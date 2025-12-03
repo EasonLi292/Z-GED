@@ -249,7 +249,7 @@ def extract_poles_zeros_gain(freqs, H_complex):
 def create_compact_graph_representation(nx_multigraph, filter_type):
     """
     Converts the component multigraph into a simple graph where
-    parallel components are merged into a single edge feature vector.
+    parallel components are merged into a single impedance function.
     """
     G = nx.Graph()
     G.add_nodes_from(nx_multigraph.nodes())
@@ -295,7 +295,18 @@ def create_compact_graph_representation(nx_multigraph, filter_type):
             elif ctype == 'L':
                 total_inverse_inductance += 1.0 / val
 
-        G.add_edge(u, v, features=[total_conductance, total_capacitance, total_inverse_inductance])
+        # Net admittance: Y(s) = G + C*s + (1/L_eq)/s where (1/L_eq) is total_inverse_inductance.
+        # Net impedance:  Z(s) = s / (C*s^2 + G*s + total_inverse_inductance)
+        # Store polynomial coefficients (highest degree first) for numerator/denominator in s-domain.
+        if total_conductance == 0.0 and total_capacitance == 0.0 and total_inverse_inductance == 0.0:
+            # Safety: should not happen, but keep a well-defined edge
+            imp_num = [1.0]
+            imp_den = [1.0]
+        else:
+            imp_num = [1.0, 0.0]  # s
+            imp_den = [total_capacitance, total_conductance, total_inverse_inductance]  # C*s^2 + G*s + L_inv
+
+        G.add_edge(u, v, impedance_num=imp_num, impedance_den=imp_den)
 
     return G
 

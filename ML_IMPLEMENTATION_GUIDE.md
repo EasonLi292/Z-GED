@@ -13,13 +13,13 @@ Your graphs and labels are well-structured and suitable for modern graph neural 
 1. **Graph Structure**
    - Clean NetworkX graph format
    - Consistent node features (4-dimensional one-hot)
-   - Consistent edge features (3-dimensional impedance vectors)
+   - Consistent edge features (impedance polynomial coefficients)
    - All 120 circuits successfully processed
 
 2. **Feature Engineering**
    - **Node Features (4D):** `[is_GND, is_IN, is_OUT, is_Internal]`
-   - **Edge Features (3D):** `[Conductance, Capacitance, Inverse_Inductance]`
-   - Physics-based features (impedance/admittance)
+   - **Edge Features:** `impedance_num=[1,0]`, `impedance_den=[C, G, L_inv]` representing \(Z(s) = s / (C s^2 + G s + L_{inv})\)
+   - Physics-based features (impedance)
 
 3. **Labels Available**
    - Filter type (6 classes) - **Perfect for classification**

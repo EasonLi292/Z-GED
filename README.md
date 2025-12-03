@@ -29,7 +29,7 @@ pip3 install PySpice numpy scipy networkx
 **Option 2: Manual execution**
 ```bash
 export DYLD_LIBRARY_PATH=/opt/homebrew/lib:$DYLD_LIBRARY_PATH
-python3 "Generated Circuits/circuit_generator.py"
+python3 "tools/circuit_generator.py"
 ```
 
 **Option 3: Add to your shell profile**
@@ -41,7 +41,7 @@ export DYLD_LIBRARY_PATH="/opt/homebrew/lib:$DYLD_LIBRARY_PATH"
 
 Then simply run:
 ```bash
-python3 "Generated Circuits/circuit_generator.py"
+python3 "tools/circuit_generator.py"
 ```
 
 ## Dataset Information
@@ -57,8 +57,8 @@ See [DATASET_INFO.md](DATASET_INFO.md) for detailed documentation.
 ## Files
 
 - `rlc_dataset/filter_dataset.pkl` - Main dataset file
-- `Generated Circuits/circuit_generator.py` - Dataset generator script
-- `verify_dataset.py` - Dataset verification script
+- `tools/circuit_generator.py` - Dataset generator script
+- `tools/verify_dataset.py` - Dataset verification script
 - `run_generator.sh` - Convenient wrapper script
 - `DATASET_INFO.md` - Complete dataset documentation
 

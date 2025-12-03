@@ -111,14 +111,13 @@ Each node has a 4-element feature vector:
 - `[0,0,1,0]` - Output (OUT)
 - `[0,0,0,1]` - Internal node
 
-### Edge Features (Admittance-based)
-Each edge has a 3-element feature vector representing parallel admittance:
-- `[G, C, 1/L]` where:
-  - `G` = Total conductance (1/R) in Siemens
-  - `C` = Total capacitance in Farads
-  - `1/L` = Inverse total inductance in 1/Henry
-
-This representation captures the parallel combination: **Y(s) = G + sC + 1/(sL)**
+### Edge Features (Impedance polynomial)
+Each edge stores the net impedance of parallel components as polynomials in `s`:
+- `impedance_num`: `[1, 0]`  (numerator coefficients for \(s\))
+- `impedance_den`: `[C, G, L_inv]` giving \(Z(s) = s / (C s^2 + G s + L_{inv})\)
+  - `C` = total capacitance in Farads
+  - `G` = total conductance (1/R) in Siemens
+  - `L_inv` = inverse total inductance (1/Henry)
 
 ## Usage Example
 
@@ -156,8 +155,8 @@ plt.show()
 ## Files
 
 - `rlc_dataset/filter_dataset.pkl` - Main dataset (3.3 MB)
-- `Generated Circuits/circuit_generator.py` - Generator script
-- `verify_dataset.py` - Dataset verification script
+- `tools/circuit_generator.py` - Generator script
+- `tools/verify_dataset.py` - Dataset verification script
 
 ## Citation
 
