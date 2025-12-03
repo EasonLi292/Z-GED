@@ -182,7 +182,6 @@ class FilterGenerator:
             nodes.add(comp['node2'])
 
         self.graph.add_nodes_from(nodes)
-
         for comp in self.components:
             self.graph.add_edge(comp['node1'], comp['node2'],
                               key=comp['name'], **comp)
@@ -210,41 +209,235 @@ class FilterGenerator:
 
         return circuit
 
-def extract_poles_zeros_gain(freqs, H_complex):
+def extract_poles_zeros_gain_analytical(filter_type, components):
     """
-    Fits a rational transfer function H(s) = K * (s-z1)... / (s-p1)...
-    to the frequency response data.
+    Analytically calculates poles, zeros, and gain based on circuit topology.
+    Uses proper circuit analysis with impedance calculations and voltage dividers.
     """
-    w = 2 * np.pi * freqs
-    s = 1j * w
+    # Extract component values
+    comp_dict = {}
+    for comp in components:
+        comp_dict[comp['name']] = comp['value']
 
-    # Try orders 1 through 6
-    best_error = float('inf')
-    best_sys = None
+    poles = []
+    zeros = []
+    gain = 1.0
 
-    for order in range(1, 7):
-        try:
-            b, a = signal.invfreqs(H_complex, w, nb=order, na=order)
+    if filter_type == 'low_pass':
+        # RC Low-pass: Vin(1) --R1-- Vout(2) --C1-- GND(0)
+        # Z_C = 1/(sC), H(s) = Z_C / (R + Z_C) = 1 / (1 + sRC)
+        R = comp_dict.get('R1', 0)
+        C = comp_dict.get('C1', 0)
+        if R > 0 and C > 0:
+            pole = -1.0 / (R * C)
+            poles = [pole]
+            zeros = []
+            # Gain: H(s) = K / (s - p), H(0) = K/(-p) = 1, so K = -p
+            gain = -pole
 
-            # Check reconstruction error
-            H_fit = signal.freqs(b, a, w)[1]
-            error = np.mean(np.abs(H_complex - H_fit)**2)
+    elif filter_type == 'high_pass':
+        # RC High-pass: Vin(1) --C1-- Vout(2) --R1-- GND(0)
+        # Z_C = 1/(sC), H(s) = R / (R + Z_C) = sRC / (1 + sRC)
+        # H(s) = s / (s - p) where p = -1/(RC)
+        R = comp_dict.get('R1', 0)
+        C = comp_dict.get('C1', 0)
+        if R > 0 and C > 0:
+            pole = -1.0 / (R * C)
+            poles = [pole]
+            zeros = [0.0]  # Zero at DC
+            # Gain: H(s) = K·s / (s - p), as s→∞: H(∞) = K = 1
+            gain = 1.0  # HF gain is 1 (already correct)
 
-            if error < best_error:
-                best_error = error
-                best_sys = (b, a)
-        except:
-            continue
+    elif filter_type == 'band_pass':
+        # Series RLC: Vin(1) --R1-- (3) --L1-- Vout(2) --C1-- GND(0)
+        # Measuring voltage at node 2 (between L and C)
+        # This measures voltage across C only
+        # I = Vin / (R + sL + 1/(sC))
+        # V_C = I / (sC) = Vin / (sC(R + sL + 1/(sC)))
+        # H(s) = 1 / (s²LC + sRC + 1)
+        R = comp_dict.get('R1', 0)
+        L = comp_dict.get('L1', 0)
+        C = comp_dict.get('C1', 0)
 
-    if best_sys is None:
-        return None, None, None
+        if R > 0 and L > 0 and C > 0:
+            # Numerator: 1 (constant, no zeros)
+            zeros = []
 
-    b, a = best_sys
+            # Denominator: s²LC + sRC + 1
+            # Standard form: s² + (R/L)s + 1/(LC)
+            omega_0 = 1.0 / np.sqrt(L * C)
+            zeta = R / (2.0) * np.sqrt(C / L)
 
-    # Extract ZPK
-    z, p, k = signal.tf2zpk(b, a)
+            if zeta < 1:  # Underdamped
+                real_part = -R / (2 * L)
+                imag_part = omega_0 * np.sqrt(1 - zeta**2)
+                poles = [complex(real_part, imag_part), complex(real_part, -imag_part)]
+            else:  # Overdamped
+                sqrt_term = np.sqrt((R / (2 * L))**2 - 1 / (L * C))
+                poles = [-R / (2 * L) + sqrt_term, -R / (2 * L) - sqrt_term]
 
-    return list(p), list(z), k
+            # Gain: H(s) = K / ((s-p1)(s-p2))
+            # At s=0: H(0) = K/(p1*p2) = 1, so K = p1*p2
+            # Note: p1*p2 = omega_0^2 = 1/(LC)
+            gain = poles[0] * poles[1]
+            gain = np.abs(gain)  # Make it real and positive
+
+    elif filter_type == 'band_stop':
+        # Band-stop (notch) filter
+        # Vin(1) --R_series-- Node3[L||C||R_parallel to GND] --R_load-- Vout(2) --R_out-- GND
+        #
+        # The parallel LC creates high impedance at resonance, passing signal through
+        # At DC and HF, the LC shorts to ground, attenuating the signal
+        L = comp_dict.get('L1', 0)
+        C = comp_dict.get('C1', 0)
+        R_series = comp_dict.get('R_series', 0)
+        R_parallel = comp_dict.get('R_parallel', 0)
+        R_load = comp_dict.get('R_load', 0)
+        R_out = comp_dict.get('R_out', 0)
+
+        if L > 0 and C > 0 and R_out > 0:
+            omega_0 = 1.0 / np.sqrt(L * C)
+
+            # Zeros: at resonance frequency on imaginary axis
+            # The parallel LC impedance becomes very high
+            zeros = [complex(0, omega_0), complex(0, -omega_0)]
+
+            # Poles: The full network is 4th order, but we approximate with dominant 2nd order poles
+            # The effective damping comes from the ratio of series to parallel resistance
+            # and the LC network. Better approximation accounts for loading.
+            if R_parallel > 0:
+                # Effective resistance seen by LC tank includes loading from R_series and R_right
+                R_right = R_load + R_out if R_load > 0 else R_out
+                R_load_eff = (R_series * R_right) / (R_series + R_right) if (R_series + R_right) > 0 else R_series
+
+                # Total parallel resistance is R_parallel || R_load_eff
+                R_eff = (R_parallel * R_load_eff) / (R_parallel + R_load_eff) if (R_parallel + R_load_eff) > 0 else R_parallel
+
+                # Quality factor with effective resistance
+                Q = R_eff * np.sqrt(C / L)
+                damping = 1.0 / Q
+
+                # For high-Q notch filters, poles are very close to imaginary axis
+                # Use more accurate pole placement
+                real_part = -omega_0 / (2 * Q)  # More accurate than -omega_0*damping/2
+                imag_part = omega_0 * np.sqrt(1 - 1/(4*Q**2)) if Q > 0.5 else omega_0 * 0.5
+
+                poles = [complex(real_part, imag_part), complex(real_part, -imag_part)]
+            else:
+                # Without R_parallel, poles are on imaginary axis (undamped)
+                poles = [complex(-omega_0*0.01, omega_0), complex(-omega_0*0.01, -omega_0)]
+
+            # Gain: The transfer function in pole-zero form is:
+            # H(s) = K*(s² + ω₀²) / ((s-p1)(s-p2))
+            #
+            # Near resonance (s ≈ jω), both numerator and denominator ≈ 0
+            # Away from resonance, the gain approaches a constant
+            #
+            # At very low or very high frequencies, the LC shorts out, so H→0
+            # This means we need K to be small enough that H→0 as s→0 or s→∞
+            #
+            # The passband gain (at resonance vicinity) depends on voltage division
+            # At resonance specifically, H = 0 due to zeros
+            # Just below/above resonance, we get the peak passband response
+
+            R_right = (R_load + R_out) if R_load > 0 else R_out
+            if R_parallel > 0 and R_right > 0:
+                # At resonance, parallel combination of R_parallel and R_right
+                Z_par_res = (R_parallel * R_right) / (R_parallel + R_right)
+                V3_gain = Z_par_res / (R_series + Z_par_res) if R_series + Z_par_res > 0 else 0
+                Vout_gain = R_out / R_right if R_right > 0 else 1.0
+                H_passband = V3_gain * Vout_gain
+            else:
+                H_passband = 0.5
+
+            # The gain K must be chosen to match the passband level
+            # For the pole-zero form: H(s) = K(s² + ω₀²) / ((s-p1)(s-p2))
+            # The gain is: K = H_passband × |p1·p2| / ω₀²
+            gain = H_passband * np.abs(poles[0] * poles[1]) / (omega_0**2)
+
+    elif filter_type == 'rlc_series':
+        # Vin(1) --R1-- (3) --L1-- (4) --C1-- Vout(2) --R_load-- GND(0)
+        # Measuring voltage across R_load only (node 2 to GND)
+        # NOT measuring across C1+R_load, just R_load!
+        R = comp_dict.get('R1', 0)
+        L = comp_dict.get('L1', 0)
+        C = comp_dict.get('C1', 0)
+        R_load = comp_dict.get('R_load', 0)
+
+        if R > 0 and L > 0 and C > 0 and R_load > 0:
+            R_total = R + R_load
+
+            # Correct transfer function: V_out = I × R_load
+            # I = Vin / Z_total = Vin / (R_total + sL + 1/(sC))
+            # H(s) = R_load / (R_total + sL + 1/(sC))
+            #      = sC·R_load / (s²LC + sC·R_total + 1)
+            #
+            # Numerator: sC·R_load → zero at s = 0
+            # Denominator: s²LC + sC·R_total + 1 → poles from characteristic equation
+
+            zeros = [0.0]  # Zero at origin (capacitor blocks DC)
+
+            # Poles from denominator: s² + (R_total/L)s + 1/(LC) = 0
+            omega_0 = 1.0 / np.sqrt(L * C)
+            zeta = R_total / (2.0) * np.sqrt(C / L)
+
+            if zeta < 1:
+                real_part = -R_total / (2 * L)
+                imag_part = omega_0 * np.sqrt(1 - zeta**2)
+                poles = [complex(real_part, imag_part), complex(real_part, -imag_part)]
+            else:
+                sqrt_term = np.sqrt((R_total / (2 * L))**2 - 1 / (L * C))
+                poles = [-R_total / (2 * L) + sqrt_term, -R_total / (2 * L) - sqrt_term]
+
+            # Gain: H(s) = K·s / ((s-p1)(s-p2))
+            # From the transfer function: H(s) = (C·R_load)·s / (LC·s² + C·R_total·s + 1)
+            # The coefficient of s in numerator is C·R_load
+            # When factored: H(s) = K·s / ((s-p1)(s-p2)) = K·s / (s² - (p1+p2)s + p1·p2)
+            # Comparing: K / (LC) = C·R_load
+            # Therefore: K = LC · C · R_load = C²·L·R_load
+            # But simpler: K = C·R_load · (p1·p2) where p1·p2 = 1/(LC)
+            gain = C * R_load * np.abs(poles[0] * poles[1])
+
+    elif filter_type == 'rlc_parallel':
+        # Vin(1) --R_source-- Vout(2: parallel RLC)-- GND(0)
+        R_source = comp_dict.get('R_source', 0)
+        R = comp_dict.get('R1', 0)
+        L = comp_dict.get('L1', 0)
+        C = comp_dict.get('C1', 0)
+
+        if L > 0 and C > 0 and R_source > 0:
+            omega_0 = 1.0 / np.sqrt(L * C)
+
+            # Quality factor with both resistances
+            if R > 0:
+                R_eff = (R * R_source) / (R + R_source)
+                Q = R_eff * np.sqrt(C / L)
+                damping = 1.0 / Q
+
+                real_part = -omega_0 * damping / 2.0
+                imag_part = omega_0 * np.sqrt(1 - (damping/2.0)**2) if damping < 2.0 else omega_0 * 0.5
+
+                poles = [complex(real_part, imag_part), complex(real_part, -imag_part)]
+            else:
+                poles = [complex(-omega_0*0.01, omega_0), complex(-omega_0*0.01, -omega_0)]
+
+            # Zero at origin (inductor shorts at DC)
+            zeros = [0.0]
+
+            # Gain: H(s) = K·s / ((s-p1)(s-p2))
+            # At high frequency, voltage divider dominates: H(∞) = R/(R+R_source)
+            # As s→∞: H(s) ≈ K·s/s² = K/s → 0, but before that it peaks
+            # Better: match the transfer function coefficient
+            # H(s) = K·s/((s-p1)(s-p2)) = K·s/(s² - (p1+p2)s + p1·p2)
+            # From circuit analysis, K should normalize to voltage divider at resonance
+            gain = R / (R + R_source) if R > 0 else 0.5
+
+    # Convert complex numbers to proper format
+    poles = [complex(p) if not isinstance(p, complex) else p for p in poles]
+    zeros = [complex(z) if not isinstance(z, complex) else z for z in zeros]
+
+    return poles, zeros, gain
+
 
 def create_compact_graph_representation(nx_multigraph, filter_type):
     """
@@ -311,12 +504,12 @@ def create_compact_graph_representation(nx_multigraph, filter_type):
     return G
 
 def main():
-    if not os.path.exists(DATASET_DIR):
-        os.makedirs(DATASET_DIR)
+    # Create dataset directory
+    os.makedirs(DATASET_DIR, exist_ok=True)
 
     dataset = []
 
-    print(f"Generating filter circuits...")
+    print("Generating filter circuits...")
     print(f"Filter types: {FILTER_TYPES}")
     print(f"Samples per type: {NUM_SAMPLES_PER_FILTER}")
     print(f"Total circuits: {len(FILTER_TYPES) * NUM_SAMPLES_PER_FILTER}\n")
@@ -364,8 +557,8 @@ def main():
             # Calculate complex transfer function
             H = vout / vin
 
-            # Extract Poles, Zeros, Gain (optional, may fail for some circuits)
-            poles, zeros, gain = extract_poles_zeros_gain(freqs, H)
+            # Extract Poles, Zeros, Gain using analytical method
+            poles, zeros, gain = extract_poles_zeros_gain_analytical(filter_type, gen.components)
 
             # Create ML-ready Graph Representation
             ml_graph = create_compact_graph_representation(gen.graph, filter_type)
@@ -392,33 +585,33 @@ def main():
 
             dataset.append(data_point)
             success_count += 1
-            pole_info = f"Poles: {len(poles)}" if poles is not None else "No poles extracted"
-            print(f"  ✓ {filter_type} #{i+1}/{NUM_SAMPLES_PER_FILTER} | fc={char_freq:.2f} Hz | {pole_info}")
 
-    # Save to disk
-    filepath = os.path.join(DATASET_DIR, "filter_dataset.pkl")
-    with open(filepath, 'wb') as f:
+            print(f"  ✓ {filter_type} #{i+1}/{NUM_SAMPLES_PER_FILTER} | fc={char_freq:.2f} Hz | Poles: {len(poles)}")
+
+    # Save dataset
+    output_file = os.path.join(DATASET_DIR, "filter_dataset.pkl")
+    with open(output_file, 'wb') as f:
         pickle.dump(dataset, f)
 
     print(f"\n{'='*60}")
-    print(f"Dataset saved to {filepath}")
+    print(f"Dataset saved to {output_file}")
     print(f"Total circuits generated: {success_count}/{len(FILTER_TYPES) * NUM_SAMPLES_PER_FILTER}")
-    print(f"{'='*60}")
+    print(f"{'='*60}\n")
 
-    # Print sample statistics
+    # Show sample
     if dataset:
-        print("\n--- Sample Data Point ---")
-        first = dataset[0]
-        print(f"ID: {first['id']}")
-        print(f"Filter Type: {first['filter_type']}")
-        print(f"Characteristic Frequency: {first['characteristic_frequency']:.2f} Hz")
-        print(f"Label Gain: {first['label']['gain']:.4e}")
-        print(f"Poles: {len(first['label']['poles'])}")
-        print(f"Zeros: {len(first['label']['zeros'])}")
-        print(f"Graph Nodes: {len(first['graph_adj']['nodes'])}")
-        print(f"Graph Edges: {len(first['graph_adj']['adjacency'])}")
-        print(f"Components: {len(first['components'])}")
-        print(f"Frequency points: {len(first['frequency_response']['freqs'])}")
+        sample = dataset[0]
+        print("--- Sample Data Point ---")
+        print(f"ID: {sample['id']}")
+        print(f"Filter Type: {sample['filter_type']}")
+        print(f"Characteristic Frequency: {sample['characteristic_frequency']:.2f} Hz")
+        print(f"Label Gain: {sample['label']['gain']:.4e}")
+        print(f"Poles: {len(sample['label']['poles'])}")
+        print(f"Zeros: {len(sample['label']['zeros'])}")
+        print(f"Graph Nodes: {len(sample['graph_adj']['nodes'])}")
+        print(f"Graph Edges: {len(sample['graph_adj']['adjacency'])}")
+        print(f"Components: {len(sample['components'])}")
+        print(f"Frequency points: {len(sample['frequency_response']['freqs'])}")
 
 if __name__ == "__main__":
     main()
