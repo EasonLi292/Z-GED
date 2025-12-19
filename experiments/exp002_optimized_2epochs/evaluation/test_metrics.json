@@ -1,0 +1,12 @@
+{
+  "topology_accuracy": 0.3333333432674408,
+  "pole_chamfer": 4.852175813462132,
+  "zero_chamfer": 4.047344911475922,
+  "avg_chamfer": 4.449760362469027,
+  "silhouette_score": 0.6221932172775269,
+  "cluster_purity": 1.0,
+  "mean_distance": 0.7648795247077942,
+  "std_distance": 0.2313188910484314,
+  "max_distance": 1.089134693145752,
+  "p95_distance": 1.0817290544509888
+}

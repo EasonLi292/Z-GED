@@ -209,6 +209,553 @@ class FilterGenerator:
 
         return circuit
 
+    # ========================================================================
+    # SPECIFICATION-BASED GENERATION METHODS
+    # ========================================================================
+
+    def _validate_component(self, comp_type, value):
+        """
+        Validate component is within practical range.
+
+        Args:
+            comp_type: 'R', 'L', or 'C'
+            value: Component value in base SI units
+
+        Returns:
+            True if valid
+
+        Raises:
+            ValueError: If value is out of practical range
+        """
+        RANGES = {
+            'R': (10, 100e3),      # 10Ω to 100kΩ
+            'L': (100e-6, 10e-3),  # 100μH to 10mH
+            'C': (1e-9, 1e-6)      # 1nF to 1μF
+        }
+
+        if comp_type not in RANGES:
+            raise ValueError(f"Unknown component type: {comp_type}")
+
+        min_val, max_val = RANGES[comp_type]
+        if not (min_val <= value <= max_val):
+            raise ValueError(
+                f"{comp_type}={value:.2e} out of practical range "
+                f"[{min_val:.2e}, {max_val:.2e}]"
+            )
+        return True
+
+    def _auto_adjust_RC(self, fc):
+        """
+        Find valid R,C combination for given cutoff frequency.
+
+        Tries standard capacitor values to find a valid resistor value.
+
+        Args:
+            fc: Cutoff frequency (Hz)
+
+        Returns:
+            (R, C): Resistor and capacitor values
+
+        Raises:
+            ValueError: If frequency cannot be realized with practical components
+        """
+        ω_c = 2 * np.pi * fc
+
+        # Try standard capacitor values
+        C_candidates = [10e-9, 22e-9, 47e-9, 100e-9, 220e-9, 470e-9, 1e-6]
+
+        for C in C_candidates:
+            R = 1 / (ω_c * C)
+            if 10 <= R <= 100e3:
+                return R, C
+
+        # If still out of range, frequency may be unrealizable
+        min_fc = 1 / (2 * np.pi * 100e3 * 1e-6)  # R_max * C_max
+        max_fc = 1 / (2 * np.pi * 10 * 1e-9)     # R_min * C_min
+
+        raise ValueError(
+            f"Cannot realize fc={fc:.2e}Hz with practical components. "
+            f"Valid range: {min_fc:.2f}Hz to {max_fc:.2e}Hz"
+        )
+
+    def from_low_pass_spec(self, fc, C=100e-9):
+        """
+        Generate low-pass RC filter from cutoff frequency specification.
+
+        Circuit topology: Vin --R-- Vout --C-- GND
+
+        Args:
+            fc: Cutoff frequency (Hz)
+            C: Capacitance (F), default 100nF
+
+        Returns:
+            actual_fc: Achieved cutoff frequency
+
+        Raises:
+            ValueError: If specification cannot be realized
+        """
+        self.filter_type = 'low_pass'
+        self.components = []
+        self.graph.clear()
+
+        ω_c = 2 * np.pi * fc
+
+        # Calculate R from fc and C
+        R = 1 / (ω_c * C)
+
+        # Validate and auto-adjust if needed
+        try:
+            self._validate_component('C', C)
+            self._validate_component('R', R)
+        except ValueError:
+            # Try to auto-adjust
+            R, C = self._auto_adjust_RC(fc)
+
+        # Build component list
+        self.components = [
+            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 1, 'node2': 2},
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 2, 'node2': 0}
+        ]
+
+        self._build_graph()
+
+        # Return actual achieved frequency
+        actual_fc = 1 / (2 * np.pi * R * C)
+        return actual_fc
+
+    def from_high_pass_spec(self, fc, C=100e-9):
+        """
+        Generate high-pass RC filter from cutoff frequency specification.
+
+        Circuit topology: Vin --C-- Vout --R-- GND
+
+        Args:
+            fc: Cutoff frequency (Hz)
+            C: Capacitance (F), default 100nF
+
+        Returns:
+            actual_fc: Achieved cutoff frequency
+
+        Raises:
+            ValueError: If specification cannot be realized
+        """
+        self.filter_type = 'high_pass'
+        self.components = []
+        self.graph.clear()
+
+        ω_c = 2 * np.pi * fc
+
+        # Calculate R from fc and C (same as low-pass)
+        R = 1 / (ω_c * C)
+
+        # Validate and auto-adjust if needed
+        try:
+            self._validate_component('C', C)
+            self._validate_component('R', R)
+        except ValueError:
+            # Try to auto-adjust
+            R, C = self._auto_adjust_RC(fc)
+
+        # Build component list (different order than low-pass)
+        self.components = [
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 1, 'node2': 2},
+            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 2, 'node2': 0}
+        ]
+
+        self._build_graph()
+
+        # Return actual achieved frequency
+        actual_fc = 1 / (2 * np.pi * R * C)
+        return actual_fc
+
+    def from_band_pass_spec(self, f0, Q=5.0, C=100e-9):
+        """
+        Generate band-pass series RLC filter from specification.
+
+        Circuit topology: Vin --R--L--C-- GND, Vout across C
+
+        Args:
+            f0: Center frequency (Hz)
+            Q: Quality factor (default 5.0), controls bandwidth
+            C: Capacitance (F), default 100nF
+
+        Returns:
+            actual_f0: Achieved center frequency
+
+        Raises:
+            ValueError: If specification cannot be realized
+
+        Notes:
+            - Bandwidth BW = f0 / Q
+            - Damping ratio ζ = 1 / (2Q)
+            - Underdamped (oscillatory) requires Q > 0.5
+        """
+        self.filter_type = 'band_pass'
+        self.components = []
+        self.graph.clear()
+
+        if Q < 0.5:
+            raise ValueError(
+                f"Q={Q} too low for band-pass filter. "
+                "Minimum Q=0.5 for underdamped response."
+            )
+
+        if Q > 50:
+            print(f"Warning: Q={Q} is very high, may be difficult to realize")
+
+        ω_0 = 2 * np.pi * f0
+        ζ = 1 / (2 * Q)
+
+        # Calculate L from resonance condition: ω_0 = 1/√(LC)
+        L = 1 / (ω_0**2 * C)
+
+        # Calculate R from damping: ζ = R/(2) * √(C/L)
+        # Rearranging: R = 2*ζ*√(L/C) = 2*ζ*ω_0*L
+        R = 2 * ζ * ω_0 * L
+
+        # Validate components
+        try:
+            self._validate_component('R', R)
+            self._validate_component('L', L)
+            self._validate_component('C', C)
+        except ValueError as e:
+            # Try to adjust C to get valid component values
+            found_valid = False
+            C_candidates = [10e-9, 22e-9, 47e-9, 100e-9, 220e-9, 470e-9, 1e-6]
+
+            for C_try in C_candidates:
+                L_try = 1 / (ω_0**2 * C_try)
+                R_try = 2 * ζ * ω_0 * L_try
+
+                try:
+                    self._validate_component('R', R_try)
+                    self._validate_component('L', L_try)
+                    self._validate_component('C', C_try)
+                    R, L, C = R_try, L_try, C_try
+                    found_valid = True
+                    break
+                except ValueError:
+                    continue
+
+            if not found_valid:
+                raise ValueError(
+                    f"Cannot realize band-pass at f0={f0}Hz, Q={Q} "
+                    f"with practical components. Original error: {e}"
+                )
+
+        # Build component list (series RLC)
+        self.components = [
+            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 1, 'node2': 3},
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 3, 'node2': 2},
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 2, 'node2': 0}
+        ]
+
+        self._build_graph()
+
+        # Return actual achieved frequency
+        actual_f0 = 1 / (2 * np.pi * np.sqrt(L * C))
+        return actual_f0
+
+    def from_band_stop_spec(self, f0, Q=10.0, C=100e-9):
+        """
+        Generate band-stop (notch) parallel RLC filter from specification.
+
+        Circuit topology: Vin --R_series-- Node3[L||C||R_parallel to GND]
+                          --R_load-- Vout --R_out-- GND
+
+        Args:
+            f0: Notch frequency (Hz)
+            Q: Quality factor (default 10.0), controls notch sharpness
+            C: Capacitance (F), default 100nF
+
+        Returns:
+            actual_f0: Achieved notch frequency
+
+        Raises:
+            ValueError: If specification cannot be realized
+
+        Notes:
+            - Higher Q = sharper notch (more selective rejection)
+            - Typical Q for notch filters: 5-20
+        """
+        self.filter_type = 'band_stop'
+        self.components = []
+        self.graph.clear()
+
+        if Q < 1.0:
+            raise ValueError(f"Q={Q} too low for band-stop filter. Minimum Q=1.0")
+
+        if Q > 50:
+            print(f"Warning: Q={Q} is very high for notch filter")
+
+        ω_0 = 2 * np.pi * f0
+
+        # Calculate L from resonance
+        L = 1 / (ω_0**2 * C)
+
+        # For band-stop filter, the Q factor depends on effective resistance
+        # Q = R_eff * √(C/L) where R_eff is complex parallel combination
+        # R_right = R_load + R_out
+        # R_load_eff = R_series || R_right
+        # R_eff = R_parallel || R_load_eff
+        #
+        # We'll use typical values for R_series, R_load, R_out
+        # and solve for R_parallel to achieve desired Q
+
+        R_series = 1000   # 1kΩ typical
+        R_load = 10000    # 10kΩ typical
+        R_out = R_load    # Same as R_load
+
+        # For band-stop, we need to increase R_series and R_load to support higher Q
+        # The effective resistance R_eff = R_parallel || R_load_eff
+        # where R_load_eff = R_series || R_right
+        #
+        # To achieve high Q, we need R_load_eff to be large
+        # Strategy: Scale R_series and R_load proportionally with Q
+
+        R_series = max(1000, 100 * Q)   # Scale with Q
+        R_load = max(10000, 1000 * Q)   # Scale with Q
+        R_out = R_load
+
+        # Calculate effective resistance from loading
+        R_right = R_load + R_out
+        R_load_eff = (R_series * R_right) / (R_series + R_right)
+
+        # Now solve for R_parallel from Q = R_eff * √(C/L)
+        # where R_eff = (R_parallel * R_load_eff) / (R_parallel + R_load_eff)
+        #
+        # Rearranging: R_parallel = R_load_eff * target_R_eff / (R_load_eff - target_R_eff)
+        # But we want R_parallel >> R_load_eff for high Q
+        # Simpler approach: R_parallel ≈ target_R_eff (when R_parallel >> R_load_eff)
+
+        target_R_eff = Q * np.sqrt(L / C)
+
+        # For high Q notch, R_parallel should be much larger than R_load_eff
+        # Use R_parallel = 2 * target_R_eff as a good starting point
+        # This ensures R_eff ≈ 0.67 * target_R_eff (acceptable for notch filters)
+        R_parallel = 2 * target_R_eff
+
+        # Validate components
+        try:
+            self._validate_component('L', L)
+            self._validate_component('C', C)
+            self._validate_component('R', R_parallel)
+        except ValueError as e:
+            # Try different C values
+            found_valid = False
+            C_candidates = [10e-9, 22e-9, 47e-9, 100e-9, 220e-9, 470e-9, 1e-6]
+
+            for C_try in C_candidates:
+                L_try = 1 / (ω_0**2 * C_try)
+                R_parallel_try = Q * np.sqrt(L_try / C_try)
+
+                try:
+                    self._validate_component('L', L_try)
+                    self._validate_component('C', C_try)
+                    self._validate_component('R', R_parallel_try)
+                    L, C, R_parallel = L_try, C_try, R_parallel_try
+                    found_valid = True
+                    break
+                except ValueError:
+                    continue
+
+            if not found_valid:
+                raise ValueError(
+                    f"Cannot realize band-stop at f0={f0}Hz, Q={Q} "
+                    f"with practical components. Original error: {e}"
+                )
+
+        # Build component list
+        self.components = [
+            {'name': 'R_series', 'type': 'R', 'value': R_series, 'node1': 1, 'node2': 3},
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 3, 'node2': 0},
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 3, 'node2': 0},
+            {'name': 'R_parallel', 'type': 'R', 'value': R_parallel, 'node1': 3, 'node2': 0},
+            {'name': 'R_load', 'type': 'R', 'value': R_load, 'node1': 3, 'node2': 2},
+            {'name': 'R_out', 'type': 'R', 'value': R_load, 'node1': 2, 'node2': 0}
+        ]
+
+        self._build_graph()
+
+        # Return actual achieved frequency
+        actual_f0 = 1 / (2 * np.pi * np.sqrt(L * C))
+        return actual_f0
+
+    def from_rlc_series_spec(self, f0, Q=5.0, C=100e-9):
+        """
+        Generate RLC series resonant circuit from specification.
+
+        Circuit topology: Vin --R--L--C-- Vout --R_load-- GND
+
+        Args:
+            f0: Resonant frequency (Hz)
+            Q: Quality factor (default 5.0)
+            C: Capacitance (F), default 100nF
+
+        Returns:
+            actual_f0: Achieved resonant frequency
+
+        Raises:
+            ValueError: If specification cannot be realized
+        """
+        self.filter_type = 'rlc_series'
+        self.components = []
+        self.graph.clear()
+
+        if Q < 0.5:
+            raise ValueError(f"Q={Q} too low. Minimum Q=0.5")
+
+        ω_0 = 2 * np.pi * f0
+        ζ = 1 / (2 * Q)
+
+        # Calculate L from resonance
+        L = 1 / (ω_0**2 * C)
+
+        # Total resistance from damping (R + R_load)
+        R_total = 2 * ζ * ω_0 * L
+
+        # Split between R and R_load (R_load = 10*R typical)
+        R = R_total / 11
+        R_load = 10 * R
+
+        # Validate components
+        try:
+            self._validate_component('R', R)
+            self._validate_component('L', L)
+            self._validate_component('C', C)
+            self._validate_component('R', R_load)
+        except ValueError as e:
+            # Try different C values
+            found_valid = False
+            C_candidates = [10e-9, 22e-9, 47e-9, 100e-9, 220e-9, 470e-9, 1e-6]
+
+            for C_try in C_candidates:
+                L_try = 1 / (ω_0**2 * C_try)
+                R_total_try = 2 * ζ * ω_0 * L_try
+                R_try = R_total_try / 11
+                R_load_try = 10 * R_try
+
+                try:
+                    self._validate_component('R', R_try)
+                    self._validate_component('L', L_try)
+                    self._validate_component('C', C_try)
+                    self._validate_component('R', R_load_try)
+                    R, L, C, R_load = R_try, L_try, C_try, R_load_try
+                    found_valid = True
+                    break
+                except ValueError:
+                    continue
+
+            if not found_valid:
+                raise ValueError(
+                    f"Cannot realize RLC series at f0={f0}Hz, Q={Q} "
+                    f"with practical components. Original error: {e}"
+                )
+
+        # Build component list
+        self.components = [
+            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 1, 'node2': 3},
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 3, 'node2': 4},
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 4, 'node2': 2},
+            {'name': 'R_load', 'type': 'R', 'value': R_load, 'node1': 2, 'node2': 0}
+        ]
+
+        self._build_graph()
+
+        # Return actual achieved frequency
+        actual_f0 = 1 / (2 * np.pi * np.sqrt(L * C))
+        return actual_f0
+
+    def from_rlc_parallel_spec(self, f0, Q=5.0, C=100e-9):
+        """
+        Generate RLC parallel resonant circuit from specification.
+
+        Circuit topology: Vin --R_source-- Node2[L||C||R to GND]
+
+        Args:
+            f0: Resonant frequency (Hz)
+            Q: Quality factor (default 5.0)
+            C: Capacitance (F), default 100nF
+
+        Returns:
+            actual_f0: Achieved resonant frequency
+
+        Raises:
+            ValueError: If specification cannot be realized
+        """
+        self.filter_type = 'rlc_parallel'
+        self.components = []
+        self.graph.clear()
+
+        if Q < 0.5:
+            raise ValueError(f"Q={Q} too low. Minimum Q=0.5")
+
+        ω_0 = 2 * np.pi * f0
+
+        # Calculate L from resonance
+        L = 1 / (ω_0**2 * C)
+
+        # For parallel RLC, Q factor depends on parallel combination of resistances
+        # Q = R_eff * √(C/L) where R_eff = (R * R_source) / (R + R_source)
+        #
+        # Choose R_source = R/10 (typical ratio), then:
+        # R_eff = (R * R/10) / (R + R/10) = R²/10 / (11R/10) = R/11
+        # Q = (R/11) * √(C/L)
+        # Therefore: R = 11 * Q * √(L/C)
+
+        R = 11 * Q * np.sqrt(L / C)
+
+        # Source resistance (R_source = R/10)
+        R_source = R / 10
+
+        # Validate components
+        try:
+            self._validate_component('R', R)
+            self._validate_component('L', L)
+            self._validate_component('C', C)
+            self._validate_component('R', R_source)
+        except ValueError as e:
+            # Try different C values
+            found_valid = False
+            C_candidates = [10e-9, 22e-9, 47e-9, 100e-9, 220e-9, 470e-9, 1e-6]
+
+            for C_try in C_candidates:
+                L_try = 1 / (ω_0**2 * C_try)
+                R_try = Q * np.sqrt(L_try / C_try)
+                R_source_try = R_try / 10
+
+                try:
+                    self._validate_component('R', R_try)
+                    self._validate_component('L', L_try)
+                    self._validate_component('C', C_try)
+                    self._validate_component('R', R_source_try)
+                    R, L, C, R_source = R_try, L_try, C_try, R_source_try
+                    found_valid = True
+                    break
+                except ValueError:
+                    continue
+
+            if not found_valid:
+                raise ValueError(
+                    f"Cannot realize RLC parallel at f0={f0}Hz, Q={Q} "
+                    f"with practical components. Original error: {e}"
+                )
+
+        # Build component list
+        self.components = [
+            {'name': 'R_source', 'type': 'R', 'value': R_source, 'node1': 1, 'node2': 2},
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 2, 'node2': 0},
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 2, 'node2': 0},
+            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 2, 'node2': 0}
+        ]
+
+        self._build_graph()
+
+        # Return actual achieved frequency
+        actual_f0 = 1 / (2 * np.pi * np.sqrt(L * C))
+        return actual_f0
+
+
 def extract_poles_zeros_gain_analytical(filter_type, components):
     """
     Analytically calculates poles, zeros, and gain based on circuit topology.

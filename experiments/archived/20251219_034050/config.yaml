@@ -1,0 +1,35 @@
+data:
+  dataset_path: rlc_dataset/filter_dataset.pkl
+  log_scale: true
+  normalize: true
+  split_seed: 42
+  train_ratio: 0.8
+  val_ratio: 0.1
+hardware:
+  num_workers: 0
+  pin_memory: false
+loss:
+  kl_weight: 0.1
+  recon_weight: 1.0
+  tf_weight: 0.1
+model:
+  decoder_hidden_dim: 128
+  dropout: 0.1
+  edge_feature_dim: 3
+  gnn_hidden_dim: 64
+  gnn_num_layers: 3
+  latent_dim: 24
+  node_feature_dim: 4
+regularization:
+  max_grad_norm: 1.0
+training:
+  batch_size: 4
+  checkpoint_dir: checkpoints/test
+  early_stopping_patience: 20
+  epochs: 2
+  learning_rate: 0.001
+  log_interval: 2
+  optimizer: adamw
+  scheduler: null
+  val_interval: 1
+  weight_decay: 1.0e-05

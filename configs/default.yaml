@@ -1,0 +1,73 @@
+# GraphVAE Base Configuration
+# Hyperparameters for circuit latent space discovery
+
+# Data configuration
+data:
+  dataset_path: "rlc_dataset/filter_dataset.pkl"
+  normalize: true
+  log_scale: true
+  train_ratio: 0.8
+  val_ratio: 0.1
+  split_seed: 42
+
+# Model architecture
+model:
+  # Node and edge features
+  node_feature_dim: 4  # [GND, VIN, VOUT, INTERNAL]
+  edge_feature_dim: 3  # [log(C), log(G), log(L_inv)]
+
+  # GNN encoder
+  gnn_hidden_dim: 64
+  gnn_num_layers: 3
+
+  # Latent space
+  latent_dim: 24  # Split into 3 × 8D [topo, values, pz]
+
+  # Decoder
+  decoder_hidden_dim: 128
+
+  # Regularization
+  dropout: 0.1
+
+# Loss function
+loss:
+  recon_weight: 1.0
+  tf_weight: 0.5  # Start low, will increase during training
+  kl_weight: 0.05
+
+# Training configuration
+training:
+  # Optimization
+  optimizer: "adamw"  # adam or adamw
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-5
+
+  # Learning rate scheduling
+  scheduler: "cosine"  # cosine, step, cosine_warmup, or null
+  min_lr: 1.0e-6  # For cosine annealing
+  T_0: 50  # For cosine_warmup
+  T_mult: 2  # For cosine_warmup
+
+  # Training parameters
+  epochs: 200
+  batch_size: 4  # Small dataset, small batches
+
+  # Validation and logging
+  val_interval: 1  # Validate every epoch
+  log_interval: 5  # Log every 5 batches
+
+  # Early stopping
+  early_stopping_patience: 20
+
+  # Checkpointing
+  checkpoint_dir: "checkpoints"
+
+# Regularization (beyond dropout and weight_decay)
+regularization:
+  max_grad_norm: 1.0
+  spectral_norm: false  # Future: apply to decoder
+
+# Hardware
+hardware:
+  num_workers: 0  # DataLoader workers (0 for debugging)
+  pin_memory: false

@@ -1,0 +1,43 @@
+# Quick test configuration for verifying training pipeline
+# 2 epochs, minimal logging
+
+data:
+  dataset_path: "rlc_dataset/filter_dataset.pkl"
+  normalize: true
+  log_scale: true
+  train_ratio: 0.8
+  val_ratio: 0.1
+  split_seed: 42
+
+model:
+  node_feature_dim: 4
+  edge_feature_dim: 3
+  gnn_hidden_dim: 64
+  gnn_num_layers: 3
+  latent_dim: 24
+  decoder_hidden_dim: 128
+  dropout: 0.1
+
+loss:
+  recon_weight: 1.0
+  tf_weight: 0.01     # Reduced drastically (Chamfer distance is large in normalized space)
+  kl_weight: 0.1      # Optimized (better regularization)
+
+training:
+  optimizer: "adamw"
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-5
+  scheduler: null  # No scheduler for quick test
+  epochs: 2  # Just 2 epochs for testing
+  batch_size: 4
+  val_interval: 1
+  log_interval: 2  # Log more frequently
+  early_stopping_patience: 20
+  checkpoint_dir: "checkpoints/test"
+
+regularization:
+  max_grad_norm: 1.0
+
+hardware:
+  num_workers: 0
+  pin_memory: false

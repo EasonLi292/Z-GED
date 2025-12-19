@@ -237,14 +237,26 @@ class CircuitGED:
         """
         Cost of replacing one edge with another.
 
-        Uses impedance distance metric.
+        Different component types (R vs C vs L) cannot be substituted directly.
+        Functionally, changing R→C is more like delete R + insert C.
 
         Args:
             edge1_attrs, edge2_attrs: Edge attribute dicts with impedance data
 
         Returns:
-            Impedance distance between edges
+            Impedance distance if same component type, else delete + insert cost
         """
+        # Get component types
+        type1 = self._get_component_type(edge1_attrs)
+        type2 = self._get_component_type(edge2_attrs)
+
+        # Different component types: treat as delete + insert
+        if type1 != type2:
+            del_cost = self._edge_del_cost(edge1_attrs)
+            ins_cost = self._edge_ins_cost(edge2_attrs)
+            return del_cost + ins_cost
+
+        # Same component type: use impedance distance for value differences
         imp1 = (edge1_attrs['impedance_num'], edge1_attrs['impedance_den'])
         imp2 = (edge2_attrs['impedance_num'], edge2_attrs['impedance_den'])
 
@@ -279,6 +291,37 @@ class CircuitGED:
         """
         return self._edge_component_cost(edge_attrs)
 
+    def _get_component_type(self, edge_attrs: Dict[str, Any]) -> str:
+        """
+        Determine the component type of an edge.
+
+        Args:
+            edge_attrs: Edge attribute dict with impedance data
+
+        Returns:
+            'R', 'C', 'L', or 'PARALLEL' indicating component type
+        """
+        den = edge_attrs['impedance_den']
+        C = den[0]
+        G = den[1]
+        L_inv = den[2]
+
+        # Count non-zero components
+        components = []
+        if C > 1e-15:  # Use small threshold for numerical stability
+            components.append('C')
+        if G > 1e-15:
+            components.append('R')
+        if L_inv > 1e-15:
+            components.append('L')
+
+        if len(components) == 0:
+            return 'NONE'
+        elif len(components) == 1:
+            return components[0]
+        else:
+            return 'PARALLEL'
+
     def _edge_component_cost(self, edge_attrs: Dict[str, Any]) -> float:
         """
         Determine edge cost based on component complexity.
@@ -289,18 +332,9 @@ class CircuitGED:
         Returns:
             simple_edge_cost if single component, complex_edge_cost if parallel
         """
-        num = edge_attrs['impedance_num']
-        den = edge_attrs['impedance_den']
+        component_type = self._get_component_type(edge_attrs)
 
-        # Extract coefficients
-        C = den[0]
-        G = den[1]
-        L_inv = den[2]
-
-        # Count non-zero components
-        num_components = sum([C > 0, G > 0, L_inv > 0])
-
-        if num_components == 1:
+        if component_type in ['R', 'C', 'L']:
             # Single component (R, L, or C alone)
             return self.simple_edge_cost
         else:

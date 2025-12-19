@@ -1,118 +1,76 @@
-# Z-GED
-Impedance-based Graph of Circuits Dataset
+# Graph Variational Autoencoder for Circuit Latent Space Discovery
 
-## Overview
-This repository contains a dataset of 120 RLC filter circuits with their frequency response data and graph representations for machine learning applications focused on impedance analysis.
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+
+**Discover intrinsic circuit properties through learned latent representations**
+
+This project implements a Graph Variational Autoencoder (GraphVAE) that learns to encode analog circuits into a structured 24-dimensional latent space, enabling circuit generation, latent space interpolation, and property discovery.
+
+🎯 **Research Goal**: Discover intrinsic circuit properties through latent space learning—not about accuracy, about new representations.
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.12+
-- ngspice (installed via Homebrew on macOS)
-
-### Installation
 ```bash
-# Install ngspice
-brew install ngspice libngspice
+# Quick 2-epoch test
+python3 scripts/train.py --config configs/test.yaml --epochs 2
 
-# Install Python dependencies
-pip3 install PySpice numpy scipy networkx
+# Full training (200 epochs)
+python3 scripts/train.py --config configs/optimized.yaml
+
+# Evaluate
+python3 scripts/evaluate.py \
+  --checkpoint experiments/exp002_optimized_2epochs/checkpoints/best.pt \
+  --output-dir results/
 ```
 
-### Running the Generator
+## Project Structure
 
-**Option 1: Using the wrapper script (recommended)**
-```bash
-./run_generator.sh
+```
+Z-GED/
+├── configs/          # Training configurations (default, optimized, test)
+├── ml/               # Core ML code (data, models, losses, training, utils)
+├── scripts/          # Executable scripts (train.py, evaluate.py)
+├── experiments/      # Training runs & results
+├── docs/             # Documentation (status, phases, analysis, guides)
+├── tests/            # Unit & integration tests
+└── tools/            # Utility tools (GED, circuit generator)
 ```
 
-**Option 2: Manual execution**
-```bash
-export DYLD_LIBRARY_PATH=/opt/homebrew/lib:$DYLD_LIBRARY_PATH
-python3 "tools/circuit_generator.py"
-```
+## Current Results (2 Epochs)
 
-**Option 3: Add to your shell profile**
+| Metric | Value | Status |
+|--------|-------|--------|
+| **Total Loss** | 2.78 | 🟢 53% improvement from baseline |
+| **Cluster Purity** | 100% | 🟢 Perfect filter type separation |
+| **Silhouette Score** | 0.62 | 🟢 Good latent space structure |
 
-Add this to your `~/.zshrc` or `~/.bash_profile`:
-```bash
-export DYLD_LIBRARY_PATH="/opt/homebrew/lib:$DYLD_LIBRARY_PATH"
-```
+## Documentation
 
-Then simply run:
-```bash
-python3 "tools/circuit_generator.py"
-```
+- **[Project Status](docs/PROJECT_STATUS.md)**: Current progress (5/7 phases complete)
+- **[Latent Space](docs/analysis/LATENT_SPACE_ORGANIZATION.md)**: 24D hierarchical structure explained
+- **[Optimization](docs/analysis/OPTIMIZATION_ANALYSIS.md)**: Loss analysis, 53% improvement
+- **[Config Guide](configs/README.md)**: Configuration options
+- **[Experiment Guide](experiments/README.md)**: Running experiments
 
-## Dataset Information
+## Architecture
 
-- **Total Circuits:** 120
-- **Filter Types:** 6 (low-pass, high-pass, band-pass, band-stop, RLC series, RLC parallel)
-- **Samples per Type:** 20
-- **Dataset Size:** 3.3 MB
-- **Format:** Python pickle (`.pkl`)
+**24D Hierarchical Latent Space**:
+- 8D topology (filter type classification)
+- 8D component values (R, L, C magnitudes)
+- 8D poles/zeros (transfer function)
 
-See [DATASET_INFO.md](DATASET_INFO.md) for detailed documentation.
+**Model**: 101,919 parameters (Encoder: 68,915, Decoder: 33,004)
 
-## Files
+## Dataset
 
-- `rlc_dataset/filter_dataset.pkl` - Main dataset file
-- `tools/circuit_generator.py` - Dataset generator script
-- `tools/verify_dataset.py` - Dataset verification script
-- `run_generator.sh` - Convenient wrapper script
-- `DATASET_INFO.md` - Complete dataset documentation
+- **Size**: 120 RLC circuits
+- **Types**: 6 filter types
+- **Features**: Graph, transfer function, frequency response
+- **Splits**: 96 train / 12 val / 12 test
 
-## Usage Example
+## Status
 
-```python
-import pickle
-import matplotlib.pyplot as plt
+**Phase 5 Complete** ✅ | **Next**: Phase 6 (Circuit Generation)
 
-# Load dataset
-with open('rlc_dataset/filter_dataset.pkl', 'rb') as f:
-    dataset = pickle.load(f)
-
-# Examine first circuit
-circuit = dataset[0]
-print(f"Filter type: {circuit['filter_type']}")
-print(f"Frequency: {circuit['characteristic_frequency']:.2f} Hz")
-
-# Plot frequency response
-freqs = circuit['frequency_response']['freqs']
-mag = circuit['frequency_response']['H_magnitude']
-plt.loglog(freqs, mag)
-plt.xlabel('Frequency (Hz)')
-plt.ylabel('Magnitude |H(jω)|')
-plt.grid(True)
-plt.show()
-```
-
-## Troubleshooting
-
-### "libngspice.dylib not found" Error
-
-This error occurs because PySpice can't find the ngspice library. Solutions:
-
-1. **Use the wrapper script:** `./run_generator.sh`
-2. **Set environment variable manually:**
-   ```bash
-   export DYLD_LIBRARY_PATH=/opt/homebrew/lib:$DYLD_LIBRARY_PATH
-   ```
-3. **Make it permanent:** Add the export to your shell profile
-
-### "Unsupported Ngspice version" Warning
-
-This warning can be safely ignored. PySpice works correctly with ngspice 45.
-
-## License
-
-See [LICENSE](LICENSE) file for details.
-
-## Citation
-
-If you use this dataset, please cite:
-```
-Z-GED: Impedance-based Graph Circuit Dataset
-Generated using PySpice and ngspice
-December 2025
-```
+Last Updated: December 19, 2025
