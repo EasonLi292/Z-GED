@@ -40,6 +40,11 @@ loss:
   topo_curriculum_warmup_epochs: 20
   topo_curriculum_initial_multiplier: 3.0  # Start at 3x, anneal to 1x
 
+  # GED-aware metric learning (optional, requires precomputed GED matrix)
+  use_ged_loss: false  # Set to true after running scripts/precompute_ged.py
+  ged_weight: 0.5      # Weight for GED metric learning loss
+  ged_matrix_path: "rlc_dataset/ged_matrix.npy"  # Path to precomputed GED matrix
+
 # Training configuration
 training:
   # Optimization

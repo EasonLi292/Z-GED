@@ -19,7 +19,7 @@ import argparse
 from datetime import datetime
 
 from ml.models import HierarchicalEncoder, HybridDecoder
-from ml.losses import SimplifiedCompositeLoss
+from ml.losses import SimplifiedCompositeLoss, CompositeLoss
 from ml.data import CircuitDataset, collate_circuit_batch
 from ml.training.trainer import VAETrainer
 

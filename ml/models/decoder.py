@@ -122,11 +122,18 @@ class HybridDecoder(nn.Module):
         )
 
         # Stage 2: Component value prediction (from z_values)
-        # Predict a fixed-size feature vector, then slice for actual edges
-        self.value_decoder = nn.Sequential(
+        # Topology-conditioned using FiLM (Feature-wise Linear Modulation)
+        self.value_mlp1 = nn.Sequential(
             nn.Linear(self.latent_dim_per_branch, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            nn.Dropout(dropout)
+        )
+
+        # FiLM conditioning: topology -> scale and shift parameters
+        self.film_scale = nn.Linear(len(FILTER_TYPES), hidden_dim)
+        self.film_shift = nn.Linear(len(FILTER_TYPES), hidden_dim)
+
+        self.value_mlp2 = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, max_edges * edge_feature_dim)
@@ -194,8 +201,17 @@ class HybridDecoder(nn.Module):
             # Use standard softmax during inference
             topo_probs = F.softmax(topo_logits, dim=-1)
 
-        # Stage 2: Component value prediction
-        edge_features_flat = self.value_decoder(z_values)  # [B, max_edges × 3]
+        # Stage 2: Component value prediction (topology-conditioned with FiLM)
+        # First layer
+        h_values = self.value_mlp1(z_values)  # [B, hidden_dim]
+
+        # FiLM conditioning: modulate features based on topology
+        gamma = self.film_scale(topo_probs)  # [B, hidden_dim] scale
+        beta = self.film_shift(topo_probs)  # [B, hidden_dim] shift
+        h_values_modulated = gamma * h_values + beta  # Feature-wise affine transformation
+
+        # Second layer
+        edge_features_flat = self.value_mlp2(h_values_modulated)  # [B, max_edges × edge_dim]
         edge_features = edge_features_flat.view(batch_size, self.max_edges, self.edge_feature_dim)
 
         # Clamp to reasonable ranges (after denormalization in loss function)
