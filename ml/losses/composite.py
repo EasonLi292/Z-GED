@@ -254,13 +254,24 @@ class SimplifiedCompositeLoss(nn.Module):
     Useful for initial training or when GED matrix is not available.
 
     L_total = λ_recon × L_recon + λ_tf × L_tf + λ_kl × L_kl
+
+    Args:
+        recon_weight: Weight for reconstruction loss
+        tf_weight: Weight for transfer function loss
+        kl_weight: Weight for KL divergence
+        use_topo_curriculum: Enable curriculum learning for topology weight
+        topo_curriculum_warmup_epochs: Epochs to anneal topology weight
+        topo_curriculum_initial_multiplier: Initial multiplier for topology weight
     """
 
     def __init__(
         self,
         recon_weight: float = 1.0,
         tf_weight: float = 0.5,
-        kl_weight: float = 0.05
+        kl_weight: float = 0.05,
+        use_topo_curriculum: bool = False,
+        topo_curriculum_warmup_epochs: int = 20,
+        topo_curriculum_initial_multiplier: float = 3.0
     ):
         super().__init__()
 
@@ -268,8 +279,16 @@ class SimplifiedCompositeLoss(nn.Module):
         self.tf_weight = tf_weight
         self.kl_weight = kl_weight
 
-        self.recon_loss = TemplateAwareReconstructionLoss()
+        self.recon_loss = TemplateAwareReconstructionLoss(
+            use_curriculum=use_topo_curriculum,
+            curriculum_warmup_epochs=topo_curriculum_warmup_epochs,
+            curriculum_initial_multiplier=topo_curriculum_initial_multiplier
+        )
         self.tf_loss = SimplifiedTransferFunctionLoss()
+
+    def set_epoch(self, epoch: int, total_epochs: int = None):
+        """Update current epoch for curriculum scheduling."""
+        self.recon_loss.set_epoch(epoch)
 
     def compute_kl_divergence(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         """Compute KL divergence."""

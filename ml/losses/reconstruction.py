@@ -136,22 +136,54 @@ class TemplateAwareReconstructionLoss(nn.Module):
     This is more appropriate than trying to match exact graph structure.
 
     Args:
-        topo_weight: Weight for topology loss
+        topo_weight: Initial weight for topology loss (can be annealed via curriculum)
         edge_weight: Weight for edge feature loss
+        use_curriculum: Whether to use curriculum learning for topology weight
+        curriculum_warmup_epochs: Number of epochs to anneal topology weight
+        curriculum_initial_multiplier: Initial multiplier for topology weight (e.g., 3-5)
     """
 
     def __init__(
         self,
         topo_weight: float = 1.0,
-        edge_weight: float = 1.0
+        edge_weight: float = 1.0,
+        use_curriculum: bool = False,
+        curriculum_warmup_epochs: int = 20,
+        curriculum_initial_multiplier: float = 3.0
     ):
         super().__init__()
 
-        self.topo_weight = topo_weight
+        self.base_topo_weight = topo_weight
         self.edge_weight = edge_weight
+
+        # Curriculum learning
+        self.use_curriculum = use_curriculum
+        self.curriculum_warmup_epochs = curriculum_warmup_epochs
+        self.curriculum_initial_multiplier = curriculum_initial_multiplier
+        self.current_epoch = 0
 
         self.topo_criterion = nn.CrossEntropyLoss()
         self.edge_criterion = nn.MSELoss()
+
+    def set_epoch(self, epoch: int):
+        """Update current epoch for curriculum scheduling."""
+        self.current_epoch = epoch
+
+    def get_topology_weight(self) -> float:
+        """Get current topology weight based on curriculum schedule."""
+        if not self.use_curriculum:
+            return self.base_topo_weight
+
+        # Anneal from (base * multiplier) down to base over warmup_epochs
+        if self.current_epoch >= self.curriculum_warmup_epochs:
+            return self.base_topo_weight
+
+        # Linear annealing
+        progress = self.current_epoch / self.curriculum_warmup_epochs
+        initial_weight = self.base_topo_weight * self.curriculum_initial_multiplier
+        current_weight = initial_weight - progress * (initial_weight - self.base_topo_weight)
+
+        return current_weight
 
     def forward(
         self,
@@ -207,9 +239,12 @@ class TemplateAwareReconstructionLoss(nn.Module):
 
         loss_edge = torch.stack(edge_losses).mean() if edge_losses else torch.tensor(0.0, device=topo_logits.device)
 
+        # Get current topology weight (may be scheduled via curriculum)
+        current_topo_weight = self.get_topology_weight()
+
         # Total loss
         total_loss = (
-            self.topo_weight * loss_topo +
+            current_topo_weight * loss_topo +
             self.edge_weight * loss_edge
         )
 
@@ -217,7 +252,8 @@ class TemplateAwareReconstructionLoss(nn.Module):
             'recon_total': total_loss.item(),
             'recon_topo': loss_topo.item(),
             'recon_edge': loss_edge.item(),
-            'topo_accuracy': topo_accuracy.item()
+            'topo_accuracy': topo_accuracy.item(),
+            'topo_weight_current': current_topo_weight
         }
 
         return total_loss, metrics

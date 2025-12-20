@@ -1,5 +1,5 @@
-# GraphVAE Base Configuration
-# Hyperparameters for circuit latent space discovery
+# GraphVAE Configuration with Curriculum Learning
+# Enables topology weight curriculum: starts high (3x), anneals to 1x over 20 epochs
 
 # Data configuration
 data:
@@ -29,45 +29,50 @@ model:
   # Regularization
   dropout: 0.1
 
-# Loss function
+# Loss function (with curriculum learning)
 loss:
   recon_weight: 1.0
-  tf_weight: 0.5  # Start low, will increase during training
-  kl_weight: 0.05
+  tf_weight: 0.01     # Low TF weight (Chamfer distance is large)
+  kl_weight: 0.1      # Increased KL for better regularization
+
+  # Curriculum learning for topology weight
+  use_topo_curriculum: true
+  topo_curriculum_warmup_epochs: 20
+  topo_curriculum_initial_multiplier: 3.0  # Start at 3x, anneal to 1x
 
 # Training configuration
 training:
   # Optimization
-  optimizer: "adamw"  # adam or adamw
-  learning_rate: 1.0e-3
+  optimizer: "adamw"
+  learning_rate: 5.0e-4
   weight_decay: 1.0e-5
 
   # Learning rate scheduling
-  scheduler: "cosine"  # cosine, step, cosine_warmup, or null
-  min_lr: 1.0e-6  # For cosine annealing
-  T_0: 50  # For cosine_warmup
-  T_mult: 2  # For cosine_warmup
+  scheduler: "cosine"
+  min_lr: 1.0e-6
+  T_0: 50
+  T_mult: 2
 
   # Training parameters
   epochs: 200
-  batch_size: 4  # Small dataset, small batches
+  batch_size: 4
 
   # Validation and logging
-  val_interval: 1  # Validate every epoch
-  log_interval: 5  # Log every 5 batches
+  val_interval: 1
+  log_interval: 5
 
   # Early stopping
-  early_stopping_patience: 20
+  early_stopping_patience: 30
 
   # Checkpointing
   checkpoint_dir: "checkpoints"
 
-# Regularization (beyond dropout and weight_decay)
+# Regularization
 regularization:
   max_grad_norm: 1.0
-  spectral_norm: false  # Future: apply to decoder
+  spectral_norm: false
 
 # Hardware
 hardware:
-  num_workers: 0  # DataLoader workers (0 for debugging)
+  num_workers: 0
   pin_memory: false

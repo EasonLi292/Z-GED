@@ -14,7 +14,7 @@ data:
 model:
   # Node and edge features
   node_feature_dim: 4  # [GND, VIN, VOUT, INTERNAL]
-  edge_feature_dim: 3  # [log(C), log(G), log(L_inv)]
+  edge_feature_dim: 7  # [log(C), log(G), log(L_inv), has_C, has_R, has_L, is_parallel]
 
   # GNN encoder
   gnn_hidden_dim: 64

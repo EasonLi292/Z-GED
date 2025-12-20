@@ -233,6 +233,14 @@ class CircuitDataset(Dataset):
                 # Edge features: impedance_den = [C, G, L_inv]
                 imp_den = neighbor['impedance_den']
 
+                # Create binary masks indicating which components are present
+                # Original values before log-scaling for accurate thresholding
+                C, G, L_inv = imp_den
+                has_C = 1.0 if C > 1e-12 else 0.0
+                has_R = 1.0 if G > 1e-12 else 0.0  # G = 1/R
+                has_L = 1.0 if L_inv > 1e-12 else 0.0  # L_inv = 1/L
+                is_parallel = 1.0  # All components between two nodes are parallel
+
                 if self.log_scale_impedance:
                     # Log scale with small epsilon
                     imp_den = np.log(np.array(imp_den) + 1e-15)
@@ -243,7 +251,12 @@ class CircuitDataset(Dataset):
                 if self.normalize_features:
                     imp_den = (imp_den - self.impedance_mean) / self.impedance_std
 
-                edge_attr.append(imp_den)
+                # Concatenate continuous features + binary masks
+                # Result: [log(C), log(G), log(L_inv), has_C, has_R, has_L, is_parallel]
+                binary_masks = torch.tensor([has_C, has_R, has_L, is_parallel], dtype=torch.float32)
+                edge_features = torch.cat([imp_den, binary_masks], dim=0)
+
+                edge_attr.append(edge_features)
 
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
         edge_attr = torch.stack(edge_attr)
