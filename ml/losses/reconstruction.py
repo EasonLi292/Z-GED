@@ -10,7 +10,8 @@ Measures how well the decoder reconstructs the original circuit:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
+from ..models.decoder import CIRCUIT_TEMPLATES, FILTER_TYPES
 
 
 class ReconstructionLoss(nn.Module):
@@ -185,21 +186,61 @@ class TemplateAwareReconstructionLoss(nn.Module):
 
         return current_weight
 
+    def _reorder_edges_to_template(
+        self,
+        edge_index: torch.Tensor,
+        edge_attr: torch.Tensor,
+        filter_type_idx: int
+    ) -> torch.Tensor:
+        """
+        Reorder edges to match the canonical template ordering.
+
+        Args:
+            edge_index: Edge index tensor [2, E_i]
+            edge_attr: Edge features [E_i, feature_dim]
+            filter_type_idx: Index of filter type (0-5)
+
+        Returns:
+            reordered_edge_attr: Edge features in canonical order [E_template, feature_dim]
+                                 Pads with zeros if target has fewer edges than template
+        """
+        filter_type = FILTER_TYPES[filter_type_idx]
+        template_edges = CIRCUIT_TEMPLATES[filter_type]['edges']
+
+        # Create mapping from (source, target) to edge features
+        edge_map = {}
+        for i in range(edge_index.size(1)):
+            src, tgt = edge_index[0, i].item(), edge_index[1, i].item()
+            edge_map[(src, tgt)] = edge_attr[i]
+
+        # Reorder according to template
+        reordered = []
+        for template_edge in template_edges:
+            if template_edge in edge_map:
+                reordered.append(edge_map[template_edge])
+            else:
+                # Edge not in target graph, pad with zeros
+                reordered.append(torch.zeros_like(edge_attr[0]))
+
+        return torch.stack(reordered) if reordered else edge_attr
+
     def forward(
         self,
         decoder_output: Dict[str, torch.Tensor],
         target_filter_type: torch.Tensor,
         target_edge_attr: torch.Tensor,
-        batch: torch.Tensor
+        edge_batch: torch.Tensor,
+        edge_index: torch.Tensor = None
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
-        Compute template-aware reconstruction loss.
+        Compute template-aware reconstruction loss with canonical edge ordering.
 
         Args:
             decoder_output: Decoder output
             target_filter_type: Ground truth filter type one-hot [B, 6]
-            target_edge_attr: Ground truth edge features [E, 3]
-            batch: Batch assignment for edges [E]
+            target_edge_attr: Ground truth edge features [E, edge_dim]
+            edge_batch: Batch assignment for edges [E]
+            edge_index: Edge connectivity [2, E] for canonical reordering
 
         Returns:
             loss: Total loss
@@ -216,25 +257,38 @@ class TemplateAwareReconstructionLoss(nn.Module):
         pred_topo = topo_logits.argmax(dim=-1)
         topo_accuracy = (pred_topo == target_topo_idx).float().mean()
 
-        # 2. Edge feature loss
-        # For each graph in batch, compare predicted edges to target edges
-        pred_edges = decoder_output['edge_features']  # [B, max_edges, 3]
+        # 2. Edge feature loss with canonical ordering
+        # For each graph in batch, reorder edges to match template
+        pred_edges = decoder_output['edge_features']  # [B, max_edges, edge_dim]
 
-        # batch parameter is edge batch assignment [E]
         edge_losses = []
 
         for i in range(batch_size):
-            # Get target edges for this graph using edge batch
-            edge_mask = batch == i
-            target_edges_i = target_edge_attr[edge_mask]  # [E_i, 3]
+            # Get target edges for this graph
+            edge_mask = edge_batch == i
+            target_edges_i = target_edge_attr[edge_mask]  # [E_i, edge_dim]
 
-            # Get predicted edges (use first E_i edges)
-            num_edges_i = target_edges_i.size(0)
+            # Get edge index for this graph
+            if edge_index is not None:
+                edge_index_i = edge_index[:, edge_mask]  # [2, E_i]
+
+                # Reorder target edges to match template canonical ordering
+                target_edges_i_reordered = self._reorder_edges_to_template(
+                    edge_index_i,
+                    target_edges_i,
+                    target_topo_idx[i].item()
+                )
+            else:
+                # Fallback: use original ordering (no reordering)
+                target_edges_i_reordered = target_edges_i
+
+            # Get predicted edges (same number as reordered target)
+            num_edges_i = target_edges_i_reordered.size(0)
             if num_edges_i > 0:
-                pred_edges_i = pred_edges[i, :num_edges_i, :]  # [E_i, 3]
+                pred_edges_i = pred_edges[i, :num_edges_i, :]  # [E_i, edge_dim]
 
                 # MSE loss
-                loss_i = F.mse_loss(pred_edges_i, target_edges_i)
+                loss_i = F.mse_loss(pred_edges_i, target_edges_i_reordered)
                 edge_losses.append(loss_i)
 
         loss_edge = torch.stack(edge_losses).mean() if edge_losses else torch.tensor(0.0, device=topo_logits.device)

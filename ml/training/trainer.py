@@ -29,6 +29,7 @@ class VAETrainer:
         - Logging and metrics tracking
         - Learning rate scheduling
         - Early stopping
+        - Teacher forcing for topology
 
     Args:
         encoder: HierarchicalEncoder model
@@ -42,6 +43,7 @@ class VAETrainer:
         checkpoint_dir: Directory for saving checkpoints
         log_interval: Log every N batches
         val_interval: Validate every N epochs
+        use_teacher_forcing: Whether to use teacher forcing for topology (default: False)
     """
 
     def __init__(
@@ -56,7 +58,8 @@ class VAETrainer:
         device: str = 'cpu',
         checkpoint_dir: str = 'checkpoints',
         log_interval: int = 10,
-        val_interval: int = 1
+        val_interval: int = 1,
+        use_teacher_forcing: bool = False
     ):
         self.encoder = encoder.to(device)
         self.decoder = decoder.to(device)
@@ -69,6 +72,7 @@ class VAETrainer:
         self.checkpoint_dir = Path(checkpoint_dir)
         self.log_interval = log_interval
         self.val_interval = val_interval
+        self.use_teacher_forcing = use_teacher_forcing
 
         # Create checkpoint directory
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -298,13 +302,14 @@ class VAETrainer:
             batch['zeros']
         )
 
-        # Decode
-        decoder_output = self.decoder(z, hard=False)
+        # Decode (with optional teacher forcing)
+        gt_filter_type = batch['filter_type'] if self.use_teacher_forcing else None
+        decoder_output = self.decoder(z, hard=False, gt_filter_type=gt_filter_type)
 
         # Compute edge batch
         edge_batch = batch['graph'].batch[batch['graph'].edge_index[0]]
 
-        # Compute loss
+        # Compute loss (with edge_index for canonical ordering)
         encoder_output = (z, mu, logvar)
         loss, metrics = self.loss_fn(
             encoder_output,
@@ -313,7 +318,8 @@ class VAETrainer:
             batch['graph'].edge_attr,
             edge_batch,
             batch['poles'],
-            batch['zeros']
+            batch['zeros'],
+            batch['graph'].edge_index  # Add edge_index for canonical edge ordering
         )
 
         return loss, metrics

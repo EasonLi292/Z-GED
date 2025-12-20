@@ -67,6 +67,9 @@ training:
   # Checkpointing
   checkpoint_dir: "checkpoints"
 
+  # Teacher forcing for topology
+  use_teacher_forcing: true  # Use ground-truth filter types during training
+
 # Regularization
 regularization:
   max_grad_norm: 1.0

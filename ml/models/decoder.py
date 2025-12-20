@@ -16,11 +16,13 @@ import networkx as nx
 
 
 # Template graph structures for each filter type
-# Format: (num_nodes, edge_list)
+# Format: (num_nodes, canonical_edge_list)
+# Canonical ordering: sorted by (source, target) for consistent edge matching
 CIRCUIT_TEMPLATES = {
     'low_pass': {
         'num_nodes': 3,
-        'edges': [(0, 2), (1, 2), (2, 0), (2, 1)],  # GND, VIN, VOUT
+        # Canonical order: sort by (source, target)
+        'edges': [(0, 2), (1, 2), (2, 0), (2, 1)],
         'num_components': 2,  # R, C
         'node_types': [0, 1, 2]  # [GND, VIN, VOUT]
     },
@@ -32,25 +34,29 @@ CIRCUIT_TEMPLATES = {
     },
     'band_pass': {
         'num_nodes': 4,
-        'edges': [(0, 2), (1, 2), (2, 3), (3, 0), (2, 0), (2, 1), (0, 3)],
+        # Canonical order: (0,2), (0,3), (1,2), (2,0), (2,1), (2,3), (3,0)
+        'edges': [(0, 2), (0, 3), (1, 2), (2, 0), (2, 1), (2, 3), (3, 0)],
         'num_components': 3,  # R, L, C
         'node_types': [0, 1, 2, 3]  # [GND, VIN, VOUT, INTERNAL]
     },
     'band_stop': {
         'num_nodes': 5,
-        'edges': [(0, 2), (1, 2), (2, 3), (3, 4), (4, 0), (0, 2), (2, 0), (2, 1), (3, 2), (0, 4)],
+        # Canonical order: sorted by (source, target)
+        'edges': [(0, 2), (0, 4), (1, 2), (2, 0), (2, 1), (2, 3), (3, 2), (3, 4), (4, 0)],
         'num_components': 6,
         'node_types': [0, 1, 2, 3, 3]  # [GND, VIN, VOUT, INTERNAL, INTERNAL]
     },
     'rlc_series': {
         'num_nodes': 5,
-        'edges': [(0, 2), (1, 2), (2, 3), (3, 4), (4, 0), (0, 2), (2, 0), (2, 1), (3, 2), (0, 4)],
+        # Canonical order: sorted by (source, target)
+        'edges': [(0, 2), (0, 4), (1, 2), (2, 0), (2, 1), (2, 3), (3, 2), (3, 4), (4, 0)],
         'num_components': 4,  # R, L, C, R_series
         'node_types': [0, 1, 2, 3, 3]
     },
     'rlc_parallel': {
         'num_nodes': 4,
-        'edges': [(0, 2), (1, 2), (2, 3), (3, 0), (2, 0), (2, 1), (0, 3)],
+        # Canonical order: (0,2), (0,3), (1,2), (2,0), (2,1), (2,3), (3,0)
+        'edges': [(0, 2), (0, 3), (1, 2), (2, 0), (2, 1), (2, 3), (3, 0)],
         'num_components': 4,  # R, L, C, R_parallel
         'node_types': [0, 1, 2, 3]
     }
@@ -146,21 +152,23 @@ class HybridDecoder(nn.Module):
         self,
         z: torch.Tensor,
         temperature: float = 1.0,
-        hard: bool = False
+        hard: bool = False,
+        gt_filter_type: torch.Tensor = None
     ) -> Dict[str, torch.Tensor]:
         """
-        Decode latent vectors to circuit graphs.
+        Decode latent vectors to circuit graphs with optional teacher forcing.
 
         Args:
             z: Latent vector [B, latent_dim]
             temperature: Temperature for Gumbel-Softmax (default: 1.0)
             hard: Whether to use hard (one-hot) sampling (default: False)
+            gt_filter_type: Ground-truth filter type one-hot [B, 6] for teacher forcing (optional)
 
         Returns:
             Dictionary with:
                 - 'topo_logits': Topology logits [B, 6]
-                - 'topo_probs': Topology probabilities [B, 6]
-                - 'edge_features': Predicted edge features [B, max_edges, 3]
+                - 'topo_probs': Topology probabilities (or GT if teacher forcing) [B, 6]
+                - 'edge_features': Predicted edge features [B, max_edges, edge_dim]
                 - 'poles': Predicted poles [B, 2, 2]
                 - 'zeros': Predicted zeros [B, 2, 2]
                 - 'graphs': List of PyG Data objects (if hard=True)
@@ -175,7 +183,11 @@ class HybridDecoder(nn.Module):
         # Stage 1: Topology classification
         topo_logits = self.topo_classifier(z_topo)  # [B, 6]
 
-        if self.training:
+        # Teacher forcing: use ground-truth topology if provided
+        if gt_filter_type is not None:
+            # Use ground-truth filter type (teacher forcing)
+            topo_probs = gt_filter_type.float()
+        elif self.training:
             # Use Gumbel-Softmax for differentiable sampling during training
             topo_probs = F.gumbel_softmax(topo_logits, tau=temperature, hard=hard, dim=-1)
         else:

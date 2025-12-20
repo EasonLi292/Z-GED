@@ -303,13 +303,21 @@ class SimplifiedCompositeLoss(nn.Module):
         target_edge_attr: torch.Tensor,
         edge_batch: torch.Tensor,
         target_poles_list: List[torch.Tensor],
-        target_zeros_list: List[torch.Tensor]
+        target_zeros_list: List[torch.Tensor],
+        edge_index: torch.Tensor = None
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
         Compute simplified composite loss.
 
         Args:
-            (same as CompositeLoss but without GED components)
+            encoder_output: (z, mu, logvar) from encoder
+            decoder_output: Output from decoder
+            target_filter_type: Ground truth filter types [B, 6]
+            target_edge_attr: Ground truth edge features [E, edge_dim]
+            edge_batch: Batch assignment for edges [E]
+            target_poles_list: List of target poles
+            target_zeros_list: List of target zeros
+            edge_index: Edge connectivity [2, E] for canonical reordering
 
         Returns:
             total_loss: Combined loss
@@ -317,12 +325,13 @@ class SimplifiedCompositeLoss(nn.Module):
         """
         z, mu, logvar = encoder_output
 
-        # Reconstruction loss
+        # Reconstruction loss (with canonical edge ordering if edge_index provided)
         loss_recon, metrics_recon = self.recon_loss(
             decoder_output,
             target_filter_type,
             target_edge_attr,
-            edge_batch
+            edge_batch,
+            edge_index
         )
 
         # Transfer function loss

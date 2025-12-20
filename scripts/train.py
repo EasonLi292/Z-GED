@@ -271,7 +271,8 @@ def main():
         device=device,
         checkpoint_dir=str(checkpoint_dir),
         log_interval=config['training'].get('log_interval', 10),
-        val_interval=config['training'].get('val_interval', 1)
+        val_interval=config['training'].get('val_interval', 1),
+        use_teacher_forcing=config['training'].get('use_teacher_forcing', False)
     )
 
     # Load checkpoint if provided

@@ -7,7 +7,7 @@
 
 This document details the architectural improvements implemented to enhance the GraphVAE's ability to learn circuit representations. These improvements address loss balancing, training stability, and feature richness.
 
-## Implemented Improvements
+## Implemented Improvements (4/6)
 
 ### 1. Topology Weight Curriculum Learning ✅
 
@@ -143,40 +143,130 @@ for neighbor in neighbors:
 
 ---
 
-## Pending Improvements (Not Yet Implemented)
+### 3. Canonical Edge Ordering per Filter Type ✅
 
-### 3. Canonical Edge Ordering per Filter Type
+**Motivation**: Original implementation paired the first `E_i` target edges with the first `E_i` template edges. If edge ordering differed between target and template, the edge MSE loss would get noisy due to permutation mismatches.
 
-**Problem**: Current implementation pairs the first `E_i` target edges with the first `E_i` template edges. If edge ordering differs between target and template, the edge MSE loss gets noisy.
+**Implementation**:
+- **Location**: `ml/models/decoder.py` (CIRCUIT_TEMPLATES), `ml/losses/reconstruction.py`
+- **Mechanism**: Sort edges canonically by (source, target) and reorder target edges to match template
 
-**Solution**:
-1. Define canonical edge ordering for each filter type in `CIRCUIT_TEMPLATES`
-2. In `tools/circuit_generator.py`: Sort edges consistently when creating graph
-3. In `TemplateAwareReconstructionLoss`: Reorder `target_edge_attr` to match template ordering
+**Template Updates**:
+```python
+# Before: arbitrary edge ordering
+'band_pass': {
+    'edges': [(0, 2), (1, 2), (2, 3), (3, 0), (2, 0), (2, 1), (0, 3)]
+}
 
-**Expected Impact**:
-- Reduce edge reconstruction loss noise
+# After: canonical ordering (sorted by source, then target)
+'band_pass': {
+    'edges': [(0, 2), (0, 3), (1, 2), (2, 0), (2, 1), (2, 3), (3, 0)]
+}
+```
+
+**Edge Reordering Function**:
+```python
+def _reorder_edges_to_template(self, edge_index, edge_attr, filter_type_idx):
+    """
+    Reorder edges to match canonical template ordering.
+
+    Creates mapping: (source, target) → edge_features
+    Then reorders according to template edge list.
+    Pads with zeros if target has fewer edges than template.
+    """
+    filter_type = FILTER_TYPES[filter_type_idx]
+    template_edges = CIRCUIT_TEMPLATES[filter_type]['edges']
+
+    # Map edges
+    edge_map = {(src, tgt): features for src, tgt, features in zip(...)}
+
+    # Reorder to match template
+    reordered = [edge_map.get(e, zero_padding) for e in template_edges]
+    return torch.stack(reordered)
+```
+
+**Loss Function Update**:
+- Added `edge_index` parameter to `TemplateAwareReconstructionLoss.forward()`
+- For each graph, extract edge_index and call `_reorder_edges_to_template()`
+- Compare reordered target edges to predicted edges
+
+**Configuration**: No config changes needed (always enabled)
+
+**Expected Benefits**:
+- Reduce edge reconstruction loss noise (no permutation mismatch)
 - Faster convergence on edge features
-- More interpretable edge predictions
+- More interpretable edge predictions (consistent ordering)
+
+**Code Changes**:
+- `ml/models/decoder.py`: Updated all 6 templates with canonical orderings
+- `ml/losses/reconstruction.py`: Added `_reorder_edges_to_template()` method
+- `ml/losses/composite.py`: Pass `edge_index` parameter through
+- `ml/training/trainer.py`: Provide `batch['graph'].edge_index` to loss
 
 ---
 
-### 4. Teacher-Forced Templates During Training
+### 4. Teacher-Forced Templates During Training ✅
 
-**Problem**: Decoder samples topology from Gumbel-Softmax, which may be incorrect early in training. This causes edge predictions to use the wrong template structure.
+**Motivation**: Decoder samples topology from Gumbel-Softmax, which may be incorrect early in training. This causes edge predictions to use the wrong template structure, making the value decoder learn on incorrect topologies.
 
-**Solution**:
-1. Add ground-truth filter type as input to decoder forward pass
-2. Use GT template during training (teacher forcing)
-3. Add auxiliary classifier to encoder's `h_topo` for topology prediction
-4. Loss = reconstruction + auxiliary_topology_CE
+**Implementation**:
+- **Location**: `ml/models/decoder.py`, `ml/training/trainer.py`, `scripts/train.py`
+- **Mechanism**: Pass ground-truth filter type to decoder; use it instead of sampling
 
-**Expected Impact**:
+**Decoder Update**:
+```python
+def forward(self, z, temperature=1.0, hard=False, gt_filter_type=None):
+    topo_logits = self.topo_classifier(z_topo)
+
+    # Teacher forcing: use ground-truth topology if provided
+    if gt_filter_type is not None:
+        topo_probs = gt_filter_type.float()  # Use GT
+    elif self.training:
+        topo_probs = F.gumbel_softmax(topo_logits, ...)  # Sample
+    else:
+        topo_probs = F.softmax(topo_logits, ...)  # Inference
+```
+
+**Trainer Update**:
+```python
+# In VAETrainer.__init__:
+self.use_teacher_forcing = use_teacher_forcing
+
+# In _forward_pass:
+gt_filter_type = batch['filter_type'] if self.use_teacher_forcing else None
+decoder_output = self.decoder(z, hard=False, gt_filter_type=gt_filter_type)
+```
+
+**Configuration**:
+```yaml
+training:
+  use_teacher_forcing: true  # Enable teacher forcing
+```
+
+**Training Behavior**:
+- **Training**: Decoder uses ground-truth filter type → correct template always used
+- **Validation/Inference**: Decoder samples from Gumbel-Softmax → tests learned topology
+
+**Expected Benefits**:
 - Faster training (correct templates from epoch 0)
-- Reduced edge loss variance
+- Reduced edge loss variance (no wrong-template noise)
 - Better gradient signal for `z_values` branch
+- Value decoder learns on correct topologies
+
+**Trade-offs**:
+- Model becomes reliant on correct topology during training
+- Must still learn to predict topology via `topo_logits` (topology loss still active)
+- May need to disable teacher forcing later in training for end-to-end learning
+
+**Code Changes**:
+- `ml/models/decoder.py`: Added `gt_filter_type` parameter to `forward()`
+- `ml/training/trainer.py`: Added `use_teacher_forcing` parameter
+- `scripts/train.py`: Read `use_teacher_forcing` from config
+- `configs/curriculum.yaml`: Enabled teacher forcing by default
 
 ---
+
+## Pending Improvements (2/6 remaining)
 
 ### 5. GED-Aware Metric Learning Loss
 
@@ -219,7 +309,7 @@ for neighbor in neighbors:
 
 ### New Config: `configs/curriculum.yaml`
 
-Production config with curriculum learning enabled:
+Production config with all improvements enabled:
 ```yaml
 loss:
   recon_weight: 1.0
@@ -228,6 +318,9 @@ loss:
   use_topo_curriculum: true
   topo_curriculum_warmup_epochs: 20
   topo_curriculum_initial_multiplier: 3.0
+
+training:
+  use_teacher_forcing: true
 ```
 
 ### Updated Configs
@@ -242,32 +335,48 @@ All configs now use `edge_feature_dim: 7`:
 
 ## Testing
 
-**Quick Test** (1 epoch):
+**Test 1: Richer Edge Typing** (1 epoch, test.yaml):
 ```bash
 python3 scripts/train.py --config configs/test.yaml --epochs 1
 ```
 
-**Results** (with richer edge typing):
-- Model params: 108,871 (increased from 101,919)
-- Training loss: 2.52 (comparable to 2.78 before)
+Results:
+- Model params: 108,871 (increased from 101,919, +6.8%)
+- Training loss: 2.52 (comparable to 2.78 baseline)
 - Edge reconstruction loss: 0.62 (working correctly)
-- Topology accuracy: 16.67% after 1 epoch (expected, needs more epochs)
+- Topology accuracy: 16.67% after 1 epoch
+
+**Test 2: Curriculum + Teacher Forcing** (1 epoch, curriculum.yaml):
+```bash
+python3 scripts/train.py --config configs/curriculum.yaml --epochs 1
+```
+
+Results:
+- Training loss: 5.62 (higher due to 3x topology weight)
+- Topology loss: 1.80 (heavily weighted)
+- Edge loss: 0.12 (much lower, correct templates used)
+- Topology accuracy: 16.67% after 1 epoch
+- Curriculum weight: Started at 3x, will anneal to 1x over 20 epochs
+- Teacher forcing: Active (GT filter types used)
 
 ---
 
 ## Future Work
 
 ### Short Term (Next Session)
-1. Implement canonical edge ordering
-2. Enable teacher-forced templates
-3. Run full 200-epoch training with curriculum + richer edge typing
-4. Compare results with baseline (exp002)
+1. ✅ ~~Implement canonical edge ordering~~ (Complete)
+2. ✅ ~~Enable teacher-forced templates~~ (Complete)
+3. Run full 200-epoch training with all improvements enabled
+4. Compare results with baseline (exp002_optimized_2epochs)
+5. Implement remaining improvements (GED loss, topology-conditioned decoder)
 
 ### Long Term
 1. GED-aware loss with precomputed neighbor matrix
 2. Topology-conditioned value decoder with FiLM
 3. Variable-length pole/zero prediction (auto-regressive decoder)
 4. β-VAE with per-branch KL weights for better disentanglement
+5. Attention mechanism for edge features
+6. Multi-task learning with circuit property prediction
 
 ---
 
@@ -292,17 +401,23 @@ Compare against baseline (exp002_optimized_2epochs):
 
 | Feature | Status | Files Modified | LOC Changed |
 |---------|--------|----------------|-------------|
-| Curriculum learning | ✅ Complete | `reconstruction.py`, `composite.py`, `train.py`, configs | ~80 |
-| Richer edge typing | ✅ Complete | `dataset.py`, all configs | ~30 |
-| Canonical ordering | ⏳ Pending | `circuit_generator.py`, `reconstruction.py` | ~50 (est.) |
-| Teacher forcing | ⏳ Pending | `decoder.py`, `encoder.py`, `trainer.py` | ~100 (est.) |
-| GED-aware loss | ⏳ Pending | `train.py`, `precompute_ged.py`, configs | ~150 (est.) |
-| Topo-conditioned decoder | ⏳ Pending | `decoder.py` | ~50 (est.) |
+| 1. Curriculum learning | ✅ Complete | `reconstruction.py`, `composite.py`, `train.py`, configs | ~80 |
+| 2. Richer edge typing | ✅ Complete | `dataset.py`, all configs | ~30 |
+| 3. Canonical ordering | ✅ Complete | `decoder.py`, `reconstruction.py`, `composite.py`, `trainer.py` | ~100 |
+| 4. Teacher forcing | ✅ Complete | `decoder.py`, `trainer.py`, `train.py`, configs | ~50 |
+| 5. GED-aware loss | ⏳ Pending | `train.py`, `precompute_ged.py`, configs | ~150 (est.) |
+| 6. Topo-conditioned decoder | ⏳ Pending | `decoder.py` | ~50 (est.) |
 
-**Total implemented**: 2/6 improvements (110 LOC)
-**Total pending**: 4/6 improvements (~350 LOC estimated)
+**Total implemented**: 4/6 improvements (~260 LOC)
+**Total pending**: 2/6 improvements (~200 LOC estimated)
+
+**Key Achievements**:
+- Curriculum learning reduces topology weight gradually (3x → 1x over 20 epochs)
+- Richer edge features include binary masks (7D instead of 3D)
+- Canonical edge ordering eliminates permutation noise in loss
+- Teacher forcing uses correct templates from epoch 0
 
 ---
 
 **Last Updated**: December 20, 2025
-**Next Review**: After full training run with curriculum + richer edge typing
+**Next Review**: After full 200-epoch training run with all 4 improvements enabled
