@@ -87,20 +87,31 @@ def create_dataloaders(config: dict):
 
 def create_models(config: dict, device: str):
     """Create encoder and decoder models."""
+    # Extract branch dimensions (optional, defaults to equal split)
+    topo_dim = config['model'].get('topo_latent_dim', None)
+    values_dim = config['model'].get('values_latent_dim', None)
+    pz_dim = config['model'].get('pz_latent_dim', None)
+
     encoder = HierarchicalEncoder(
         node_feature_dim=config['model']['node_feature_dim'],
         edge_feature_dim=config['model']['edge_feature_dim'],
         gnn_hidden_dim=config['model']['gnn_hidden_dim'],
         gnn_num_layers=config['model']['gnn_num_layers'],
         latent_dim=config['model']['latent_dim'],
-        dropout=config['model']['dropout']
+        dropout=config['model']['dropout'],
+        topo_latent_dim=topo_dim,
+        values_latent_dim=values_dim,
+        pz_latent_dim=pz_dim
     )
 
     decoder = HybridDecoder(
         latent_dim=config['model']['latent_dim'],
         edge_feature_dim=config['model']['edge_feature_dim'],
         hidden_dim=config['model']['decoder_hidden_dim'],
-        dropout=config['model']['dropout']
+        dropout=config['model']['dropout'],
+        topo_latent_dim=topo_dim,
+        values_latent_dim=values_dim,
+        pz_latent_dim=pz_dim
     )
 
     encoder = encoder.to(device)

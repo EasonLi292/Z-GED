@@ -48,17 +48,32 @@ class HierarchicalEncoder(nn.Module):
         gnn_hidden_dim: int = 64,
         gnn_num_layers: int = 3,
         latent_dim: int = 24,
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        # Variable branch dimensions (defaults to equal split)
+        topo_latent_dim: Optional[int] = None,
+        values_latent_dim: Optional[int] = None,
+        pz_latent_dim: Optional[int] = None
     ):
         super().__init__()
 
-        assert latent_dim % 3 == 0, "Latent dim must be divisible by 3 for hierarchical split"
+        # Set branch dimensions (default to equal split if not specified)
+        if topo_latent_dim is None or values_latent_dim is None or pz_latent_dim is None:
+            assert latent_dim % 3 == 0, "Latent dim must be divisible by 3 for equal split"
+            self.topo_latent_dim = latent_dim // 3
+            self.values_latent_dim = latent_dim // 3
+            self.pz_latent_dim = latent_dim // 3
+        else:
+            self.topo_latent_dim = topo_latent_dim
+            self.values_latent_dim = values_latent_dim
+            self.pz_latent_dim = pz_latent_dim
+            assert topo_latent_dim + values_latent_dim + pz_latent_dim == latent_dim, \
+                f"Branch dims {topo_latent_dim}+{values_latent_dim}+{pz_latent_dim} != {latent_dim}"
 
         self.node_feature_dim = node_feature_dim
         self.edge_feature_dim = edge_feature_dim
         self.gnn_hidden_dim = gnn_hidden_dim
         self.latent_dim = latent_dim
-        self.latent_dim_per_branch = latent_dim // 3
+        self.latent_dim_per_branch = latent_dim // 3  # For backward compatibility
 
         # Stage 1: Impedance-Aware GNN
         self.gnn = ImpedanceGNN(
@@ -84,8 +99,8 @@ class HierarchicalEncoder(nn.Module):
             nn.ReLU()
         )
 
-        self.topo_mu = nn.Linear(gnn_hidden_dim // 2, self.latent_dim_per_branch)
-        self.topo_logvar = nn.Linear(gnn_hidden_dim // 2, self.latent_dim_per_branch)
+        self.topo_mu = nn.Linear(gnn_hidden_dim // 2, self.topo_latent_dim)
+        self.topo_logvar = nn.Linear(gnn_hidden_dim // 2, self.topo_latent_dim)
 
         # Branch 2: Component values encoding (from edge features)
         # Aggregate edge features across the graph
@@ -97,8 +112,8 @@ class HierarchicalEncoder(nn.Module):
             nn.ReLU()
         )
 
-        self.values_mu = nn.Linear(gnn_hidden_dim // 2, self.latent_dim_per_branch)
-        self.values_logvar = nn.Linear(gnn_hidden_dim // 2, self.latent_dim_per_branch)
+        self.values_mu = nn.Linear(gnn_hidden_dim // 2, self.values_latent_dim)
+        self.values_logvar = nn.Linear(gnn_hidden_dim // 2, self.values_latent_dim)
 
         # Branch 3: Poles/Zeros encoding (DeepSets for variable-length)
         self.pz_encoder_poles = DeepSets(
@@ -121,8 +136,8 @@ class HierarchicalEncoder(nn.Module):
             nn.Dropout(dropout)
         )
 
-        self.pz_mu = nn.Linear(gnn_hidden_dim // 2, self.latent_dim_per_branch)
-        self.pz_logvar = nn.Linear(gnn_hidden_dim // 2, self.latent_dim_per_branch)
+        self.pz_mu = nn.Linear(gnn_hidden_dim // 2, self.pz_latent_dim)
+        self.pz_logvar = nn.Linear(gnn_hidden_dim // 2, self.pz_latent_dim)
 
     def forward(
         self,

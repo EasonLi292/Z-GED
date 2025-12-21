@@ -98,14 +98,29 @@ class HybridDecoder(nn.Module):
         hidden_dim: int = 128,
         max_nodes: int = 5,
         max_edges: int = 10,
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        # Variable branch dimensions (defaults to equal split)
+        topo_latent_dim: Optional[int] = None,
+        values_latent_dim: Optional[int] = None,
+        pz_latent_dim: Optional[int] = None
     ):
         super().__init__()
 
-        assert latent_dim % 3 == 0, "Latent dim must be divisible by 3"
+        # Set branch dimensions (default to equal split if not specified)
+        if topo_latent_dim is None or values_latent_dim is None or pz_latent_dim is None:
+            assert latent_dim % 3 == 0, "Latent dim must be divisible by 3 for equal split"
+            self.topo_latent_dim = latent_dim // 3
+            self.values_latent_dim = latent_dim // 3
+            self.pz_latent_dim = latent_dim // 3
+        else:
+            self.topo_latent_dim = topo_latent_dim
+            self.values_latent_dim = values_latent_dim
+            self.pz_latent_dim = pz_latent_dim
+            assert topo_latent_dim + values_latent_dim + pz_latent_dim == latent_dim, \
+                f"Branch dims {topo_latent_dim}+{values_latent_dim}+{pz_latent_dim} != {latent_dim}"
 
         self.latent_dim = latent_dim
-        self.latent_dim_per_branch = latent_dim // 3
+        self.latent_dim_per_branch = latent_dim // 3  # For backward compatibility
         self.edge_feature_dim = edge_feature_dim
         self.hidden_dim = hidden_dim
         self.max_nodes = max_nodes
@@ -113,7 +128,7 @@ class HybridDecoder(nn.Module):
 
         # Stage 1: Topology classification (from z_topo)
         self.topo_classifier = nn.Sequential(
-            nn.Linear(self.latent_dim_per_branch, hidden_dim),
+            nn.Linear(self.topo_latent_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim // 2),
@@ -124,7 +139,7 @@ class HybridDecoder(nn.Module):
         # Stage 2: Component value prediction (from z_values)
         # Topology-conditioned using FiLM (Feature-wise Linear Modulation)
         self.value_mlp1 = nn.Sequential(
-            nn.Linear(self.latent_dim_per_branch, hidden_dim),
+            nn.Linear(self.values_latent_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout)
         )
@@ -144,13 +159,13 @@ class HybridDecoder(nn.Module):
 
         # Predict maximum 2 poles and 2 zeros (most complex case)
         self.pole_decoder = nn.Sequential(
-            nn.Linear(self.latent_dim_per_branch, hidden_dim // 2),
+            nn.Linear(self.pz_latent_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, 2 * 2)  # 2 poles × [real, imag]
         )
 
         self.zero_decoder = nn.Sequential(
-            nn.Linear(self.latent_dim_per_branch, hidden_dim // 2),
+            nn.Linear(self.pz_latent_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, 2 * 2)  # 2 zeros × [real, imag]
         )
@@ -182,10 +197,10 @@ class HybridDecoder(nn.Module):
         """
         batch_size = z.size(0)
 
-        # Split latent vector
-        z_topo = z[:, :self.latent_dim_per_branch]
-        z_values = z[:, self.latent_dim_per_branch:2*self.latent_dim_per_branch]
-        z_pz = z[:, 2*self.latent_dim_per_branch:]
+        # Split latent vector using actual branch dimensions
+        z_topo = z[:, :self.topo_latent_dim]
+        z_values = z[:, self.topo_latent_dim:self.topo_latent_dim+self.values_latent_dim]
+        z_pz = z[:, self.topo_latent_dim+self.values_latent_dim:]
 
         # Stage 1: Topology classification
         topo_logits = self.topo_classifier(z_topo)  # [B, 6]
