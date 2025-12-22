@@ -132,18 +132,26 @@ def create_models(config: dict, device: str):
 
 def create_loss_function(config: dict, device: str):
     """Create loss function."""
-    # Extract curriculum parameters (with defaults)
-    use_curriculum = config['loss'].get('use_topo_curriculum', False)
-    warmup_epochs = config['loss'].get('topo_curriculum_warmup_epochs', 20)
-    initial_multiplier = config['loss'].get('topo_curriculum_initial_multiplier', 3.0)
+    # Extract topology curriculum parameters (with defaults)
+    use_topo_curriculum = config['loss'].get('use_topo_curriculum', False)
+    topo_warmup_epochs = config['loss'].get('topo_curriculum_warmup_epochs', 20)
+    topo_initial_multiplier = config['loss'].get('topo_curriculum_initial_multiplier', 3.0)
+
+    # Extract transfer function curriculum parameters (with defaults)
+    use_tf_curriculum = config['loss'].get('use_tf_curriculum', False)
+    tf_warmup_epochs = config['loss'].get('tf_curriculum_warmup_epochs', 50)
+    tf_initial_multiplier = config['loss'].get('tf_curriculum_initial_multiplier', 0.01)
 
     loss_fn = SimplifiedCompositeLoss(
         recon_weight=config['loss']['recon_weight'],
         tf_weight=config['loss']['tf_weight'],
         kl_weight=config['loss']['kl_weight'],
-        use_topo_curriculum=use_curriculum,
-        topo_curriculum_warmup_epochs=warmup_epochs,
-        topo_curriculum_initial_multiplier=initial_multiplier
+        use_topo_curriculum=use_topo_curriculum,
+        topo_curriculum_warmup_epochs=topo_warmup_epochs,
+        topo_curriculum_initial_multiplier=topo_initial_multiplier,
+        use_tf_curriculum=use_tf_curriculum,
+        tf_curriculum_warmup_epochs=tf_warmup_epochs,
+        tf_curriculum_initial_multiplier=tf_initial_multiplier
     )
 
     return loss_fn.to(device)

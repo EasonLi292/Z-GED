@@ -1,0 +1,98 @@
+# GraphVAE Configuration - Ultra-Compact 6D Architecture (EXPERIMENTAL)
+# Based on 14D model diffusion map analysis showing per-branch intrinsic dimensions:
+#   - z_topo: 1D intrinsic → allocate 1D (matched to intrinsic)
+#   - z_values: 2D intrinsic → allocate 2D (matched to intrinsic)
+#   - z_pz: 3D intrinsic → allocate 3D (matched to intrinsic)
+# Total: 1D + 2D + 3D = 6D (75% reduction from 24D baseline)
+#
+# WARNING: This is an aggressive optimization that allocates exactly at intrinsic
+# dimension limits. Recommended to validate 8D model first.
+
+# Data configuration
+data:
+  dataset_path: "rlc_dataset/filter_dataset.pkl"
+  normalize: true
+  log_scale: true
+  train_ratio: 0.8
+  val_ratio: 0.1
+  split_seed: 42
+
+# Model architecture - ULTRA-COMPACT (6D from 24D)
+model:
+  # Node and edge features (unchanged)
+  node_feature_dim: 4
+  edge_feature_dim: 7
+
+  # GNN encoder (unchanged)
+  gnn_hidden_dim: 64
+  gnn_num_layers: 3
+
+  # Latent space - AGGRESSIVE REDUCTION from 14D to 6D
+  latent_dim: 6
+
+  # Explicit branch dimensions (matched to intrinsic dimensions)
+  topo_latent_dim: 1    # Reduced from 6D (intrinsic: 1D, no margin) ⚠️ AGGRESSIVE
+  values_latent_dim: 2  # Reduced from 3D (intrinsic: 2D, matched)
+  pz_latent_dim: 3      # Reduced from 5D (intrinsic: 3D, matched)
+
+  # Decoder (unchanged)
+  decoder_hidden_dim: 128
+
+  # Regularization (unchanged)
+  dropout: 0.1
+
+# Loss function (with curriculum learning)
+loss:
+  recon_weight: 1.0
+  tf_weight: 0.01
+  kl_weight: 0.1
+
+  # Curriculum learning for topology weight
+  use_topo_curriculum: true
+  topo_curriculum_warmup_epochs: 20
+  topo_curriculum_initial_multiplier: 3.0
+
+  # GED-aware metric learning (optional)
+  use_ged_loss: false
+  ged_weight: 0.5
+  ged_matrix_path: "rlc_dataset/ged_matrix.npy"
+
+# Training configuration
+training:
+  # Optimization
+  optimizer: "adamw"
+  learning_rate: 5.0e-4
+  weight_decay: 1.0e-5
+
+  # Learning rate scheduling
+  scheduler: "cosine"
+  min_lr: 1.0e-6
+  T_0: 50
+  T_mult: 2
+
+  # Training parameters
+  epochs: 200
+  batch_size: 4
+
+  # Validation and logging
+  val_interval: 1
+  log_interval: 5
+
+  # Early stopping
+  early_stopping_patience: 30
+
+  # Checkpointing
+  checkpoint_dir: "checkpoints"
+
+  # Teacher forcing for topology
+  use_teacher_forcing: true
+
+# Regularization
+regularization:
+  max_grad_norm: 1.0
+  spectral_norm: false
+
+# Hardware
+hardware:
+  num_workers: 0
+  pin_memory: false

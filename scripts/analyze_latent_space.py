@@ -64,6 +64,11 @@ def load_model_and_config(checkpoint_path: str, device: str):
         with open('configs/base_config.yaml', 'r') as f:
             config = yaml.safe_load(f)
 
+    # Extract branch dimensions (optional, defaults to equal split)
+    topo_dim = config['model'].get('topo_latent_dim', None)
+    values_dim = config['model'].get('values_latent_dim', None)
+    pz_dim = config['model'].get('pz_latent_dim', None)
+
     # Create models
     encoder = HierarchicalEncoder(
         node_feature_dim=config['model']['node_feature_dim'],
@@ -71,14 +76,20 @@ def load_model_and_config(checkpoint_path: str, device: str):
         gnn_hidden_dim=config['model']['gnn_hidden_dim'],
         gnn_num_layers=config['model']['gnn_num_layers'],
         latent_dim=config['model']['latent_dim'],
-        dropout=config['model']['dropout']
+        dropout=config['model']['dropout'],
+        topo_latent_dim=topo_dim,
+        values_latent_dim=values_dim,
+        pz_latent_dim=pz_dim
     )
 
     decoder = HybridDecoder(
         latent_dim=config['model']['latent_dim'],
         edge_feature_dim=config['model']['edge_feature_dim'],
         hidden_dim=config['model']['decoder_hidden_dim'],
-        dropout=config['model']['dropout']
+        dropout=config['model']['dropout'],
+        topo_latent_dim=topo_dim,
+        values_latent_dim=values_dim,
+        pz_latent_dim=pz_dim
     )
 
     # Load weights
@@ -215,6 +226,12 @@ def main():
     # Load model
     encoder, decoder, config = load_model_and_config(args.checkpoint, device)
 
+    # Get branch dimensions from config
+    topo_dim = config['model'].get('topo_latent_dim', config['model']['latent_dim'] // 3)
+    values_dim = config['model'].get('values_latent_dim', config['model']['latent_dim'] // 3)
+    pz_dim = config['model'].get('pz_latent_dim', config['model']['latent_dim'] // 3)
+    branch_dims = [topo_dim, values_dim, pz_dim]
+
     # Load dataset
     dataset = CircuitDataset(
         dataset_path=args.dataset,
@@ -275,18 +292,22 @@ def main():
     print("="*70)
 
     latent_dim = latent_vectors.shape[1]
-    branch_dim = latent_dim // 3
 
-    # Analyze each branch separately
+    # Analyze each branch separately with actual branch dimensions
     branch_names = ['z_topo (topology)', 'z_values (component values)', 'z_pz (poles/zeros)']
     branch_results = {}
 
-    for i, branch_name in enumerate(branch_names):
-        print(f"\n{branch_name}:")
+    # Calculate branch start indices
+    branch_starts = [0, topo_dim, topo_dim + values_dim]
+
+    for i, (branch_name, branch_dim) in enumerate(zip(branch_names, branch_dims)):
+        print(f"\n{branch_name} [{branch_dim}D]:")
         print("-" * 70)
 
-        # Extract branch
-        branch_vectors = latent_vectors[:, i*branch_dim:(i+1)*branch_dim]
+        # Extract branch using actual dimensions
+        start_idx = branch_starts[i]
+        end_idx = start_idx + branch_dim
+        branch_vectors = latent_vectors[:, start_idx:end_idx]
 
         # Analyze
         branch_result = estimate_intrinsic_dimension(
@@ -346,7 +367,7 @@ def main():
     print("\n" + "="*70)
     print("RECOMMENDATION")
     print("="*70)
-    print(f"Current latent space: {latent_dim}D (3 × {branch_dim}D branches)")
+    print(f"Current latent space: {latent_dim}D ({topo_dim}D + {values_dim}D + {pz_dim}D branches)")
     print(f"Estimated intrinsic dimension: {results['recommended_dim']}D")
 
     if results['recommended_dim'] < latent_dim:
@@ -357,8 +378,8 @@ def main():
 
     # Branch-specific recommendations
     print("\nBranch-specific analysis:")
-    for i, (branch_name, branch_res) in enumerate(branch_results.items()):
-        current_dim = branch_dim
+    for i, (branch_name, branch_res) in enumerate(zip(branch_names, branch_results.values())):
+        current_dim = branch_dims[i]
         recommended = branch_res['recommended_dim']
         if recommended < current_dim:
             print(f"  {branch_name}: {current_dim}D → {recommended}D (reduce by {current_dim - recommended})")

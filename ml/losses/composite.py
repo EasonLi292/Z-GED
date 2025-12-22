@@ -257,11 +257,14 @@ class SimplifiedCompositeLoss(nn.Module):
 
     Args:
         recon_weight: Weight for reconstruction loss
-        tf_weight: Weight for transfer function loss
+        tf_weight: Weight for transfer function loss (target/final value)
         kl_weight: Weight for KL divergence
         use_topo_curriculum: Enable curriculum learning for topology weight
         topo_curriculum_warmup_epochs: Epochs to anneal topology weight
         topo_curriculum_initial_multiplier: Initial multiplier for topology weight
+        use_tf_curriculum: Enable curriculum learning for transfer function weight
+        tf_curriculum_warmup_epochs: Epochs to increase tf weight from initial to target
+        tf_curriculum_initial_multiplier: Initial multiplier for tf weight (starts at tf_weight * multiplier)
     """
 
     def __init__(
@@ -271,13 +274,22 @@ class SimplifiedCompositeLoss(nn.Module):
         kl_weight: float = 0.05,
         use_topo_curriculum: bool = False,
         topo_curriculum_warmup_epochs: int = 20,
-        topo_curriculum_initial_multiplier: float = 3.0
+        topo_curriculum_initial_multiplier: float = 3.0,
+        use_tf_curriculum: bool = False,
+        tf_curriculum_warmup_epochs: int = 50,
+        tf_curriculum_initial_multiplier: float = 0.01
     ):
         super().__init__()
 
         self.recon_weight = recon_weight
-        self.tf_weight = tf_weight
+        self.tf_weight_target = tf_weight  # Target/final TF weight
         self.kl_weight = kl_weight
+
+        # TF curriculum settings
+        self.use_tf_curriculum = use_tf_curriculum
+        self.tf_curriculum_warmup_epochs = tf_curriculum_warmup_epochs
+        self.tf_curriculum_initial_multiplier = tf_curriculum_initial_multiplier
+        self.current_epoch = 0
 
         self.recon_loss = TemplateAwareReconstructionLoss(
             use_curriculum=use_topo_curriculum,
@@ -286,8 +298,23 @@ class SimplifiedCompositeLoss(nn.Module):
         )
         self.tf_loss = SimplifiedTransferFunctionLoss()
 
+    def get_tf_weight(self) -> float:
+        """Get current transfer function weight (with curriculum if enabled)."""
+        if not self.use_tf_curriculum:
+            return self.tf_weight_target
+
+        # Gradually increase tf_weight from (target * initial_multiplier) to target
+        warmup_progress = min(1.0, self.current_epoch / max(1, self.tf_curriculum_warmup_epochs))
+
+        # Start low, increase to target
+        initial_weight = self.tf_weight_target * self.tf_curriculum_initial_multiplier
+        current_weight = initial_weight + (self.tf_weight_target - initial_weight) * warmup_progress
+
+        return current_weight
+
     def set_epoch(self, epoch: int, total_epochs: int = None):
         """Update current epoch for curriculum scheduling."""
+        self.current_epoch = epoch
         self.recon_loss.set_epoch(epoch)
 
     def compute_kl_divergence(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
@@ -345,16 +372,20 @@ class SimplifiedCompositeLoss(nn.Module):
         # KL divergence
         loss_kl = self.compute_kl_divergence(mu, logvar)
 
+        # Get current transfer function weight (with curriculum if enabled)
+        current_tf_weight = self.get_tf_weight()
+
         # Total loss
         total_loss = (
             self.recon_weight * loss_recon +
-            self.tf_weight * loss_tf +
+            current_tf_weight * loss_tf +
             self.kl_weight * loss_kl
         )
 
         metrics = {
             'total_loss': total_loss.item(),
             'kl_loss': loss_kl.item(),
+            'tf_weight': current_tf_weight,  # Track current TF weight
             **metrics_recon,
             **metrics_tf
         }
