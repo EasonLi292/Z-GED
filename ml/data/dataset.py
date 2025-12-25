@@ -299,13 +299,16 @@ class CircuitDataset(Dataset):
         Returns:
             Dictionary with:
                 - graph: PyG Data object
-                - poles: Complex tensor of poles
-                - zeros: Complex tensor of zeros
+                - poles: Complex tensor of poles [num_poles, 2]
+                - zeros: Complex tensor of zeros [num_zeros, 2]
+                - num_poles: Number of poles (scalar)
+                - num_zeros: Number of zeros (scalar)
                 - gain: Scalar gain
                 - freq_response: [701, 2] magnitude and phase
                 - filter_type: One-hot [6]
                 - circuit_id: String ID
                 - ged_neighbors: (Optional) k-nearest indices
+                - idx: Dataset index
         """
         circuit = self.circuits[idx]
 
@@ -370,10 +373,16 @@ class CircuitDataset(Dataset):
         # Get GED neighbors if available
         ged_neighbors = self._get_ged_neighbors(idx)
 
+        # Add pole/zero counts for variable-length decoder
+        num_poles = len(poles)
+        num_zeros = len(zeros)
+
         return {
             'graph': graph,
             'poles': poles_tensor,
             'zeros': zeros_tensor,
+            'num_poles': torch.tensor(num_poles, dtype=torch.long),
+            'num_zeros': torch.tensor(num_zeros, dtype=torch.long),
             'gain': gain_tensor,
             'freq_response': freq_response,
             'filter_type': filter_type,
@@ -503,6 +512,8 @@ def collate_circuit_batch(batch: List[Dict]) -> Dict[str, any]:
     gains = torch.stack([item['gain'] for item in batch])
     freq_responses = torch.stack([item['freq_response'] for item in batch])
     filter_types = torch.stack([item['filter_type'] for item in batch])
+    num_poles = torch.stack([item['num_poles'] for item in batch])
+    num_zeros = torch.stack([item['num_zeros'] for item in batch])
 
     # Keep circuit IDs as list
     circuit_ids = [item['circuit_id'] for item in batch]
@@ -519,6 +530,8 @@ def collate_circuit_batch(batch: List[Dict]) -> Dict[str, any]:
         'graph': batched_graph,
         'poles': poles,
         'zeros': zeros,
+        'num_poles': num_poles,
+        'num_zeros': num_zeros,
         'gain': gains,
         'freq_response': freq_responses,
         'filter_type': filter_types,

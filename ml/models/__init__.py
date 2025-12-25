@@ -3,6 +3,7 @@
 from .gnn_layers import ImpedanceConv, ImpedanceGNN, GlobalPooling, DeepSets
 from .encoder import HierarchicalEncoder
 from .decoder import HybridDecoder, TemplateDecoder, CIRCUIT_TEMPLATES, FILTER_TYPES
+from .variable_decoder import VariableLengthDecoder
 
 __all__ = [
     'ImpedanceConv',
@@ -12,6 +13,7 @@ __all__ = [
     'HierarchicalEncoder',
     'HybridDecoder',
     'TemplateDecoder',
+    'VariableLengthDecoder',
     'CIRCUIT_TEMPLATES',
     'FILTER_TYPES'
 ]

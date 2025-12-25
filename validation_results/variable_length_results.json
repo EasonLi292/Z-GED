@@ -1,0 +1,64 @@
+{
+  "checkpoint": "checkpoints/variable_length/20251222_102121/best.pt",
+  "num_samples": 12,
+  "overall": {
+    "pole_count_accuracy": 0.8333333333333334,
+    "zero_count_accuracy": 1.0,
+    "topology_accuracy": 1.0,
+    "tf_inference_accuracy": 0.8333333333333334
+  },
+  "per_filter_type": {
+    "high_pass": {
+      "count": 3,
+      "pole_accuracy": 0.3333333333333333,
+      "zero_accuracy": 1.0,
+      "tf_accuracy": 0.3333333333333333
+    },
+    "band_pass": {
+      "count": 2,
+      "pole_accuracy": 1.0,
+      "zero_accuracy": 1.0,
+      "tf_accuracy": 1.0
+    },
+    "band_stop": {
+      "count": 5,
+      "pole_accuracy": 1.0,
+      "zero_accuracy": 1.0,
+      "tf_accuracy": 1.0
+    },
+    "rlc_series": {
+      "count": 1,
+      "pole_accuracy": 1.0,
+      "zero_accuracy": 1.0,
+      "tf_accuracy": 1.0
+    },
+    "rlc_parallel": {
+      "count": 1,
+      "pole_accuracy": 1.0,
+      "zero_accuracy": 1.0,
+      "tf_accuracy": 1.0
+    }
+  },
+  "pole_count_distribution": {
+    "target": {
+      "2": 9,
+      "1": 3
+    },
+    "predicted": {
+      "2": 11,
+      "1": 1
+    }
+  },
+  "zero_count_distribution": {
+    "target": {
+      "2": 5,
+      "1": 5,
+      "0": 2
+    },
+    "predicted": {
+      "2": 5,
+      "1": 5,
+      "0": 2
+    }
+  }
+}

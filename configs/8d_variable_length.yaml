@@ -1,0 +1,89 @@
+model:
+  latent_dim: 8
+  topo_latent_dim: 2
+  values_latent_dim: 2
+  pz_latent_dim: 4
+  gnn_hidden_dim: 64
+  gnn_num_layers: 3
+  decoder_hidden_dim: 64
+  dropout: 0.1
+
+  # Graph structure
+  node_feature_dim: 4
+  edge_feature_dim: 7
+  max_nodes: 5
+  max_edges: 10
+
+  # Variable-length decoder specific
+  max_poles: 4
+  max_zeros: 4
+
+loss:
+  # Component weights
+  recon_weight: 1.0
+  kl_weight: 0.1
+  topo_weight: 1.0
+  values_weight: 0.5
+
+  # Transfer function weights - using curriculum
+  # Initial (structure-focused): pole_count=5.0, pole_value=0.1
+  # Final (balanced): pole_count=1.0, pole_value=1.0
+  use_pz_weight_curriculum: true
+  pz_weight_warmup_epochs: 50
+
+  # Initial PZ weights (will be scheduled by curriculum)
+  pole_count_weight: 5.0
+  zero_count_weight: 5.0
+  pole_value_weight: 0.1
+  zero_value_weight: 0.1
+
+training:
+  batch_size: 4
+  epochs: 200
+  learning_rate: 0.0005
+  weight_decay: 0.00001
+
+  # Teacher forcing
+  use_teacher_forcing: true
+
+  # Scheduler
+  use_scheduler: true
+  scheduler_type: cosine
+  scheduler_patience: 10
+  scheduler_factor: 0.5
+
+  # Validation
+  val_interval: 1
+  save_interval: 10
+
+  # Paths
+  checkpoint_dir: checkpoints/variable_length
+  log_dir: logs
+
+  # Device
+  device: mps
+
+  # Reproducibility
+  seed: 42
+
+regularization:
+  max_grad_norm: 1.0
+
+data:
+  dataset_path: rlc_dataset/filter_dataset.pkl
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  normalize: true
+  log_scale: true
+  split_seed: 42
+
+hardware:
+  num_workers: 0
+  pin_memory: false
+
+logging:
+  log_dir: logs
+  checkpoint_dir: checkpoints/variable_length
+  experiment_name: 8d_variable_length
+  log_interval: 10
