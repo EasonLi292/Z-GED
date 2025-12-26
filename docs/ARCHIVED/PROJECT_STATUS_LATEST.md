@@ -1,3 +1,5 @@
+**📦 ARCHIVED - Historical Reference**
+
 # GraphVAE Project Status - Latest
 
 **Last Updated:** 2025-12-20

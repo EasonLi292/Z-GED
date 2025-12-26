@@ -1,3 +1,5 @@
+**📦 ARCHIVED - Historical Reference**
+
 # Circuit Generation Implementation
 
 ## Overview

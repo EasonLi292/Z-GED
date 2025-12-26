@@ -1,3 +1,5 @@
+**✅ CURRENT - Variable-Length Decoder Series**
+
 # Behavioral Specification-Driven Circuit Generation
 
 **Date**: December 25, 2024

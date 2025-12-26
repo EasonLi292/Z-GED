@@ -1,3 +1,5 @@
+**✅ CURRENT - Quick Start Guide**
+
 # Variable-Length Decoder for Circuit Generation
 
 A breakthrough in learned circuit synthesis using hierarchical VAE with variable-length pole/zero prediction.

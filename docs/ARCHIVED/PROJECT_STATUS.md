@@ -1,3 +1,5 @@
+**📦 ARCHIVED - Historical Reference**
+
 # GraphVAE for Circuit Latent Space Discovery - Project Status
 
 **Last Updated**: December 19, 2025

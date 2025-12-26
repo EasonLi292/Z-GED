@@ -1,3 +1,5 @@
+**📦 ARCHIVED - Historical Reference**
+
 # Generation Failure: Root Cause Analysis
 
 ## The Mystery

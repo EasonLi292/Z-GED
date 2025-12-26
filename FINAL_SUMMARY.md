@@ -1,3 +1,5 @@
+**✅ CURRENT - Master Project Documentation**
+
 # Variable-Length Decoder: Final Project Summary
 
 **Date**: December 25, 2024
