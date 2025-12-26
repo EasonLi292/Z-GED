@@ -167,7 +167,8 @@ def prepare_batch_for_diffusion(batch, device):
             # Get indices of nodes in this graph
             node_indices = torch.where(node_mask)[0]
             # Find edges where source node is in this graph
-            edge_mask = torch.isin(batch_graph.edge_index[0], node_indices)
+            # Use broadcasting instead of torch.isin for MPS compatibility
+            edge_mask = (batch_graph.edge_index[0].unsqueeze(1) == node_indices.unsqueeze(0)).any(dim=1)
             if edge_mask.any():
                 # Use mean edge attributes
                 edge_values[b, 0, 1] = batch_graph.edge_attr[edge_mask].mean(dim=0)
