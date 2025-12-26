@@ -233,29 +233,6 @@ class CircuitDataset:
 
 ---
 
-## Expected Improvements
-
-### Before (Fixed 2 poles, 2 zeros)
-
-```
-Circuit 0 (low_pass, 1 pole, 0 zeros):
-  Predicted: 2 poles, 2 zeros ❌
-  Structure match: 0%
-  Value match: Poor (trying to fit 1 pole into 2 predictions)
-```
-
-### After (Variable-length)
-
-```
-Circuit 0 (low_pass, 1 pole, 0 zeros):
-  Predicted count: 1 pole, 0 zeros ✅
-  Predicted values: [[-1.75, 0.01]] ≈ GT [[-1.788, 0.0]] ✅
-  Structure match: 100%
-  Value match: Good (direct 1-to-1 mapping)
-```
-
----
-
 ## Training Strategy
 
 ### Phase 1: Count Prediction Warmup
@@ -283,43 +260,6 @@ loss_weights:
 ```
 
 **Rationale**: Once structure is correct, refine values
-
----
-
-## Alternative: Filter-Type-Aware Counts
-
-Since we know filter type during generation (100% topology accuracy), we could use that:
-
-```python
-# Filter type → expected pole/zero structure
-FILTER_STRUCTURES = {
-    'low_pass':     {'poles': (1, 2), 'zeros': (0, 1)},  # min, max
-    'high_pass':    {'poles': (1, 2), 'zeros': (1, 2)},
-    'band_pass':    {'poles': (2, 2), 'zeros': (0, 2)},
-    'band_stop':    {'poles': (2, 4), 'zeros': (2, 4)},
-    'rlc_series':   {'poles': (2, 2), 'zeros': (0, 0)},
-    'rlc_parallel': {'poles': (2, 2), 'zeros': (0, 0)},
-}
-
-def decode_with_filter_type(z, filter_type):
-    # Know the valid range for this filter
-    pole_range = FILTER_STRUCTURES[filter_type]['poles']
-
-    # Only predict within valid range
-    num_poles = predict_count(z_pz, min=pole_range[0], max=pole_range[1])
-    poles = predict_poles(z_pz, count=num_poles)
-
-    return poles
-```
-
-**Pros**:
-- More constrained → easier to learn
-- Uses known filter characteristics
-- Guaranteed valid structure
-
-**Cons**:
-- Couples pole/zero prediction to topology
-- Less flexible
 
 ---
 
@@ -424,14 +364,3 @@ poles = outputs['poles_all'][:, :num_poles]  # Use variable count
 
 The key improvement: **Model can now match the structure**, not just approximate values.
 
----
-
-## Why This Will Work
-
-1. **Addresses root cause**: Variable-length outputs now possible
-2. **Adds information**: Count encoded in latent space
-3. **Uses correct structure**: Loss only computed on valid poles/zeros
-4. **Maintains topology**: Topology branch unchanged
-5. **Backward compatible**: Can fall back to old behavior if needed
-
-This is the **proper fix** for the generation failure!

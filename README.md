@@ -61,23 +61,6 @@ python scripts/test_reconstruction.py \
 | **Cutoff match** | 100% | Perfect |
 | **Spec deviation** | 5-10% | Precise |
 
-**Improvement over baseline**: ∞ (0% → 83-100%)
-
----
-
-## Key Innovation
-
-### Before (Fixed-Length Decoder)
-- Always predicted 2 poles, 2 zeros (hardcoded)
-- 0% pole/zero count accuracy
-- Broken circuit generation
-
-### After (Variable-Length Decoder)
-- Predicts 0-4 poles/zeros (variable!)
-- 83-100% accuracy
-- Functional circuit generation
-- 100% behavioral specification matching
-
 ---
 
 ## Architecture
@@ -208,17 +191,3 @@ Z-GED/
 - 100% specification accuracy
 - Supports automated design workflows
 
----
-
-## Citation
-
-```
-Variable-Length Decoder for Circuit Generation
-Architecture: 8D Hierarchical VAE
-Performance: 83-100% accuracy, 100% specification matching
-Completion: December 25, 2024
-```
-
----
-
-**From 0% to 100% in circuit generation!**

@@ -112,45 +112,6 @@ Training:
 
 ---
 
-## Comparison: Fixed vs Variable Decoder
-
-### Before (Fixed-Length Decoder)
-
-```
-Problem:
-- Decoder ALWAYS outputs 2 poles, 2 zeros
-- Training data has 0-4 poles/zeros (variable)
-- Model learns "average" that matches NOTHING
-
-Results:
-- Topology: 100% ✅
-- Pole count: 0% ❌
-- Zero count: 0% ❌
-- Transfer function inference: 0% ❌
-```
-
-### After (Variable-Length Decoder)
-
-```
-Solution:
-- Predicts count (0-4) with classification heads
-- Predicts values (up to 4) with regression heads
-- Masks invalid predictions using predicted count
-
-Results (epoch 30):
-- Topology: 100% ✅ (maintained)
-- Pole count: 75% ✅ (improving)
-- Zero count: 100% ✅ (solved!)
-- Transfer function inference: TBD (after training)
-```
-
-**ACTUAL final results (epoch 200)**:
-- Pole count accuracy: **83.33%** validation, **95.83%** training ✅
-- Zero count accuracy: **100%** validation and training ✅
-- Transfer function inference: **TBD** (validation script needed)
-
----
-
 ## Architecture Details
 
 ### Count Prediction (NEW)

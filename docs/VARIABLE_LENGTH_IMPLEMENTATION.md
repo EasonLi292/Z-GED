@@ -11,38 +11,6 @@ Successfully implemented variable-length pole/zero decoder to fix the 0% transfe
 
 ---
 
-## The Problem We Fixed
-
-### Before (Fixed-Length Decoder)
-
-```python
-# Old decoder: ALWAYS outputs 2 poles, 2 zeros
-poles = decoder_output.view(batch_size, 2, 2)  # Hardcoded!
-zeros = decoder_output.view(batch_size, 2, 2)
-
-# Training data: Variable lengths
-Circuit 0: 1 pole,  0 zeros
-Circuit 1: 2 poles, 1 zero
-Circuit 2: 1 pole,  0 zeros
-
-# Result: Model outputs "average" that matches nothing
-# Transfer function inference: 0% accuracy ❌
-```
-
-### After (Variable-Length Decoder)
-
-```python
-# New decoder: Predicts count, then outputs that many
-num_poles = count_head(z_pz).argmax()  # Predicts: 0, 1, 2, 3, or 4
-poles_all = pole_decoder(z_pz).view(B, 4, 2)  # Predict up to 4
-poles_valid = poles_all[:, :num_poles]  # Use only predicted count
-
-# Result: Model can match actual structure
-# Transfer function inference: Expected 60-90% accuracy ✅
-```
-
----
-
 ## What Was Implemented
 
 ### 1. Variable-Length Decoder
@@ -290,39 +258,6 @@ for batch in dataloader:
 
 ---
 
-## Expected Results
-
-### Quantitative Improvements
-
-| Metric | Before (Fixed) | After (Variable) | Improvement |
-|--------|----------------|------------------|-------------|
-| **Pole Count Accuracy** | 0% | **90%+** | ∞ |
-| **Zero Count Accuracy** | 0% | **90%+** | ∞ |
-| **Pole Value MAE** | 0.69 | **< 0.2** | 70% |
-| **Zero Value MAE** | N/A | **< 0.3** | - |
-| **TF Inference Accuracy** | 0% | **60-80%** | ∞ |
-| **Topology Accuracy** | 100% | **100%** | Maintained |
-
-### Qualitative Improvements
-
-**Before**:
-```
-Generated low-pass filter:
-  Predicted: 2 complex poles, 2 complex zeros
-  Inferred type from TF: band_stop ❌
-  Accuracy: 0%
-```
-
-**After**:
-```
-Generated low-pass filter:
-  Predicted: 1 real pole, 0 zeros ✅
-  Inferred type from TF: low_pass ✅
-  Accuracy: 100%
-```
-
----
-
 ## Files Created/Modified
 
 ### Created
@@ -448,21 +383,6 @@ LOW_PASS:
 
 ---
 
-## Comparison: Fixed vs Variable
-
-| Aspect | Fixed-Length | Variable-Length |
-|--------|--------------|-----------------|
-| **Architecture** | 2 poles (hardcoded) | 0-4 poles (predicted) |
-| **Count Prediction** | No | Yes (classification head) |
-| **Value Prediction** | 2 always | Up to 4, masked by count |
-| **Loss on Invalid** | Yes (problematic) | No (masked out) |
-| **Structure Match** | 0% | **90%+** |
-| **TF Inference** | 0% | **60-80%** |
-| **Parameters** | ~500 | ~600 (+20%, minimal) |
-| **Training Time** | Same | ~Same |
-
----
-
 ## Success Criteria
 
 ### Must Have (Core Functionality)
@@ -486,65 +406,20 @@ LOW_PASS:
 
 ---
 
-## Backward Compatibility
-
-### Old Models Still Work
-
-```python
-# Old decoder (HybridDecoder) - still functional
-from ml.models import HybridDecoder
-
-decoder_old = HybridDecoder(...)
-outputs = decoder_old(z)
-# Works as before - generates circuits with fixed 2 poles/zeros
-```
-
-### New Models Use Variable-Length
-
-```python
-# New decoder (VariableLengthDecoder)
-from ml.models import VariableLengthDecoder
-
-decoder_new = VariableLengthDecoder(...)
-outputs = decoder_new(z)
-# Generates circuits with variable poles/zeros
-```
-
-### Side-by-Side Comparison
-
-You can train both and compare:
-```bash
-# Old model
-python scripts/train.py --config configs/8d_conservative.yaml
-
-# New model
-python scripts/train_variable_length.py --config configs/8d_variable_length.yaml
-
-# Compare results
-python scripts/compare_models.py \
-    --model1 checkpoints/old/best.pt \
-    --model2 checkpoints/new/best.pt
-```
-
----
-
 ## Summary
 
-**Problem**: Fixed decoder (2 poles, 2 zeros) couldn't match variable training data (0-4 poles/zeros) → 0% TF accuracy
+Variable-length decoder implementation that predicts variable pole/zero counts (0-4) and their values.
 
-**Solution**: Variable-length decoder that:
-1. Predicts count (0-4) with classification heads
-2. Predicts values (up to 4) with value heads
-3. Masks invalid predictions based on count
-4. Trains with count-aware loss function
+**Key components**:
+1. Count prediction with classification heads
+2. Value prediction with value heads (up to 4 poles/zeros)
+3. Validity masking based on predicted count
+4. Count-aware loss function
 
-**Status**: ✅ **TRAINING COMPLETE - SUCCESS!**
+**Status**: ✅ **COMPLETE**
 
 **Results** (200 epochs, Dec 22 2024):
-- Pole count accuracy: **0% → 83.33%** (val), **95.83%** (train) 🚀
-- Zero count accuracy: **0% → 100%** (perfect!) 🚀
-- Transfer function structure prediction: **SOLVED** ✅
+- Pole count accuracy: **83.33%** (val), **95.83%** (train)
+- Zero count accuracy: **100%** (val and train)
+- Transfer function structure prediction: Working
 - Best checkpoint: `checkpoints/variable_length/20251222_102121/best.pt`
-
-**Expected Impact**: Transfer function inference accuracy: **0% → 60-80%** 🚀
-**Next**: Validate transfer function inference and test circuit generation!
