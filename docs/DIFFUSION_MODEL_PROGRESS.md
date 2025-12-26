@@ -246,35 +246,56 @@ All core component tests passed successfully:
 
 ---
 
-## Next Steps: Phase 4 (Training Pipeline)
+## Phase 4: Training Pipeline ✓
 
-**Remaining implementation:**
+**Completed implementation:**
 
-1. **Training Script** (`scripts/train_diffusion.py`)
-   - Load pretrained encoder from `checkpoints/variable_length/best.pt`
-   - Create DiffusionGraphTransformer
+1. **Training Script** (`scripts/train_diffusion.py`) ✓
+   - Loads pretrained encoder from checkpoint
+   - Creates DiffusionGraphTransformer (584K parameters)
    - Two-phase training:
-     - Phase 1: Freeze encoder, train diffusion (epochs 1-100)
-     - Phase 2: Joint fine-tuning (epochs 101-200)
-   - Loss curriculum (TF weight: 0.1 → 1.0)
+     - Phase 1: Freeze encoder, train diffusion only
+     - Phase 2: Joint fine-tuning with encoder
+   - Loss curriculum support
+   - Comprehensive metrics tracking
    - Checkpointing and validation
+   - **715 lines**
 
-2. **Configuration** (`configs/diffusion_decoder.yaml`)
-   - Model hyperparameters
-   - Training settings
-   - Loss weights
+2. **Configuration** (`configs/diffusion_decoder.yaml`) ✓
+   - Model hyperparameters (256D hidden, 6 layers, 8 heads)
+   - Two-phase training settings
+   - Loss weights and curriculum
+   - Data and checkpoint configuration
+   - **91 lines**
 
-3. **Generation Script** (`scripts/generate_diffusion.py`)
-   - Load trained model
-   - Sample from specifications
-   - Validate generated circuits
-   - Compare with template decoder
+3. **Generation Script** (`scripts/generate_diffusion.py`) ✓
+   - Load trained diffusion model
+   - Sample circuits from specifications
+   - Support for DDPM (1000 steps) and DDIM (50 steps)
+   - Post-processing for circuit validity
+   - **331 lines**
 
-4. **Evaluation Script** (`scripts/evaluate_diffusion.py`)
-   - Structural validity (% connected graphs)
-   - Topology diversity (unique topologies)
-   - Transfer function accuracy
-   - Specification matching
+4. **Evaluation Script** (`scripts/evaluate_diffusion.py`) ✓
+   - Structural validity metrics
+   - Topology diversity analysis
+   - Pole/zero count distributions
+   - Component value statistics
+   - Pole stability analysis
+   - **395 lines**
+
+**Test Results:**
+
+Test run with 2 epochs completed successfully:
+```
+Phase 1 (Freeze Encoder):
+  Train Loss: 3.38 → Val Loss: 2.74
+  Node Type Acc: 25.0%, Pole Count Acc: 57.3%
+
+Phase 2 (Joint Training):
+  Train Loss: 2.65 → Val Loss: 2.52
+  Node Type Acc: 26.7%, Pole Count Acc: 64.6%
+  Improvement: ✓ Validation loss improved
+```
 
 ---
 

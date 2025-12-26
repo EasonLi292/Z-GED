@@ -136,23 +136,29 @@ class CircuitForwardDiffusion:
         # 1. Add noise to node types (discrete categorical)
         # ==================================================================
 
-        clean_node_types = clean_circuit['node_types']  # [batch, max_nodes, num_node_types]
+        clean_node_types = clean_circuit['node_types']  # [batch, max_nodes] - integer labels
 
-        # For each node in each graph
-        noisy_node_types_list = []
-        for b in range(batch_size):
-            noisy_nodes_b = []
-            for n in range(self.max_nodes):
-                node_one_hot = clean_node_types[b, n].unsqueeze(0)  # [1, num_node_types]
-                t_b = t[b].unsqueeze(0)  # [1]
+        # Convert to one-hot encoding
+        clean_node_types_onehot = F.one_hot(
+            clean_node_types, num_classes=self.num_node_types
+        ).float()  # [batch, max_nodes, num_node_types]
 
-                # Add discrete noise
-                noisy_node = add_noise_discrete(node_one_hot, t_b, self.Q_bar_node_types)
-                noisy_nodes_b.append(noisy_node.squeeze(0))
+        # Flatten to [batch * max_nodes, num_node_types] for batched processing
+        batch_size_orig = clean_node_types_onehot.shape[0]
+        node_types_flat = clean_node_types_onehot.reshape(-1, self.num_node_types)
 
-            noisy_node_types_list.append(torch.stack(noisy_nodes_b))
+        # Expand timesteps for each node
+        t_expanded = t.unsqueeze(1).expand(-1, self.max_nodes).reshape(-1)  # [batch * max_nodes]
 
-        noisy_circuit['node_types'] = torch.stack(noisy_node_types_list)  # [batch, max_nodes, num_node_types]
+        # Add discrete noise (batched)
+        noisy_node_types_flat = add_noise_discrete(
+            node_types_flat, t_expanded, self.Q_bar_node_types
+        )  # [batch * max_nodes, num_node_types]
+
+        # Reshape back
+        noisy_circuit['node_types'] = noisy_node_types_flat.reshape(
+            batch_size_orig, self.max_nodes, self.num_node_types
+        )
 
         # ==================================================================
         # 2. Add noise to edge values (continuous)

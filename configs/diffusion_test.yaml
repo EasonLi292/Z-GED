@@ -1,0 +1,71 @@
+# Test configuration for quick validation of diffusion training
+
+model:
+  encoder:
+    node_feature_dim: 4
+    edge_feature_dim: 7
+    gnn_hidden_dim: 64
+    gnn_num_layers: 3
+    latent_dim: 8
+    topo_latent_dim: 2
+    values_latent_dim: 2
+    pz_latent_dim: 4
+    dropout: 0.1
+
+  decoder:
+    hidden_dim: 128              # Smaller for testing
+    num_layers: 2                # Fewer layers
+    num_heads: 4                 # Fewer heads
+    latent_dim: 8
+    conditions_dim: 2
+    max_nodes: 5
+    max_poles: 4
+    max_zeros: 4
+    dropout: 0.1
+    timesteps: 100               # Fewer timesteps for testing
+
+training:
+  phase1_epochs: 1               # Just 1 epoch for testing
+  phase2_epochs: 1
+  total_epochs: 2
+
+  batch_size: 2                  # Small batch size
+  learning_rate_phase1: 1.0e-4
+  learning_rate_phase2: 5.0e-5
+  weight_decay: 1.0e-5
+  grad_clip: 1.0
+
+  tf_weight_start: 0.1
+  tf_weight_end: 1.0
+  tf_weight_warmup_epochs: 1
+
+loss:
+  node_type_weight: 1.0
+  edge_exist_weight: 1.0
+  edge_value_weight: 1.0
+  pole_count_weight: 1.0
+  zero_count_weight: 1.0
+  pole_value_weight: 1.0
+  zero_value_weight: 1.0
+  tf_weight: 0.5
+  structure_weight: 0.1
+  use_time_weighting: true
+
+data:
+  dataset_path: 'rlc_dataset/filter_dataset.pkl'
+  train_split: 0.8
+
+checkpoint:
+  pretrained_encoder: 'checkpoints/variable_length/20251222_102121/best.pt'
+  save_dir: 'checkpoints/diffusion_test'
+  save_frequency: 1
+  keep_best: true
+
+validation:
+  frequency: 1
+  num_samples: 2
+
+logging:
+  log_frequency: 10
+  tensorboard: false
+  verbose: true
