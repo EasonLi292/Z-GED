@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from typing import Dict, Optional, List
 from torch_geometric.data import Data
 
-from .decoder import FILTER_TYPES, CIRCUIT_TEMPLATES
+from .constants import FILTER_TYPES, CIRCUIT_TEMPLATES
 
 
 class VariableLengthDecoder(nn.Module):

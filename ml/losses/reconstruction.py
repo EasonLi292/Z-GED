@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, Tuple, List
-from ..models.decoder import CIRCUIT_TEMPLATES, FILTER_TYPES
+from ..models.constants import CIRCUIT_TEMPLATES, FILTER_TYPES
 
 
 class ReconstructionLoss(nn.Module):
