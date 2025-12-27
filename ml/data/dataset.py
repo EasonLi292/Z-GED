@@ -539,3 +539,128 @@ def collate_circuit_batch(batch: List[Dict]) -> Dict[str, any]:
         'ged_neighbors': ged_neighbors,
         'idx': indices
     }
+
+
+def collate_graphgpt_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
+    """
+    Custom collate function for GraphGPT training.
+
+    Converts PyG Data objects into the format expected by GraphGPT decoder:
+    - Node types as integers [batch, max_nodes]
+    - Edge existence as adjacency matrix [batch, max_nodes, max_nodes]
+    - Edge values as matrix [batch, max_nodes, max_nodes, 7]
+    - Pole/zero counts and values as tensors
+
+    Args:
+        batch: List of dataset items
+
+    Returns:
+        Dictionary with GraphGPT-compatible format
+    """
+    from torch_geometric.data import Batch
+
+    batch_size = len(batch)
+
+    # Always use fixed max_nodes (for GraphGPT decoder)
+    # The decoder expects exactly 5 nodes
+    max_nodes = 5
+
+    # Initialize tensors
+    node_features_list = []
+    edge_index_list = []
+    edge_attr_list = []
+    batch_idx_list = []
+
+    node_types = torch.zeros(batch_size, max_nodes, dtype=torch.long)
+    edge_existence = torch.zeros(batch_size, max_nodes, max_nodes, dtype=torch.float32)
+    edge_values = torch.zeros(batch_size, max_nodes, max_nodes, 7, dtype=torch.float32)
+
+    # Extract specifications (cutoff frequency, Q-factor) from filter_type
+    # For now, use dummy values - should be extracted from actual circuit specs
+    specifications = torch.zeros(batch_size, 2, dtype=torch.float32)
+
+    for b, item in enumerate(batch):
+        graph = item['graph']
+        num_nodes = graph.x.shape[0]
+
+        # Convert node features (one-hot) to node types
+        # graph.x is [num_nodes, 4] one-hot: [is_GND, is_VIN, is_VOUT, is_INTERNAL]
+        node_type_indices = torch.argmax(graph.x, dim=1)  # [num_nodes]
+        node_types[b, :num_nodes] = node_type_indices
+        # Pad with MASK token (index 4)
+        node_types[b, num_nodes:] = 4
+
+        # Store for encoder (PyG format)
+        node_features_list.append(graph.x)
+        edge_index_list.append(graph.edge_index)
+        edge_attr_list.append(graph.edge_attr)
+        batch_idx_list.extend([b] * num_nodes)
+
+        # Convert edge_index to adjacency matrix
+        # graph.edge_index is [2, num_edges]
+        # graph.edge_attr is [num_edges, 7]: [log(C), log(G), log(L_inv), has_C, has_R, has_L, is_parallel]
+        for edge_idx in range(graph.edge_index.shape[1]):
+            src = graph.edge_index[0, edge_idx].item()
+            dst = graph.edge_index[1, edge_idx].item()
+
+            edge_existence[b, src, dst] = 1.0
+            edge_values[b, src, dst] = graph.edge_attr[edge_idx]
+
+    # Batch graphs for encoder (PyG format)
+    graphs = [item['graph'] for item in batch]
+    batched_graph = Batch.from_data_list(graphs)
+    batch_idx = torch.tensor(batch_idx_list, dtype=torch.long)
+
+    # Keep poles and zeros as lists for encoder
+    poles_list = [item['poles'] for item in batch]
+    zeros_list = [item['zeros'] for item in batch]
+
+    # Also create padded versions for decoder
+    # Use fixed max values from decoder config (max_poles=4, max_zeros=4)
+    max_poles = 4
+    max_zeros = 4
+
+    pole_count = torch.stack([item['num_poles'] for item in batch])
+    zero_count = torch.stack([item['num_zeros'] for item in batch])
+
+    pole_values = torch.zeros(batch_size, max_poles, 2, dtype=torch.float32)
+    zero_values = torch.zeros(batch_size, max_zeros, 2, dtype=torch.float32)
+
+    for b, item in enumerate(batch):
+        n_poles = item['num_poles'].item()
+        n_zeros = item['num_zeros'].item()
+
+        if n_poles > 0:
+            pole_values[b, :n_poles] = item['poles']
+        if n_zeros > 0:
+            zero_values[b, :n_zeros] = item['zeros']
+
+    # Extract specifications from filter_type
+    # Use dummy values for now: cutoff=1000Hz, Q=0.707
+    # These should ideally come from the circuit's actual specifications
+    for b, item in enumerate(batch):
+        # Normalize: log(cutoff)/4.0, log(Q)/2.0
+        specifications[b, 0] = np.log10(1000.0) / 4.0  # Normalized cutoff
+        specifications[b, 1] = np.log10(0.707) / 2.0   # Normalized Q
+
+    return {
+        # For encoder (PyG format)
+        'node_features': batched_graph.x,
+        'edge_index': batched_graph.edge_index,
+        'edge_attr': batched_graph.edge_attr,
+        'batch_idx': batched_graph.batch,
+        'poles_list': poles_list,
+        'zeros_list': zeros_list,
+
+        # For decoder (GraphGPT format)
+        'node_types': node_types,
+        'edge_existence': edge_existence,
+        'edge_values': edge_values,
+        'specifications': specifications,
+
+        # For loss computation
+        'pole_count': pole_count,
+        'zero_count': zero_count,
+        'pole_values': pole_values,
+        'zero_values': zero_values,
+    }
