@@ -2,10 +2,14 @@
 
 from .gnn_layers import ImpedanceConv, ImpedanceGNN, GlobalPooling, DeepSets
 from .encoder import HierarchicalEncoder
-from .variable_decoder import VariableLengthDecoder
 from .conditional_encoder import ConditionalHierarchicalEncoder
-from .conditional_decoder import ConditionalVariableLengthDecoder
 from .constants import FILTER_TYPES, CIRCUIT_TEMPLATES
+
+# New latent-guided models (current approach)
+from .graphgpt_decoder_latent_guided import LatentGuidedGraphGPTDecoder
+from .latent_guided_decoder import LatentDecomposer, LatentGuidedEdgeDecoder
+
+# Note: ConditionalVariableLengthDecoder removed (old approach, depends on deleted variable_decoder)
 
 __all__ = [
     'ImpedanceConv',
@@ -13,9 +17,10 @@ __all__ = [
     'GlobalPooling',
     'DeepSets',
     'HierarchicalEncoder',
-    'VariableLengthDecoder',
     'ConditionalHierarchicalEncoder',
-    'ConditionalVariableLengthDecoder',
     'FILTER_TYPES',
-    'CIRCUIT_TEMPLATES'
+    'CIRCUIT_TEMPLATES',
+    'LatentGuidedGraphGPTDecoder',
+    'LatentDecomposer',
+    'LatentGuidedEdgeDecoder'
 ]

@@ -84,28 +84,87 @@ class CircuitDataset(Dataset):
             self._compute_normalization_stats()
 
     def _compute_normalization_stats(self):
-        """Compute mean/std for feature normalization."""
+        """
+        Compute mean/std for feature normalization with practical range clipping.
+
+        This implements Option 3 fix for component value normalization:
+        1. Clip to practical ranges BEFORE logging
+        2. Use proper z-score normalization (mean=0, std=1)
+        """
         # Collect all impedance features
-        all_impedances = []
+        all_C = []
+        all_G = []
+        all_L_inv = []
 
         for circuit in self.circuits:
             for neighbors in circuit['graph_adj']['adjacency']:
                 for edge in neighbors:
-                    imp_den = edge['impedance_den']
-                    all_impedances.append(imp_den)
+                    imp_den = edge['impedance_den']  # [C, G, L_inv]
+                    C, G, L_inv = imp_den
+                    all_C.append(C)
+                    all_G.append(G)
+                    all_L_inv.append(L_inv)
 
-        all_impedances = np.array(all_impedances)  # Shape: [N, 3]
+        all_C = np.array(all_C)
+        all_G = np.array(all_G)
+        all_L_inv = np.array(all_L_inv)
 
         if self.log_scale_impedance:
-            # Add small epsilon to avoid log(0)
-            all_impedances = np.log(all_impedances + 1e-15)
+            # Option 3: Clip to practical ranges BEFORE logging
+            # This prevents extreme values from polluting the normalization
 
-        self.impedance_mean = torch.tensor(all_impedances.mean(axis=0), dtype=torch.float32)
-        self.impedance_std = torch.tensor(all_impedances.std(axis=0) + 1e-8, dtype=torch.float32)
+            # Convert G and L_inv back to R and L for clipping
+            # (avoiding division by zero with epsilon)
+            all_R = 1.0 / (all_G + 1e-15)
+            all_L = 1.0 / (all_L_inv + 1e-15)
 
-        print(f"Impedance normalization:")
-        print(f"  Mean: {self.impedance_mean.numpy()}")
-        print(f"  Std:  {self.impedance_std.numpy()}")
+            # Clip to practical component ranges
+            # These ranges are based on common off-the-shelf components
+            R_practical = np.clip(all_R, 10, 100e3)        # 10Ω to 100kΩ
+            L_practical = np.clip(all_L, 1e-9, 10e-3)      # 1nH to 10mH
+            C_practical = np.clip(all_C, 1e-12, 1e-6)      # 1pF to 1μF
+
+            # Convert back to G and L_inv
+            G_practical = 1.0 / R_practical
+            L_inv_practical = 1.0 / L_practical
+
+            # Log transform
+            log_C = np.log(C_practical + 1e-15)
+            log_G = np.log(G_practical + 1e-15)
+            log_L_inv = np.log(L_inv_practical + 1e-15)
+
+            # Z-score normalization (centered at 0, std=1)
+            # This is the key fix - previous normalization didn't center at 0
+            C_mean = log_C.mean()
+            C_std = log_C.std() + 1e-8
+            G_mean = log_G.mean()
+            G_std = log_G.std() + 1e-8
+            L_inv_mean = log_L_inv.mean()
+            L_inv_std = log_L_inv.std() + 1e-8
+
+            # Store as tensors
+            self.impedance_mean = torch.tensor([C_mean, G_mean, L_inv_mean], dtype=torch.float32)
+            self.impedance_std = torch.tensor([C_std, G_std, L_inv_std], dtype=torch.float32)
+
+            print(f"Impedance normalization (with practical range clipping):")
+            print(f"  C:     mean={C_mean:.3f}, std={C_std:.3f}")
+            print(f"  G:     mean={G_mean:.3f}, std={G_std:.3f}")
+            print(f"  L_inv: mean={L_inv_mean:.3f}, std={L_inv_std:.3f}")
+
+            # Print practical ranges for reference
+            print(f"\nPractical component ranges:")
+            print(f"  R: 10Ω to 100kΩ")
+            print(f"  L: 1nH to 10mH")
+            print(f"  C: 1pF to 1μF")
+        else:
+            # If not log-scaling, just use simple mean/std
+            all_impedances = np.stack([all_C, all_G, all_L_inv], axis=1)
+            self.impedance_mean = torch.tensor(all_impedances.mean(axis=0), dtype=torch.float32)
+            self.impedance_std = torch.tensor(all_impedances.std(axis=0) + 1e-8, dtype=torch.float32)
+
+            print(f"Impedance normalization:")
+            print(f"  Mean: {self.impedance_mean.numpy()}")
+            print(f"  Std:  {self.impedance_std.numpy()}")
 
         # Collect pole/zero magnitudes for normalization
         all_pole_mags = []
@@ -242,12 +301,26 @@ class CircuitDataset(Dataset):
                 is_parallel = 1.0  # All components between two nodes are parallel
 
                 if self.log_scale_impedance:
-                    # Log scale with small epsilon
-                    imp_den = np.log(np.array(imp_den) + 1e-15)
+                    # Apply same practical range clipping as in normalization (Option 3 fix)
+                    # Convert G and L_inv to R and L
+                    R = 1.0 / (G + 1e-15)
+                    L = 1.0 / (L_inv + 1e-15)
+
+                    # Clip to practical ranges
+                    R_practical = np.clip(R, 10, 100e3)        # 10Ω to 100kΩ
+                    L_practical = np.clip(L, 1e-9, 10e-3)      # 1nH to 10mH
+                    C_practical = np.clip(C, 1e-12, 1e-6)      # 1pF to 1μF
+
+                    # Convert back to G and L_inv
+                    G_practical = 1.0 / R_practical
+                    L_inv_practical = 1.0 / L_practical
+
+                    # Log transform
+                    imp_den = np.log(np.array([C_practical, G_practical, L_inv_practical]) + 1e-15)
 
                 imp_den = torch.tensor(imp_den, dtype=torch.float32)
 
-                # Normalize if requested
+                # Normalize if requested (z-score normalization)
                 if self.normalize_features:
                     imp_den = (imp_den - self.impedance_mean) / self.impedance_std
 

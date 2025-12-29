@@ -1,4 +1,15 @@
-# Configuration for GraphGPT Autoregressive Circuit Decoder Training
+# Configuration for Latent-Guided GraphGPT Circuit Decoder Training
+#
+# Architecture:
+# - Decoder generates circuit graphs (nodes + edges + values)
+# - No pole/zero prediction (evaluated via SPICE simulation)
+# - Latent-guided edge generation with cross-attention
+#
+# Key innovations:
+# 1. Cross-attention to latent at each edge decision
+# 2. TF consistency scoring for smart edge selection
+# 3. Iterative edge refinement (3 iterations)
+# 4. Smart VIN connectivity enforcement
 
 # Model Architecture
 model:
@@ -14,7 +25,7 @@ model:
     pz_latent_dim: 4
     dropout: 0.1
 
-  # GraphGPT Decoder
+  # Latent-Guided GraphGPT Decoder (no TF prediction)
   decoder:
     latent_dim: 8                # Latent code dimension from encoder
     conditions_dim: 2            # Specifications dimension (cutoff, Q)
@@ -22,9 +33,13 @@ model:
     num_heads: 8                 # Number of attention heads
     num_node_layers: 4           # Number of transformer layers for nodes
     max_nodes: 5                 # Maximum number of nodes
-    max_poles: 4                 # Maximum number of poles
-    max_zeros: 4                 # Maximum number of zeros
     dropout: 0.1                 # Dropout probability
+
+    # Latent-guided parameters
+    num_edge_iterations: 3       # Iterative edge refinement (3 iterations)
+    enforce_vin_connectivity: true  # Smart VIN connectivity enforcement
+    consistency_boost: 1.5       # Boost factor for high-consistency edges (>0.7)
+    consistency_penalty: 0.5     # Penalty factor for low-consistency edges (<0.3)
 
 # Training Configuration
 training:
@@ -38,28 +53,28 @@ training:
   learning_rate_phase2: 5.0e-5   # Learning rate for phase 2 (joint)
 
   weight_decay: 1.0e-5           # L2 regularization
-  grad_clip: 1.0                 # Gradient clipping (standard, no need for tight clipping)
+  grad_clip: 1.0                 # Gradient clipping
 
   kl_weight: 0.01                # KL divergence weight (phase 2 only)
 
-# Loss Weights
+# Loss Weights (no TF prediction - evaluated via SPICE)
 loss:
-  # All losses weighted equally (NO 50x needed!)
+  # Circuit generation losses
   node_type_weight: 1.0          # Node type prediction
-  edge_exist_weight: 1.0         # Edge existence prediction (autoregressive handles imbalance!)
-  edge_value_weight: 1.0         # Edge value prediction
-  pole_count_weight: 1.0         # Pole count prediction
-  zero_count_weight: 1.0         # Zero count prediction
-  pole_value_weight: 1.0         # Pole value prediction
-  zero_value_weight: 1.0         # Zero value prediction
+  edge_exist_weight: 1.0         # Edge existence prediction
+  edge_value_weight: 1.0         # Edge value prediction (R, C, L)
 
-  # Optional transfer function loss
-  tf_weight: 0.0                 # Set to 0.5 if you want to add TF loss
+  # Latent-guided parameters
+  consistency_weighting_strength: 2.0  # Strength of TF consistency weighting (for edge guidance)
+
+  # Connectivity loss
+  use_connectivity_loss: true    # Enable connectivity loss
+  connectivity_weight: 5.0       # Weight for connectivity loss (VIN/VOUT)
 
 # Edge Generation Monitoring
 edge_monitoring:
-  enabled: true                  # Enable edge generation validation
-  warning_threshold: 0.3         # Warn if mean edge prob < this (higher than diffusion)
+  enabled: false                 # Disabled to avoid dependency
+  warning_threshold: 0.3         # Warn if mean edge prob < this
   critical_threshold: 0.1        # Critical alert if mean edge prob < this
   check_every_n_batches: 10      # Check edge stats every N batches
 
@@ -70,8 +85,8 @@ data:
 
 # Checkpoint Configuration
 checkpoint:
-  pretrained_encoder: 'checkpoints/variable_length/20251222_102121/best.pt'  # Pretrained encoder
-  save_dir: 'checkpoints/graphgpt_decoder'
+  pretrained_encoder: null       # Train from scratch with new normalization
+  save_dir: 'checkpoints/latent_guided_decoder'
   save_frequency: 10             # Save checkpoint every N epochs
   keep_best: true                # Keep best validation loss checkpoint
 
@@ -85,3 +100,7 @@ logging:
   log_frequency: 10              # Log metrics every N batches
   tensorboard: false             # Use TensorBoard logging
   verbose: true                  # Print detailed metrics
+
+  # NEW: Latent-guided specific logging
+  log_consistency_scores: true   # Log consistency score distribution
+  log_vin_connectivity: true     # Log VIN connectivity rate during training

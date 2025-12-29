@@ -31,7 +31,7 @@ from ml.models.encoder import HierarchicalEncoder
 from ml.models.graphgpt_decoder import GraphGPTDecoder
 from ml.losses.graphgpt_loss import GraphGPTCircuitLoss
 from ml.data.dataset import CircuitDataset, collate_graphgpt_batch
-from scripts.validate_edge_generation import EdgeGenerationValidator
+# from scripts.validate_edge_generation import EdgeGenerationValidator  # Disabled
 
 
 def load_config(config_path):
@@ -60,14 +60,17 @@ def create_models(config, device):
     # Load pretrained weights
     if 'pretrained_encoder' in config['checkpoint']:
         checkpoint_path = config['checkpoint']['pretrained_encoder']
-        if os.path.exists(checkpoint_path):
+        if checkpoint_path is not None and os.path.exists(checkpoint_path):
             print(f"Loading pretrained encoder from: {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path, map_location=device)
             encoder.load_state_dict(checkpoint['encoder_state_dict'])
             print("✅ Encoder loaded successfully")
         else:
-            print(f"⚠️  Warning: Encoder checkpoint not found at {checkpoint_path}")
-            print("   Starting with random initialization")
+            if checkpoint_path is None:
+                print("✅ Training from scratch with random initialization (new normalization)")
+            else:
+                print(f"⚠️  Warning: Encoder checkpoint not found at {checkpoint_path}")
+                print("   Starting with random initialization")
 
     # Create GraphGPT decoder
     decoder = GraphGPTDecoder(
