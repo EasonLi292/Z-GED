@@ -105,8 +105,10 @@ for i, batch in enumerate(val_loader):
             zeros_list
         )
 
-        # Generate circuit
-        conditions = torch.randn(1, 2, device=device)
+        # Use specifications from the circuit being validated
+        # For validation, we're reconstructing, so we don't use specifications
+        # but we could pass them if we wanted to test spec-driven generation
+        conditions = torch.randn(1, 2, device=device)  # Keep random for reconstruction test
         circuit = decoder.generate(mu, conditions, verbose=False)
 
         edge_vals = circuit['edge_values'][0]

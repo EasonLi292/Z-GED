@@ -30,11 +30,31 @@ from torch_geometric.data import Batch
 
 def collate_circuit_batch(batch_list):
     """Custom collate function for circuit graphs."""
+    import numpy as np
+
     graphs = [item['graph'] for item in batch_list]
     poles = [item['poles'] for item in batch_list]
     zeros = [item['zeros'] for item in batch_list]
     batched_graph = Batch.from_data_list(graphs)
-    return {'graph': batched_graph, 'poles': poles, 'zeros': zeros}
+
+    # Extract and normalize specifications
+    batch_size = len(batch_list)
+    specifications = torch.zeros(batch_size, 2, dtype=torch.float32)
+
+    for b, item in enumerate(batch_list):
+        cutoff_freq = item['specifications'][0].item()
+        q_factor = item['specifications'][1].item()
+
+        # Normalize: log10(freq)/4.0, log10(Q)/2.0
+        specifications[b, 0] = np.log10(max(cutoff_freq, 1.0)) / 4.0
+        specifications[b, 1] = np.log10(max(q_factor, 0.01)) / 2.0
+
+    return {
+        'graph': batched_graph,
+        'poles': poles,
+        'zeros': zeros,
+        'specifications': specifications
+    }
 
 
 def graph_to_dense_format(graph, max_nodes=5):
@@ -124,9 +144,8 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
         eps = torch.randn_like(std)
         latent = mu + eps * std
 
-        # Dummy conditions
-        batch_size = mu.size(0)
-        conditions = torch.randn(batch_size, 2, device=device)
+        # Use real circuit specifications from batch
+        conditions = batch['specifications'].to(device)
 
         # Convert graph to dense format for decoder targets
         targets = graph_to_dense_format(graph, max_nodes=decoder.max_nodes)
@@ -198,9 +217,8 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
             # Use mean for validation (no sampling)
             latent = mu
 
-            # Dummy conditions
-            batch_size = mu.size(0)
-            conditions = torch.randn(batch_size, 2, device=device)
+            # Use real circuit specifications from batch
+            conditions = batch['specifications'].to(device)
 
             # Convert graph to dense format
             targets = graph_to_dense_format(graph, max_nodes=decoder.max_nodes)

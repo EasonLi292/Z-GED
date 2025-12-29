@@ -260,6 +260,56 @@ class CircuitDataset(Dataset):
         """Return number of circuits in dataset."""
         return len(self.circuits)
 
+    def _compute_q_factor(
+        self,
+        freqs: np.ndarray,
+        magnitude: np.ndarray,
+        char_freq: float,
+        filter_type: str
+    ) -> float:
+        """
+        Compute Q-factor from frequency response.
+
+        For resonant circuits (band-pass, band-stop, RLC): Q = f0 / BW
+        where BW is the -3dB bandwidth.
+
+        For low-pass/high-pass: return standard Q = 0.707 (Butterworth)
+
+        Args:
+            freqs: Frequency array
+            magnitude: Magnitude response
+            char_freq: Characteristic frequency (cutoff or resonance)
+            filter_type: Type of filter
+
+        Returns:
+            Q-factor (dimensionless)
+        """
+        if filter_type in ['band_pass', 'band_stop', 'rlc_series', 'rlc_parallel']:
+            # For resonant circuits: Q = f0 / BW
+            peak_mag = np.max(magnitude)
+            cutoff_mag = peak_mag / np.sqrt(2)  # -3dB point
+
+            # Find frequencies where mag > cutoff
+            above_cutoff = magnitude > cutoff_mag
+            if np.sum(above_cutoff) < 2:
+                return 0.707  # Default for non-resonant
+
+            # Find first and last crossing
+            crossings = np.where(above_cutoff)[0]
+            f_low = freqs[crossings[0]]
+            f_high = freqs[crossings[-1]]
+
+            bw = f_high - f_low
+            if bw > 0:
+                q = char_freq / bw
+                # Clamp to reasonable range
+                return np.clip(q, 0.01, 100.0)
+            else:
+                return 0.707
+        else:
+            # For low-pass/high-pass: standard Butterworth Q
+            return 0.707
+
     def _convert_graph_to_pyg(self, graph_adj: Dict) -> Data:
         """
         Convert graph adjacency dict to PyTorch Geometric Data object.
@@ -450,6 +500,18 @@ class CircuitDataset(Dataset):
         num_poles = len(poles)
         num_zeros = len(zeros)
 
+        # Extract circuit specifications
+        char_freq = circuit['characteristic_frequency']
+        q_factor = self._compute_q_factor(
+            freqs=np.array(freq_resp['freqs']),
+            magnitude=np.array(freq_resp['H_magnitude']),
+            char_freq=char_freq,
+            filter_type=circuit['filter_type']
+        )
+
+        # Package specifications as [cutoff_freq, q_factor]
+        specifications = torch.tensor([char_freq, q_factor], dtype=torch.float32)
+
         return {
             'graph': graph,
             'poles': poles_tensor,
@@ -461,7 +523,8 @@ class CircuitDataset(Dataset):
             'filter_type': filter_type,
             'circuit_id': circuit['id'],
             'ged_neighbors': ged_neighbors,
-            'idx': idx
+            'idx': idx,
+            'specifications': specifications  # [cutoff_freq, q_factor]
         }
 
     def get_filter_type_indices(self, filter_type: str) -> List[int]:
@@ -648,8 +711,7 @@ def collate_graphgpt_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     edge_existence = torch.zeros(batch_size, max_nodes, max_nodes, dtype=torch.float32)
     edge_values = torch.zeros(batch_size, max_nodes, max_nodes, 7, dtype=torch.float32)
 
-    # Extract specifications (cutoff frequency, Q-factor) from filter_type
-    # For now, use dummy values - should be extracted from actual circuit specs
+    # Extract specifications (cutoff frequency, Q-factor) from batch items
     specifications = torch.zeros(batch_size, 2, dtype=torch.float32)
 
     for b, item in enumerate(batch):
@@ -708,13 +770,17 @@ def collate_graphgpt_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
         if n_zeros > 0:
             zero_values[b, :n_zeros] = item['zeros']
 
-    # Extract specifications from filter_type
-    # Use dummy values for now: cutoff=1000Hz, Q=0.707
-    # These should ideally come from the circuit's actual specifications
+    # Extract specifications from batch items (already computed in __getitem__)
     for b, item in enumerate(batch):
-        # Normalize: log(cutoff)/4.0, log(Q)/2.0
-        specifications[b, 0] = np.log10(1000.0) / 4.0  # Normalized cutoff
-        specifications[b, 1] = np.log10(0.707) / 2.0   # Normalized Q
+        # Get real specifications [cutoff_freq, q_factor]
+        cutoff_freq = item['specifications'][0].item()
+        q_factor = item['specifications'][1].item()
+
+        # Normalize to reasonable range for neural network
+        # Cutoff: log10(freq) / 4.0  (maps 10Hz-1MHz to ~0.25-1.5)
+        # Q: log10(Q) / 2.0  (maps 0.01-100 to ~-1.0 to 1.0)
+        specifications[b, 0] = np.log10(max(cutoff_freq, 1.0)) / 4.0
+        specifications[b, 1] = np.log10(max(q_factor, 0.01)) / 2.0
 
     return {
         # For encoder (PyG format)
