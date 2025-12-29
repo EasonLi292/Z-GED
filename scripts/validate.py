@@ -1,4 +1,4 @@
-"""Comprehensive validation of Phase 3 Joint Prediction model."""
+"""Comprehensive validation of the latent-guided circuit generation model."""
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -20,7 +20,7 @@ def collate_circuit_batch(batch_list):
     return {'graph': batched_graph, 'poles': poles, 'zeros': zeros}
 
 print("="*70)
-print("Phase 3: Joint Edge-Component Prediction Validation")
+print("Circuit Generation Model Validation")
 print("="*70)
 
 device = 'cpu'
@@ -48,8 +48,8 @@ decoder = LatentGuidedGraphGPTDecoder(
     enforce_vin_connectivity=True
 ).to(device)
 
-# Load Phase 3 checkpoint
-checkpoint = torch.load('checkpoints/phase3_joint_prediction/best.pt', map_location=device)
+# Load production checkpoint
+checkpoint = torch.load('checkpoints/production/best.pt', map_location=device)
 encoder.load_state_dict(checkpoint['encoder_state_dict'])
 decoder.load_state_dict(checkpoint['decoder_state_dict'])
 

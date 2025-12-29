@@ -1,15 +1,13 @@
 """
-Training script for Phase 3: Joint Edge-Component Prediction.
+Training script for latent-guided circuit generation model.
 
-This script trains the improved architecture where edge existence and component type
-are predicted jointly (single 8-way classification instead of two separate heads).
+This script trains the circuit generation architecture with joint edge-component prediction.
 
-Key improvements over baseline:
+Key features:
 1. Unified edge-component head (class 0=no edge, 1-7=component type)
-2. Rebalanced loss weights (edge_exist_weight increased, component_type_weight decreased)
-3. Trains on "None" class to eliminate train/generation mismatch
-
-Expected improvement: 75% → 90-95% accuracy
+2. Latent-guided decoder with hierarchical latent space (8D = 2D topology + 2D values + 4D TF)
+3. Gumbel-Softmax for discrete component selection (R, C, L, RC, RL, CL, RCL)
+4. Cross-attention to latent components for context-aware generation
 """
 
 import sys
@@ -141,7 +139,7 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
             target_edges=targets['edge_existence']
         )
 
-        # Compute loss (automatically detects Phase 3 joint prediction)
+        # Compute loss (joint edge-component prediction)
         loss, metrics = loss_fn(predictions, targets)
 
         # Backward and optimize
@@ -346,11 +344,11 @@ def main():
 
     # Training loop
     print("\n" + "="*70)
-    print("Starting Training (Phase 3)")
+    print("Starting Training")
     print("="*70)
 
     best_val_loss = float('inf')
-    checkpoint_dir = 'checkpoints/phase3_joint_prediction'
+    checkpoint_dir = 'checkpoints/production'
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     for epoch in range(1, num_epochs + 1):
@@ -403,7 +401,7 @@ def main():
     print("="*70)
     print(f"\nBest validation loss: {best_val_loss:.4f}")
     print(f"Model saved to: {checkpoint_dir}/best.pt")
-    print(f"\nNext step: Run validation with scripts/validate_gumbel_comprehensive.py")
+    print(f"\nNext step: Run validation with scripts/validate.py")
 
 
 if __name__ == '__main__':
