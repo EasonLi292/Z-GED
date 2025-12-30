@@ -22,18 +22,24 @@ class CircuitSimulator:
                  simulator='ngspice',
                  freq_points=100,
                  freq_start=1.0,
-                 freq_stop=1e6):
+                 freq_stop=1e6,
+                 impedance_mean=None,
+                 impedance_std=None):
         """
         Args:
             simulator: SPICE simulator to use ('ngspice', 'ltspice')
             freq_points: Number of frequency points for AC analysis
             freq_start: Starting frequency (Hz)
             freq_stop: Stopping frequency (Hz)
+            impedance_mean: [3] array of normalization means [C_mean, G_mean, L_inv_mean]
+            impedance_std: [3] array of normalization stds [C_std, G_std, L_inv_std]
         """
         self.simulator = simulator
         self.freq_points = freq_points
         self.freq_start = freq_start
         self.freq_stop = freq_stop
+        self.impedance_mean = impedance_mean
+        self.impedance_std = impedance_std
 
     def circuit_to_netlist(self,
                           node_types: torch.Tensor,
@@ -60,21 +66,21 @@ class CircuitSimulator:
         # Node type mapping
         NODE_TYPES = {0: 'GND', 1: 'VIN', 2: 'VOUT', 3: 'INTERNAL', 4: 'MASK'}
 
-        # Find special nodes
-        gnd_node = None
+        # Find special nodes (support multiple GND nodes)
+        gnd_nodes = []
         vin_node = None
         vout_node = None
 
         for i, node_type_id in enumerate(node_type_ids):
             node_type = NODE_TYPES[node_type_id]
             if node_type == 'GND':
-                gnd_node = i
+                gnd_nodes.append(i)
             elif node_type == 'VIN':
                 vin_node = i
             elif node_type == 'VOUT':
                 vout_node = i
 
-        if gnd_node is None or vin_node is None or vout_node is None:
+        if len(gnd_nodes) == 0 or vin_node is None or vout_node is None:
             raise ValueError("Circuit must have GND, VIN, and VOUT nodes")
 
         # Build netlist
@@ -104,13 +110,25 @@ class CircuitSimulator:
                 if node_type_ids[i] == 4 or node_type_ids[j] == 4:
                     continue
 
-                # Get edge values
-                log_C = edge_values_np[i, j, 0]
-                log_G = edge_values_np[i, j, 1]
-                log_L_inv = edge_values_np[i, j, 2]
+                # Get edge values (normalized)
+                log_C_norm = edge_values_np[i, j, 0]
+                log_G_norm = edge_values_np[i, j, 1]
+                log_L_inv_norm = edge_values_np[i, j, 2]
                 mask_C = edge_values_np[i, j, 3]
                 mask_G = edge_values_np[i, j, 4]
                 mask_L = edge_values_np[i, j, 5]
+
+                # Denormalize if normalization stats provided
+                if self.impedance_mean is not None and self.impedance_std is not None:
+                    # Denormalize z-score: value = norm_value * std + mean
+                    log_C = log_C_norm * self.impedance_std[0] + self.impedance_mean[0]
+                    log_G = log_G_norm * self.impedance_std[1] + self.impedance_mean[1]
+                    log_L_inv = log_L_inv_norm * self.impedance_std[2] + self.impedance_mean[2]
+                else:
+                    # Assume already denormalized (backward compatibility)
+                    log_C = log_C_norm
+                    log_G = log_G_norm
+                    log_L_inv = log_L_inv_norm
 
                 # Convert log values to actual values
                 C_value = np.exp(log_C)  # Farads
@@ -120,9 +138,9 @@ class CircuitSimulator:
                 # Convert G to R
                 R_value = 1.0 / (G_value + 1e-12)  # Ohms
 
-                # Map nodes (use GND=0, others as-is)
-                node_i = 0 if i == gnd_node else f"n{i}"
-                node_j = 0 if j == gnd_node else f"n{j}"
+                # Map nodes (use GND=0 for all GND nodes, others as-is)
+                node_i = 0 if i in gnd_nodes else f"n{i}"
+                node_j = 0 if j in gnd_nodes else f"n{j}"
 
                 # Add components based on masks
                 if mask_C > 0.5:
@@ -154,7 +172,7 @@ class CircuitSimulator:
         )
 
         # Print transfer function (VOUT/VIN)
-        vout_node_spice = 0 if vout_node == gnd_node else f"n{vout_node}"
+        vout_node_spice = 0 if vout_node in gnd_nodes else f"n{vout_node}"
         netlist_lines.append(f".print ac v({vout_node_spice})")
 
         # Control commands
@@ -425,6 +443,83 @@ class CircuitSimulator:
             'magnitude_correlation': magnitude_correlation,
             'phase_mse': phase_mse,
         }
+
+
+def extract_cutoff_and_q(frequencies: np.ndarray,
+                        response: np.ndarray) -> Dict[str, float]:
+    """
+    Extract cutoff frequency and Q-factor from frequency response.
+
+    Args:
+        frequencies: [num_points] frequency array (Hz)
+        response: [num_points] complex transfer function H(jω)
+
+    Returns:
+        dict with:
+            'cutoff_freq': Cutoff frequency in Hz (-3dB point)
+            'q_factor': Q-factor (for resonant circuits) or 0.707 for Butterworth
+            'peak_freq': Peak frequency (resonance) if applicable
+            'peak_gain': Peak gain in dB
+    """
+    magnitude = np.abs(response)
+    magnitude_db = 20 * np.log10(magnitude + 1e-12)
+
+    # Find peak (resonance)
+    peak_idx = np.argmax(magnitude_db)
+    peak_freq = frequencies[peak_idx]
+    peak_gain = magnitude_db[peak_idx]
+
+    # Find -3dB point relative to peak
+    cutoff_db = peak_gain - 3.0
+
+    # Find cutoff frequency (first crossing of -3dB line)
+    # Look for where magnitude crosses cutoff_db
+    above_cutoff = magnitude_db > cutoff_db
+
+    if not np.any(above_cutoff):
+        # No resonance, use DC gain as reference
+        dc_gain = magnitude_db[0]
+        cutoff_db = dc_gain - 3.0
+
+    # Find crossing points
+    crossings = []
+    for i in range(len(magnitude_db) - 1):
+        if (magnitude_db[i] >= cutoff_db and magnitude_db[i+1] < cutoff_db) or \
+           (magnitude_db[i] < cutoff_db and magnitude_db[i+1] >= cutoff_db):
+            # Linear interpolation for crossing point
+            frac = (cutoff_db - magnitude_db[i]) / (magnitude_db[i+1] - magnitude_db[i])
+            crossing_freq = frequencies[i] + frac * (frequencies[i+1] - frequencies[i])
+            crossings.append(crossing_freq)
+
+    # Determine filter type and extract specs
+    if len(crossings) >= 2:
+        # Band-pass or band-stop: two crossings
+        f_low = crossings[0]
+        f_high = crossings[-1]
+        f0 = np.sqrt(f_low * f_high)  # Geometric mean (center frequency)
+        bandwidth = f_high - f_low
+        q_factor = f0 / bandwidth if bandwidth > 0 else 0.707
+        cutoff_freq = f0
+
+    elif len(crossings) == 1:
+        # Low-pass or high-pass: one crossing
+        cutoff_freq = crossings[0]
+        q_factor = 0.707  # Butterworth default
+
+    else:
+        # No clear cutoff, use peak frequency
+        cutoff_freq = peak_freq
+        q_factor = 0.707
+
+    # Clamp Q-factor to reasonable range
+    q_factor = np.clip(q_factor, 0.01, 100.0)
+
+    return {
+        'cutoff_freq': cutoff_freq,
+        'q_factor': q_factor,
+        'peak_freq': peak_freq,
+        'peak_gain': peak_gain,
+    }
 
 
 def compare_pole_zero_counts(pred_count: int,

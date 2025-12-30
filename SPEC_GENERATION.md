@@ -46,6 +46,8 @@ python scripts/generate_from_specs.py --cutoff FREQ --q-factor Q
 | `--q-factor` | Target Q-factor | 0.707 |
 | `--num-samples` | Number of circuits to generate | 5 |
 | `--method` | `nearest` or `interpolate` | `interpolate` |
+| `--ged-weight` | Weight for GED vs spec distance (0.0-1.0) | 0.5 |
+| `--ged-matrix` | Path to precomputed GED matrix | `analysis_results/ged_matrix_120.npy` |
 | `--checkpoint` | Model checkpoint path | `checkpoints/production/best.pt` |
 
 ---
@@ -75,6 +77,19 @@ python scripts/generate_from_specs.py --cutoff 10000 --q-factor 0.707 --method n
 ```
 
 **Result:** Uses exact latent code from most similar training circuit
+
+### 4. GED-Weighted Interpolation (Structural Similarity)
+
+```bash
+python scripts/generate_from_specs.py --cutoff 10000 --q-factor 0.707 --ged-weight 0.8
+```
+
+**Result:** Favors neighbors with similar graph structure (topology), not just specifications
+
+**GED Weight Parameter:**
+- `--ged-weight 0.0`: Use only specification distance (default behavior)
+- `--ged-weight 0.5`: Balance specification distance and structural similarity (recommended)
+- `--ged-weight 1.0`: Use only Graph Edit Distance (structural similarity)
 
 ---
 
@@ -123,17 +138,37 @@ nearest_5 = argsort(distances)[:5]
 - Frequency: log-scale distance
 - Q-factor: linear distance (2x weight)
 
-### 3. Interpolate Latent Codes
+### 3. Refine with Graph Edit Distance (Optional)
 
 ```python
-# Inverse distance weighting
-weights = 1.0 / (distances + eps)
+# Among k nearest by specification, use GED for structural similarity
+for each neighbor in k_nearest:
+    ged_avg = average_ged_to_other_neighbors(neighbor, k_nearest)
+    # Lower GED = more similar structure = higher weight
+
+# Combine specification distance + GED
+combined_distance = (1 - ged_weight) * spec_distance + ged_weight * ged_distance
+```
+
+**Benefit:** Favors circuits with similar topology, not just similar frequency response
+
+**Graph Edit Distance (GED):**
+- Measures structural similarity between circuit graphs
+- GED = 0: Identical topology
+- GED > 0: Different number of nodes/edges or different connections
+- Precomputed for all 120 training circuits
+
+### 4. Interpolate Latent Codes
+
+```python
+# Inverse distance weighting (using combined distance if GED enabled)
+weights = 1.0 / (combined_distances + eps)
 interpolated_latent = sum(weights[i] * latents[i])
 ```
 
-**Benefit:** Smooth interpolation between similar circuits
+**Benefit:** Smooth interpolation between structurally similar circuits
 
-### 4. Generate Circuit
+### 5. Generate Circuit
 
 ```python
 circuit = decoder.generate(interpolated_latent, conditions)
@@ -164,6 +199,36 @@ circuit = decoder.generate(interpolated_latent, conditions)
 - Faster (no interpolation)
 
 **When to use:** When you want exact reproduction of training circuit
+
+### GED Weighting Enhancement
+
+Both `interpolate` and `nearest` methods can use **Graph Edit Distance (GED)** to refine neighbor selection.
+
+**How it works:**
+1. Find k-nearest neighbors by specification distance
+2. Among those k, compute average GED to measure structural similarity
+3. Combine spec distance + GED using adjustable weight parameter
+4. Use combined distance for interpolation weights
+
+**Benefits:**
+- **Better topology matching**: Favors circuits with similar structure
+- **More coherent interpolation**: Weighted average of structurally similar circuits produces more realistic results
+- **Tunable**: Adjust `--ged-weight` to balance specification vs structure matching
+
+**When to use:**
+- **High GED weight (0.7-1.0)**: When you care more about circuit topology than exact frequency response
+- **Balanced (0.4-0.6)**: Recommended for most cases - balances specs and structure
+- **Low GED weight (0.0-0.3)**: When you want exact specification matching regardless of topology
+
+**Example output with GED weighting:**
+```
+Sample 1: Interpolated from 5 nearest
+  Neighbor weights (GED-adjusted): [0.305, 0.245, 0.141, 0.161, 0.149]
+  Top neighbor: cutoff=8975.2 Hz, Q=0.707, weight=0.305
+  Reference circuit: cutoff=8975.2 Hz, Q=0.707
+  Generated: 2 edges
+  Valid circuit: ✅
+```
 
 ---
 

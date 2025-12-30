@@ -80,6 +80,7 @@ class LatentGuidedEdgeDecoder(nn.Module):
         topo_latent_dim: int = 2,
         values_latent_dim: int = 2,
         tf_latent_dim: int = 4,
+        conditions_dim: int = 2,
         edge_feature_dim: int = 7,
         num_attention_heads: int = 4,
         dropout: float = 0.1
@@ -106,6 +107,9 @@ class LatentGuidedEdgeDecoder(nn.Module):
         self.topo_proj = nn.Linear(topo_latent_dim, hidden_dim)
         self.values_proj = nn.Linear(values_latent_dim, hidden_dim)
         self.tf_proj = nn.Linear(tf_latent_dim, hidden_dim)
+
+        # NEW: Project conditions (target specifications) to hidden_dim
+        self.conditions_proj = nn.Linear(conditions_dim, hidden_dim)
 
         # ==================================================================
         # 3. Cross-Attention Modules
@@ -135,13 +139,21 @@ class LatentGuidedEdgeDecoder(nn.Module):
             batch_first=True
         )
 
+        # NEW: Conditions attention: "Adjust values based on target specifications"
+        self.conditions_attention = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_attention_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+
         # ==================================================================
         # 4. Feature Fusion
         # ==================================================================
 
-        # Combine base + topology-guided + TF-guided features
+        # Combine base + topology-guided + TF-guided + values-guided + conditions-guided features
         self.fusion = nn.Sequential(
-            nn.Linear(hidden_dim * 4, hidden_dim * 2),
+            nn.Linear(hidden_dim * 5, hidden_dim * 2),  # Changed from 4 to 5
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim * 2, hidden_dim)
@@ -195,7 +207,8 @@ class LatentGuidedEdgeDecoder(nn.Module):
         node_j: torch.Tensor,
         latent_topo: torch.Tensor,
         latent_values: torch.Tensor,
-        latent_tf: torch.Tensor
+        latent_tf: torch.Tensor,
+        conditions: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict]:
         """
         Predict edge with latent guidance and JOINT edge-component prediction (Phase 3).
@@ -206,6 +219,7 @@ class LatentGuidedEdgeDecoder(nn.Module):
             latent_topo: Topology latent [batch, topo_dim]
             latent_values: Component values latent [batch, values_dim]
             latent_tf: Transfer function latent [batch, tf_dim]
+            conditions: Target specifications [batch, conditions_dim] (e.g., [log_cutoff, log_q])
 
         Returns:
             edge_component_logits: Joint edge+component logits [batch, 8]
@@ -237,6 +251,9 @@ class LatentGuidedEdgeDecoder(nn.Module):
         latent_values_proj = self.values_proj(latent_values).unsqueeze(1)
         latent_tf_proj = self.tf_proj(latent_tf).unsqueeze(1)
 
+        # NEW: Project conditions (target specifications)
+        conditions_proj = self.conditions_proj(conditions).unsqueeze(1)  # [batch, 1, hidden_dim]
+
         # Topology attention: "Does this edge fit target topology?"
         edge_topo_guided, topo_attn_weights = self.topo_attention(
             query=edge_base_expanded,
@@ -264,17 +281,27 @@ class LatentGuidedEdgeDecoder(nn.Module):
         )
         edge_values_guided = edge_values_guided.squeeze(1)  # [batch, hidden_dim]
 
+        # NEW: Conditions attention: "Adjust values for target specifications"
+        edge_conditions_guided, conditions_attn_weights = self.conditions_attention(
+            query=edge_base_expanded,
+            key=conditions_proj,
+            value=conditions_proj,
+            need_weights=True
+        )
+        edge_conditions_guided = edge_conditions_guided.squeeze(1)  # [batch, hidden_dim]
+
         # ==================================================================
         # 3. Feature Fusion
         # ==================================================================
 
         # Combine all features
         edge_features = torch.cat([
-            edge_base,         # Base: node pair compatibility
-            edge_topo_guided,  # Guided: topology consistency
-            edge_tf_guided,    # Guided: TF consistency
-            edge_values_guided # Guided: value appropriateness
-        ], dim=-1)  # [batch, hidden_dim * 4]
+            edge_base,              # Base: node pair compatibility
+            edge_topo_guided,       # Guided: topology consistency
+            edge_tf_guided,         # Guided: TF consistency
+            edge_values_guided,     # Guided: value appropriateness
+            edge_conditions_guided  # NEW: Guided by target specifications
+        ], dim=-1)  # [batch, hidden_dim * 5]
 
         edge_features_fused = self.fusion(edge_features)  # [batch, hidden_dim]
 
@@ -304,7 +331,8 @@ class LatentGuidedEdgeDecoder(nn.Module):
         attention_weights = {
             'topology': topo_attn_weights,
             'transfer_function': tf_attn_weights,
-            'values': values_attn_weights
+            'values': values_attn_weights,
+            'conditions': conditions_attn_weights  # NEW: Track how much conditions influence this edge
         }
 
         return (

@@ -116,6 +116,7 @@ class LatentGuidedGraphGPTDecoder(nn.Module):
             topo_latent_dim=2,
             values_latent_dim=2,
             tf_latent_dim=4,
+            conditions_dim=conditions_dim,  # NEW: Pass conditions_dim
             edge_feature_dim=edge_feature_dim,
             num_attention_heads=4,
             dropout=dropout
@@ -195,7 +196,8 @@ class LatentGuidedGraphGPTDecoder(nn.Module):
                     node_embeddings[j],
                     latent_topo,
                     latent_values,
-                    latent_tf
+                    latent_tf,
+                    conditions  # NEW: Pass target specifications
                 )
 
                 edge_component_logits[:, i, j, :] = edge_comp_logits
@@ -335,7 +337,8 @@ class LatentGuidedGraphGPTDecoder(nn.Module):
                         node_embeddings[j],
                         latent_topo,
                         latent_values,
-                        latent_tf
+                        latent_tf,
+                        conditions  # NEW: Pass target specifications
                     )
 
                     # Edge existence probability: P(class > 0) = 1 - P(class 0)
@@ -407,7 +410,8 @@ class LatentGuidedGraphGPTDecoder(nn.Module):
                                 node_embeddings[target_id],
                                 latent_topo,
                                 latent_values,
-                                latent_tf
+                                latent_tf,
+                                conditions  # NEW: Pass target specifications
                             )
 
                             if consistency[0] > best_consistency:
@@ -421,7 +425,8 @@ class LatentGuidedGraphGPTDecoder(nn.Module):
                             node_embeddings[best_target],
                             latent_topo,
                             latent_values,
-                            latent_tf
+                            latent_tf,
+                            conditions  # NEW: Pass target specifications
                         )
 
                         # Component type from joint prediction (classes 1-7)
