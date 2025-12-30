@@ -24,10 +24,14 @@ Z-GED is a specification-driven circuit generator that creates RLC filter circui
 | Metric | Result | Notes |
 |--------|--------|-------|
 | **Training Accuracy** | 100% | Node/edge/component types |
-| **Cutoff Frequency Error** | 63.5% avg | Best case: 4.1% (20 Hz target) |
-| **Q-Factor Error** | 209% avg | Needs improvement (see limitations) |
+| **Topology Viability** | 100% | All generated topologies are viable |
+| **Cutoff Frequency Error** | 53% avg | Best case: 16.5% (15 kHz, Q=3.0) |
+| **Q-Factor Error** | 50% avg | Perfect for Q=0.707, poor for Q>5 |
 | **Circuit Validity** | 100% | All circuits have VIN/VOUT connected |
 | **SPICE Simulation Success** | 100% | All circuits simulate successfully |
+
+📊 **[See Comprehensive Generation Results →](GENERATION_RESULTS.md)** (18 test cases analyzed)
+🎨 **[See Hybrid Generation Analysis →](HYBRID_GENERATION_ANALYSIS.md)** (10 cross-type blending tests)
 
 ---
 
@@ -290,9 +294,13 @@ python scripts/train.py --config configs/production_ready.yaml --epochs 100
 
 | Document | Description |
 |----------|-------------|
+| [GENERATION_RESULTS.md](GENERATION_RESULTS.md) | **🔥 Comprehensive test results (18 specifications)** |
 | [CVAE_FIX_SUMMARY.md](CVAE_FIX_SUMMARY.md) | **Complete technical analysis of recent fixes** |
 | [SPEC_GENERATION.md](SPEC_GENERATION.md) | **Specification-driven generation guide** |
-| [COMPONENT_VALUE_DENORMALIZATION_FIX.md](COMPONENT_VALUE_DENORMALIZATION_FIX.md) | **Denormalization bug analysis** |
+| [docs/GENERATION_GUIDE.md](docs/GENERATION_GUIDE.md) | **How to use the generation interface** |
+| [docs/ERROR_SOURCE_ANALYSIS.md](docs/ERROR_SOURCE_ANALYSIS.md) | **Error source investigation** |
+| [docs/FINDINGS_SUMMARY.md](docs/FINDINGS_SUMMARY.md) | **Key findings summary** |
+| [COMPONENT_VALUE_DENORMALIZATION_FIX.md](COMPONENT_VALUE_DENORMALIZATION_FIX.md) | Denormalization bug analysis |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Model architecture details |
 | [USAGE.md](USAGE.md) | API reference and examples |
 | [RESULTS.md](RESULTS.md) | Performance benchmarks |

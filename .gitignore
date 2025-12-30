@@ -207,7 +207,12 @@ marimo/_lsp/
 __marimo__/
 
 # Project-specific
-checkpoints/
+checkpoints/*/epoch_*.pt
+checkpoints/archive/
+experiments/*/checkpoints/
 analysis_results/
 TRAINING_IN_PROGRESS.md
 training_log*.txt
+stratified_split.pt
+*.pyc
+__pycache__/
