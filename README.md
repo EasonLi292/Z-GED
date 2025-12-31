@@ -30,8 +30,7 @@ Z-GED is a specification-driven circuit generator that creates RLC filter circui
 | **Circuit Validity** | 100% | All circuits have VIN/VOUT connected |
 | **SPICE Simulation Success** | 100% | All circuits simulate successfully |
 
-📊 **[See Comprehensive Generation Results →](GENERATION_RESULTS.md)** (18 test cases analyzed)
-🎨 **[See Hybrid Generation Analysis →](HYBRID_GENERATION_ANALYSIS.md)** (10 cross-type blending tests)
+📊 **[See Comprehensive Generation Results →](GENERATION_RESULTS.md)** (28 test cases: 18 pure + 10 hybrid)
 
 ---
 
@@ -294,9 +293,7 @@ python scripts/train.py --config configs/production_ready.yaml --epochs 100
 
 | Document | Description |
 |----------|-------------|
-| [GENERATION_RESULTS.md](GENERATION_RESULTS.md) | **🔥 Comprehensive test results (18 specifications)** |
-| [CVAE_FIX_SUMMARY.md](CVAE_FIX_SUMMARY.md) | **Complete technical analysis of recent fixes** |
-| [SPEC_GENERATION.md](SPEC_GENERATION.md) | **Specification-driven generation guide** |
+| [GENERATION_RESULTS.md](GENERATION_RESULTS.md) | **🔥 Complete test results & circuit diagrams (28 tests)** |
 | [docs/GENERATION_GUIDE.md](docs/GENERATION_GUIDE.md) | **How to use the generation interface** |
 | [docs/ERROR_SOURCE_ANALYSIS.md](docs/ERROR_SOURCE_ANALYSIS.md) | **Error source investigation** |
 | [docs/FINDINGS_SUMMARY.md](docs/FINDINGS_SUMMARY.md) | **Key findings summary** |
