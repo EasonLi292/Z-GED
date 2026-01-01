@@ -1,0 +1,104 @@
+# Anti-Overfitting Configuration for Circuit Generation
+#
+# Changes from production model:
+# 1. Reduced hidden_dim: 256 → 128 (4x fewer decoder params)
+# 2. Increased dropout: 0.1 → 0.3 (stronger regularization)
+# 3. Reduced decoder layers: 4 → 2 (simpler model)
+# 4. Reduced attention heads: 8 → 4 (smaller capacity)
+# 5. Added weight decay: 1e-4 (L2 regularization)
+# 6. Doubled training data: 120 → 240 circuits
+#
+# Expected results:
+# - Reduced params/sample: 68,018 → ~8,500 (8x reduction)
+# - Better generalization to unseen specifications
+# - Less memorization, more learning
+
+# Model Architecture
+model:
+  # Encoder (keep small - only 69k params)
+  encoder:
+    node_feature_dim: 4
+    edge_feature_dim: 7
+    gnn_hidden_dim: 64        # Keep same
+    gnn_num_layers: 3         # Keep same
+    latent_dim: 8             # Keep same
+    topo_latent_dim: 2
+    values_latent_dim: 2
+    pz_latent_dim: 4
+    dropout: 0.3              # INCREASED from 0.1
+
+  # Decoder (reduce from 6.5M → ~800k params)
+  decoder:
+    latent_dim: 8
+    conditions_dim: 2
+    hidden_dim: 128           # REDUCED from 256 (4x fewer params)
+    num_heads: 4              # REDUCED from 8
+    num_node_layers: 2        # REDUCED from 4 (half the depth)
+    max_nodes: 5
+    dropout: 0.3              # INCREASED from 0.1
+
+    # Latent-guided parameters
+    num_edge_iterations: 3
+    enforce_vin_connectivity: true
+    consistency_boost: 1.5
+    consistency_penalty: 0.5
+
+# Training Configuration
+training:
+  # Two-phase training
+  phase1_epochs: 50           # REDUCED from 100 (faster iteration)
+  phase2_epochs: 50           # REDUCED from 100
+  total_epochs: 100
+
+  batch_size: 8               # INCREASED from 4 (better gradient estimates)
+  learning_rate_phase1: 5.0e-5  # REDUCED from 1e-4 (more conservative)
+  learning_rate_phase2: 2.5e-5  # REDUCED from 5e-5
+
+  weight_decay: 1.0e-4        # ADDED (L2 regularization)
+  grad_clip: 1.0
+  kl_weight: 0.01
+
+# Loss Weights
+loss:
+  # Circuit generation losses
+  node_type_weight: 1.0
+  edge_exist_weight: 1.0
+  edge_value_weight: 1.0
+
+  # Latent-guided parameters
+  consistency_weighting_strength: 2.0
+
+  # Connectivity loss
+  use_connectivity_loss: true
+  connectivity_weight: 5.0
+
+# Data Configuration
+data:
+  dataset_path: 'rlc_dataset/filter_dataset_240.pkl'  # NEW: 240 circuits
+  train_split: 0.8            # 192 train, 48 val
+
+# Checkpoint Configuration
+checkpoint:
+  pretrained_encoder: null
+  save_dir: 'checkpoints/reduced_overfitting'
+  save_frequency: 10
+  keep_best: true
+
+# Validation Configuration
+validation:
+  frequency: 1
+  num_samples: 10
+
+# Logging Configuration
+logging:
+  log_frequency: 10
+  tensorboard: false
+  verbose: true
+  log_consistency_scores: true
+  log_vin_connectivity: true
+
+# Early Stopping
+early_stopping:
+  enabled: true
+  patience: 20                # Stop if no improvement for 20 epochs
+  min_delta: 0.001           # Minimum improvement threshold
