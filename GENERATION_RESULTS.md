@@ -62,21 +62,22 @@ Testing specifications within traditional filter categories (low-pass, band-pass
 
 **Average:** 46.2% cutoff error, **0.0% Q error**
 
-#### ⭐ Example: 10 kHz Low-Pass Filter (BEST OVERALL RESULT)
+#### ⭐ Example: Cutoff=10 kHz, Q=0.707 (BEST OVERALL RESULT)
 
-**Target:** 10 kHz, Q=0.707 (Butterworth)
+**Target:** 10 kHz, Q=0.707
 **Actual:** 10224.5 Hz, Q=0.707 (2.2% error, 0.0% Q error)
 
 ```
 Generated Circuit:
 
-    VIN (n1) ──────── Component ────────┬──── VOUT (n2)
-                                        │
-                                    R+L+C network
-                                        │
-                                       GND (n0)
+    VIN (n1) ──────── R(845Ω) ──────── VOUT (n2)
+                                           │
+                                      C(18.4nF)
+                                           │
+                                         GND (n0)
 
-Topology: 2-edge RLC low-pass filter
+Components: R = 845Ω, C = 18.4nF
+Topology: 2-edge RC network
 Analysis: Near-perfect accuracy (2.2%), exact Q-factor match
 ```
 
@@ -102,7 +103,7 @@ Analysis: Near-perfect accuracy (2.2%), exact Q-factor match
 
 **Average:** 31.7% cutoff error, 52.5% Q error
 
-#### ⭐ Example: 15 kHz Band-Pass Q=3.0 (BEST PURE RESULT)
+#### ⭐ Example: Cutoff=15 kHz, Q=3.0 (BEST MODERATE-Q RESULT)
 
 **Target:** 15 kHz, Q=3.0
 **Actual:** 15396.3 Hz, Q=2.375 (2.6% error, 20.8% Q error)
@@ -111,14 +112,13 @@ Analysis: Near-perfect accuracy (2.2%), exact Q-factor match
 Generated Circuit (4 edges - most complex pure topology):
 
     VIN (n1) ──────── R ────────┬──── INTERNAL (n3)
-                                │
-                                │
-    VOUT (n2) ──────── R ───────┤
-         │                      │
-         │                   R+L network
-         R                      │
-         │                      │
-        GND (n0) ───────────────┘
+                                │         │
+                                │      R+L network
+    VOUT (n2) ──────── R ───────┤         │
+         │                      │         │
+         R                      └─────────┘
+         │
+        GND (n0)
 
 Topology: 4-edge RLC network with internal node
 Analysis: Most complex topology generated, excellent accuracy for Q>1
@@ -146,7 +146,7 @@ Analysis: Most complex topology generated, excellent accuracy for Q>1
 
 **Average:** 79.8% cutoff error, 93.2% Q error
 
-#### Example: 10 kHz High-Q Resonator Q=10.0 (FAILURE CASE)
+#### Example: Cutoff=10 kHz, Q=10.0 (FAILURE CASE)
 
 **Target:** 10 kHz, Q=10.0
 **Actual:** 4365.7 Hz, Q=0.707 (56.3% error, 92.9% Q error)
@@ -156,12 +156,12 @@ Generated Circuit:
 
     VIN (n1) ──────── R ────── INTERNAL (n3)
                                      │
-                                     │
-    VOUT (n2) ──────── L ────────────┘
-         │
-        GND (n0)
+                                     L
+    VOUT (n2) ───────────────────────┤
+         │                           │
+        GND (n0) ────────────────────┘
 
-Topology: 3-node RL network
+Topology: 3-edge RL network
 Analysis: Topology shows awareness (3 edges), but values completely wrong
           System defaults to Q=0.707 for Q>5 targets
 ```
@@ -187,7 +187,7 @@ Analysis: Topology shows awareness (3 edges), but values completely wrong
 
 **Average:** 44.3% cutoff error, 62.4% Q error
 
-#### ⭐ Example: 50 kHz Q=0.1 (BEST OVERDAMPED RESULT)
+#### ⭐ Example: Cutoff=50 kHz, Q=0.1 (BEST OVERDAMPED RESULT)
 
 **Target:** 50 kHz, Q=0.1
 **Actual:** 39998.6 Hz, Q=0.134 (20.0% error, 33.9% Q error)
@@ -246,7 +246,7 @@ Testing specifications that blend multiple filter types through k-NN interpolati
 
 ---
 
-### 🥇 Test 1: Q=1.0 Hybrid (ABSOLUTE BEST HYBRID - 6.5% error)
+### 🥇 Test 1: Cutoff=10 kHz, Q=1.0 Hybrid (BEST HYBRID - 6.5% error)
 
 **Target:** 10 kHz, Q=1.0
 **Actual:** 10645.6 Hz, Q=0.923 (6.5% cutoff error, 7.7% Q error)
@@ -259,11 +259,11 @@ Testing specifications that blend multiple filter types through k-NN interpolati
 ```
 Generated Circuit (3 types blended):
 
-    VIN (n1) ──────── Component ────────┬──── VOUT (n2)
-                                        │
-                                    R+L+C network
-                                        │
-                                       GND (n0)
+    VIN (n1) ──────── R ──────── VOUT (n2)
+                                     │
+                                  R+L network
+                                     │
+                                   GND (n0)
 
 Topology: 2-edge RLC network
 Blend: rlc_parallel (60%) + band_pass (20%) + low_pass (20%)
@@ -278,7 +278,7 @@ Analysis: Excellent hybrid result - Q close to target (0.923 vs 1.0)
 
 ---
 
-### 🥈 Test 2: Q=4.5 Hybrid (EXCELLENT - 4.6% cutoff)
+### 🥈 Test 2: Cutoff=15 kHz, Q=4.5 Hybrid (EXCELLENT - 4.6% cutoff)
 
 **Target:** 15 kHz, Q=4.5
 **Actual:** 15691.0 Hz, Q=2.349 (4.6% cutoff error, 47.8% Q error)
@@ -290,11 +290,11 @@ Analysis: Excellent hybrid result - Q close to target (0.923 vs 1.0)
 ```
 Generated Circuit (2 types blended):
 
-    VIN (n1) ──────── Component ────────┬──── VOUT (n2)
-                                        │
-                                    R+L network
-                                        │
-                                       GND (n0)
+    VIN (n1) ──────── R ──────── VOUT (n2)
+                                     │
+                                  R+L network
+                                     │
+                                   GND (n0)
 
 Topology: 2-edge RLC resonant network
 Blend: rlc_parallel (60%) + band_stop (40%)
@@ -309,7 +309,7 @@ Analysis: Excellent cutoff accuracy (4.6%)
 
 ---
 
-### Test 3: Q=0.4 Hybrid (GOOD - 25% error)
+### Test 3: Cutoff=20 kHz, Q=0.4 Hybrid (GOOD - 25% error)
 
 **Target:** 20 kHz, Q=0.4
 **Actual:** 25029.4 Hz, Q=0.351 (25.1% cutoff error, 12.2% Q error)
@@ -324,9 +324,8 @@ Generated Circuit (Complex 4-edge topology):
 
     VIN (n1) ──────── R ────────┬──── INTERNAL (n3)
                                 │         │
-                                │         │
-    VOUT (n2) ──────── R ───────┤    R+L network
-         │                      │         │
+                                │      R+L network
+    VOUT (n2) ──────── R ───────┤         │
          │                      │         │
          R                      └─────────┘
          │
@@ -345,7 +344,7 @@ Analysis: Complex topology for unusual Q=0.4, good Q accuracy (12.2% error)
 
 ---
 
-### Test 4: Q=4.0 Hybrid (GOOD - 11.9% cutoff)
+### Test 4: Cutoff=10 kHz, Q=4.0 Hybrid (GOOD - 11.9% cutoff)
 
 **Target:** 10 kHz, Q=4.0
 **Actual:** 11193.6 Hz, Q=6.256 (11.9% cutoff error, 56.4% Q error)
@@ -358,11 +357,13 @@ Analysis: Complex topology for unusual Q=0.4, good Q accuracy (12.2% error)
 ```
 Generated Circuit (4 edges):
 
-    VIN (n1) ──────── Component ────────┬──── INTERNAL (n3)
-                                        │
-    VOUT (n2) ──────────────────────────┤
-         │                              │
-        GND (n0) ───────────────────────┘
+    VIN (n1) ──────── R ────────┬──── INTERNAL (n3)
+                                │         │
+    VOUT (n2) ──────── R ───────┤      R+L network
+         │                      │         │
+         R                      └─────────┘
+         │
+        GND (n0)
 
 Topology: 4-edge RLC network
 Blend: band_stop (40%) + rlc_parallel (40%) + rlc_series (20%)
