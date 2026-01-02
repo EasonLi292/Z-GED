@@ -1,12 +1,12 @@
 """Comprehensive validation of the latent-guided circuit generation model."""
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import torch
 import numpy as np
 from ml.models.encoder import HierarchicalEncoder
-from ml.models.graphgpt_decoder_latent_guided import LatentGuidedGraphGPTDecoder
+from ml.models.decoder import LatentGuidedGraphGPTDecoder
 from ml.data.dataset import CircuitDataset
 from torch.utils.data import DataLoader, Subset
 from torch_geometric.data import Batch

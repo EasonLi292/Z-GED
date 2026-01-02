@@ -269,7 +269,7 @@ if __name__ == '__main__':
     print("""
 Example usage:
 
-    from ml.models.graphgpt_decoder import GraphGPTDecoder
+    from ml.models.node_decoder import GraphGPTDecoder
     from ml.models.guided_generation import guided_generate
 
     # Load decoder

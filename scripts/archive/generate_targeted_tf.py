@@ -24,7 +24,7 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from ml.models.tf_encoder import TransferFunctionEncoder
-from ml.models.graphgpt_decoder import GraphGPTDecoder
+from ml.models.node_decoder import GraphGPTDecoder
 
 
 def parse_complex(s: str) -> complex:

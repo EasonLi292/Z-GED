@@ -12,7 +12,7 @@ Key features:
 
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import torch
 import torch.nn as nn
@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 from ml.data.dataset import CircuitDataset
 from ml.models.encoder import HierarchicalEncoder
-from ml.models.graphgpt_decoder_latent_guided import LatentGuidedGraphGPTDecoder
+from ml.models.decoder import LatentGuidedGraphGPTDecoder
 from ml.losses.gumbel_softmax_loss import GumbelSoftmaxCircuitLoss
 from ml.models.gumbel_softmax_utils import masks_to_component_type
 from torch_geometric.data import Batch

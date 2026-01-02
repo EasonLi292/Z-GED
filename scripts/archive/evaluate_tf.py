@@ -13,7 +13,7 @@ import torch
 import numpy as np
 import pickle
 from ml.models.encoder import HierarchicalEncoder
-from ml.models.graphgpt_decoder_latent_guided import LatentGuidedGraphGPTDecoder
+from ml.models.decoder import LatentGuidedGraphGPTDecoder
 from ml.data.dataset import CircuitDataset, collate_graphgpt_batch
 
 print("="*70)

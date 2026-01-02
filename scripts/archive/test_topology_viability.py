@@ -14,7 +14,7 @@ import torch
 import numpy as np
 from ml.data.dataset import CircuitDataset
 from ml.models.encoder import HierarchicalEncoder
-from ml.models.graphgpt_decoder_latent_guided import LatentGuidedGraphGPTDecoder
+from ml.models.decoder import LatentGuidedGraphGPTDecoder
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 

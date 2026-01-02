@@ -15,8 +15,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, Optional, List
 
-from ml.models.graphgpt_decoder import AutoregressiveNodeDecoder
-from ml.models.latent_guided_decoder import (
+from ml.models.node_decoder import AutoregressiveNodeDecoder
+from ml.models.decoder_components import (
     LatentDecomposer,
     LatentGuidedEdgeDecoder
 )
