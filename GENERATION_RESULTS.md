@@ -68,7 +68,7 @@ Testing specifications within traditional filter categories (low-pass, band-pass
 **Actual:** 10224.5 Hz, Q=0.707 (2.2% error, 0.0% Q error)
 
 ```
-Generated Circuit:
+Circuit Diagram:
 
     VIN (n1) ──────── R(845Ω) ──────── VOUT (n2)
                                            │
@@ -76,8 +76,17 @@ Generated Circuit:
                                            │
                                          GND (n0)
 
-Components: R = 845Ω, C = 18.4nF
-Topology: 2-edge RC network
+SPICE Netlist:
+--------------
+VIN n1 0 DC 0 AC 1.0
+
+C1 0 n2 1.837562813023e-08
+R1 n1 n2 8.450922241211e+02
+
+.ac dec 200 1.0 1000000.0
+
+Components: R1 = 845Ω (VIN to VOUT), C1 = 18.4nF (VOUT to GND)
+Topology: 2-edge RC low-pass network
 Analysis: Near-perfect accuracy (2.2%), exact Q-factor match
 ```
 
@@ -109,18 +118,32 @@ Analysis: Near-perfect accuracy (2.2%), exact Q-factor match
 **Actual:** 15396.3 Hz, Q=2.375 (2.6% error, 20.8% Q error)
 
 ```
-Generated Circuit (4 edges - most complex pure topology):
+Circuit Diagram (4 edges - most complex pure topology):
 
-    VIN (n1) ──────── R ────────┬──── INTERNAL (n3)
-                                │         │
-                                │      R+L network
-    VOUT (n2) ──────── R ───────┤         │
-         │                      │         │
-         R                      └─────────┘
+    VIN (n1) ──────── R3(618Ω) ──────┬──── INTERNAL (n3)
+                                     │         │
+                                     │    R2(2.1kΩ)+C1(53.8nF)
+    VOUT (n2) ──────── R4(6.0kΩ) ────┤    +L1(2.0mH)
+         │                           │         │
+         R1(4.7kΩ)                   └─────────┘
          │
         GND (n0)
 
-Topology: 4-edge RLC network with internal node
+SPICE Netlist:
+--------------
+VIN n1 0 DC 0 AC 1.0
+
+R1 0 n2 4.688350585938e+03
+C1 0 n3 5.376886846875e-08
+R2 0 n3 2.069810546875e+03
+L1 0 n3 1.987420488149e-03
+R3 n1 n3 6.184905395508e+02
+R4 n2 n3 6.015530273438e+03
+
+.ac dec 200 1.0 1000000.0
+
+Components: R1=4.7kΩ, R2=2.1kΩ, R3=618Ω, R4=6.0kΩ, C1=53.8nF, L1=2.0mH
+Topology: 4-edge RLC network with internal node (n3)
 Analysis: Most complex topology generated, excellent accuracy for Q>1
 ```
 
@@ -152,18 +175,31 @@ Analysis: Most complex topology generated, excellent accuracy for Q>1
 **Actual:** 4365.7 Hz, Q=0.707 (56.3% error, 92.9% Q error)
 
 ```
-Generated Circuit:
+Circuit Diagram:
 
-    VIN (n1) ──────── R ────── INTERNAL (n3)
-                                     │
-                                     L
-    VOUT (n2) ───────────────────────┤
-         │                           │
-        GND (n0) ────────────────────┘
+    VIN (n1) ──────── R1(687Ω) ──────── INTERNAL (n3)
+                                              │
+                                              │
+    VOUT (n2) ───────────────── L1(3.6mH) ────┤
+         │                                    │
+         C1(60.4nF)                           │
+         │                                    │
+        GND (n0) ────────────────────────────┘
 
-Topology: 3-edge RL network
-Analysis: Topology shows awareness (3 edges), but values completely wrong
-          System defaults to Q=0.707 for Q>5 targets
+SPICE Netlist:
+--------------
+VIN n1 0 DC 0 AC 1.0
+
+C1 0 n2 6.039092426136e-08
+R1 n1 n3 6.874627075195e+02
+L1 n2 n3 3.616266883910e-03
+
+.ac dec 200 1.0 1000000.0
+
+Components: R1=687Ω (VIN to n3), L1=3.6mH (VOUT to n3), C1=60.4nF (VOUT to GND)
+Topology: 3-edge RLC network
+Analysis: Topology shows awareness (3 edges), but Q defaults to 0.707
+          System cannot achieve Q>5 targets
 ```
 
 **Analysis:**
@@ -193,18 +229,30 @@ Analysis: Topology shows awareness (3 edges), but values completely wrong
 **Actual:** 39998.6 Hz, Q=0.134 (20.0% error, 33.9% Q error)
 
 ```
-Generated Circuit:
+Circuit Diagram (4-node network):
 
-    VIN (n1) ──────── R ────────┬──── INTERNAL (n3)
-                                │         │
-                                │      R+L network
-    VOUT (n2) ──────── R ───────┤         │
-         │                      │         │
-         R                      └─────────┘
+    VIN (n1) ──────── R2(100Ω) ──────┬──── n3
+                                     │     │
+                                     │     │
+    VOUT (n2) ──────────────── C1(22nF) ──┤── n4
+         │                           │     │
+         R1(1.25kΩ)                  └─ L1(720μH)
          │
         GND (n0)
 
-Topology: 4-edge complex network
+SPICE Netlist:
+--------------
+VIN n1 0 DC 0 AC 1.0
+
+R1 0 n2 1.253574951172e+03
+R2 n1 n3 1.002513275146e+02
+C1 n2 n4 2.200298432342e-08
+L1 n3 n4 7.195794605650e-04
+
+.ac dec 200 1.0 1000000.0
+
+Components: R1=1.25kΩ, R2=100Ω, C1=22nF, L1=720μH
+Topology: 4-edge complex network with 2 internal nodes (n3, n4)
 Analysis: Good cutoff accuracy (20%), Q close to target (0.134 vs 0.1)
 ```
 
@@ -257,15 +305,29 @@ Testing specifications that blend multiple filter types through k-NN interpolati
 - 20% low_pass (1/5 neighbors)
 
 ```
-Generated Circuit (3 types blended):
+Circuit Diagram (3 types blended):
 
-    VIN (n1) ──────── R ──────── VOUT (n2)
-                                     │
-                                  R+L network
-                                     │
-                                   GND (n0)
+    VIN (n1) ──────── R2(391Ω) ──────── VOUT (n2)
+                                            │
+                                       R1(6.9kΩ)+C1(37.2nF)
+                                       +L1(6.0mH)
+                                       (parallel RLC)
+                                            │
+                                          GND (n0)
 
-Topology: 2-edge RLC network
+SPICE Netlist:
+--------------
+VIN n1 0 DC 0 AC 1.0
+
+C1 0 n2 3.719846120021e-08
+R1 0 n2 6.913256347656e+03
+L1 0 n2 6.008800584823e-03
+R2 n1 n2 3.909108886719e+02
+
+.ac dec 200 1.0 1000000.0
+
+Components: R1=6.9kΩ, R2=391Ω, C1=37.2nF, L1=6.0mH
+Topology: Series R + Parallel RLC to ground
 Blend: rlc_parallel (60%) + band_pass (20%) + low_pass (20%)
 Analysis: Excellent hybrid result - Q close to target (0.923 vs 1.0)
 ```
@@ -288,15 +350,29 @@ Analysis: Excellent hybrid result - Q close to target (0.923 vs 1.0)
 - 40% band_stop (2/5 neighbors)
 
 ```
-Generated Circuit (2 types blended):
+Circuit Diagram (2 types blended):
 
-    VIN (n1) ──────── R ──────── VOUT (n2)
-                                     │
-                                  R+L network
-                                     │
-                                   GND (n0)
+    VIN (n1) ──────── R2(338Ω) ──────── VOUT (n2)
+                                            │
+                                       R1(5.3kΩ)+C1(74.8nF)
+                                       +L1(1.4mH)
+                                       (parallel RLC)
+                                            │
+                                          GND (n0)
 
-Topology: 2-edge RLC resonant network
+SPICE Netlist:
+--------------
+VIN n1 0 DC 0 AC 1.0
+
+C1 0 n2 7.481588681912e-08
+R1 0 n2 5.260436523438e+03
+L1 0 n2 1.375170424581e-03
+R2 n1 n2 3.382262878418e+02
+
+.ac dec 200 1.0 1000000.0
+
+Components: R1=5.3kΩ, R2=338Ω, C1=74.8nF, L1=1.4mH
+Topology: Series R + Parallel RLC to ground (resonant)
 Blend: rlc_parallel (60%) + band_stop (40%)
 Analysis: Excellent cutoff accuracy (4.6%)
 ```
