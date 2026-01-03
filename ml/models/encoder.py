@@ -1,13 +1,18 @@
 """
 Hierarchical Encoder for GraphVAE.
 
-Encodes circuit graphs into a 24D hierarchical latent space:
-    z = [z_topo (8D) | z_values (8D) | z_pz (8D)]
+Encodes circuit graphs into a hierarchical latent space.
+
+Production configuration (8D):
+    z = [z_topo (2D) | z_values (2D) | z_pz (4D)]
 
 where:
     - z_topo: Encodes graph topology and filter type
     - z_values: Encodes component values and their distributions
     - z_pz: Encodes poles/zeros (transfer function behavior)
+
+The latent dimensions are configurable via constructor parameters.
+Default total latent_dim=8 splits as 2D + 2D + 4D.
 """
 
 import torch
@@ -24,44 +29,54 @@ class HierarchicalEncoder(nn.Module):
 
     Architecture:
         Stage 1: Impedance-aware GNN (3 layers)
-            Input: Node features [4D] + Edge features [3D]
+            Input: Node features [4D] + Edge features [7D]
             Output: Node embeddings [64D]
 
         Stage 2: Hierarchical latent encoding
-            Branch 1 (Topology): Global pooling → MLP → μ_topo, log_σ_topo → z_topo [8D]
-            Branch 2 (Values): Edge aggregation → MLP → μ_values, log_σ_values → z_values [8D]
-            Branch 3 (Poles/Zeros): DeepSets → MLP → μ_pz, log_σ_pz → z_pz [8D]
+            Branch 1 (Topology): Global pooling → MLP → μ_topo, log_σ_topo → z_topo [2D]
+            Branch 2 (Values): Edge aggregation → MLP → μ_values, log_σ_values → z_values [2D]
+            Branch 3 (Poles/Zeros): DeepSets → MLP → μ_pz, log_σ_pz → z_pz [4D]
 
     Args:
         node_feature_dim: Input node feature dimension (default: 4)
-        edge_feature_dim: Input edge feature dimension (default: 3)
+        edge_feature_dim: Input edge feature dimension (default: 7)
         gnn_hidden_dim: Hidden dimension for GNN (default: 64)
         gnn_num_layers: Number of GNN layers (default: 3)
-        latent_dim: Total latent dimension (default: 24, split 8+8+8)
+        latent_dim: Total latent dimension (default: 8)
+        topo_latent_dim: Topology latent dimension (default: 2)
+        values_latent_dim: Values latent dimension (default: 2)
+        pz_latent_dim: Poles/zeros latent dimension (default: 4)
         dropout: Dropout probability (default: 0.1)
     """
 
     def __init__(
         self,
         node_feature_dim: int = 4,
-        edge_feature_dim: int = 3,
+        edge_feature_dim: int = 7,
         gnn_hidden_dim: int = 64,
         gnn_num_layers: int = 3,
-        latent_dim: int = 24,
+        latent_dim: int = 8,
         dropout: float = 0.1,
-        # Variable branch dimensions (defaults to equal split)
+        # Variable branch dimensions (defaults: 2D + 2D + 4D for 8D total)
         topo_latent_dim: Optional[int] = None,
         values_latent_dim: Optional[int] = None,
         pz_latent_dim: Optional[int] = None
     ):
         super().__init__()
 
-        # Set branch dimensions (default to equal split if not specified)
+        # Set branch dimensions
         if topo_latent_dim is None or values_latent_dim is None or pz_latent_dim is None:
-            assert latent_dim % 3 == 0, "Latent dim must be divisible by 3 for equal split"
-            self.topo_latent_dim = latent_dim // 3
-            self.values_latent_dim = latent_dim // 3
-            self.pz_latent_dim = latent_dim // 3
+            # Production defaults: 2D topology + 2D values + 4D TF = 8D total
+            if latent_dim == 8:
+                self.topo_latent_dim = 2
+                self.values_latent_dim = 2
+                self.pz_latent_dim = 4
+            else:
+                # Fall back to equal split for other latent dimensions
+                assert latent_dim % 3 == 0, "Latent dim must be divisible by 3 for equal split"
+                self.topo_latent_dim = latent_dim // 3
+                self.values_latent_dim = latent_dim // 3
+                self.pz_latent_dim = latent_dim // 3
         else:
             self.topo_latent_dim = topo_latent_dim
             self.values_latent_dim = values_latent_dim
@@ -73,7 +88,6 @@ class HierarchicalEncoder(nn.Module):
         self.edge_feature_dim = edge_feature_dim
         self.gnn_hidden_dim = gnn_hidden_dim
         self.latent_dim = latent_dim
-        self.latent_dim_per_branch = latent_dim // 3  # For backward compatibility
 
         # Stage 1: Impedance-Aware GNN
         self.gnn = ImpedanceGNN(
