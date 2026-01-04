@@ -1,37 +1,15 @@
-"""Loss functions for GraphVAE training."""
+"""Loss functions for circuit generation training.
 
-from .reconstruction import (
-    ReconstructionLoss,
-    TemplateAwareReconstructionLoss,
-    EdgeFeatureReconstructionLoss
-)
-from .transfer_function import (
-    TransferFunctionLoss,
-    SimplifiedTransferFunctionLoss,
-    chamfer_distance
-)
-from .ged_metric import (
-    GEDMetricLoss,
-    SoftGEDMetricLoss,
-    RegularizedGEDMetricLoss
-)
-from .composite import (
-    CompositeLoss,
-    SimplifiedCompositeLoss,
-    WeightScheduler
-)
+Current production loss:
+- GumbelSoftmaxCircuitLoss: Main training loss for joint edge-component prediction
+- ConnectivityLoss: Ensures VIN/VOUT connectivity (used internally by GumbelSoftmax)
+"""
+
+from .gumbel_softmax_loss import GumbelSoftmaxCircuitLoss
+from .connectivity_loss import ConnectivityLoss, SpectralConnectivityLoss
 
 __all__ = [
-    'ReconstructionLoss',
-    'TemplateAwareReconstructionLoss',
-    'EdgeFeatureReconstructionLoss',
-    'TransferFunctionLoss',
-    'SimplifiedTransferFunctionLoss',
-    'chamfer_distance',
-    'GEDMetricLoss',
-    'SoftGEDMetricLoss',
-    'RegularizedGEDMetricLoss',
-    'CompositeLoss',
-    'SimplifiedCompositeLoss',
-    'WeightScheduler'
+    'GumbelSoftmaxCircuitLoss',
+    'ConnectivityLoss',
+    'SpectralConnectivityLoss',
 ]
