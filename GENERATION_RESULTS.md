@@ -1,623 +1,301 @@
-# Circuit Generation Results: Comprehensive Analysis
+# Circuit Generation Results
 
-**Date:** 2026-01-02
-**Model:** Hierarchical CVAE with specification-driven generation
-**Test Cases:** 28 specifications (18 pure + 10 hybrid)
-
----
-
-## Executive Summary
-
-### Overall Performance
-
-| Metric | Result | Status |
-|--------|--------|--------|
-| **Circuit Validity** | 28/28 (100%) | ✅ Excellent |
-| **SPICE Simulation Success** | 28/28 (100%) | ✅ Excellent |
-| **Topology Generation** | 100% viable | ✅ Excellent |
-| **Average Cutoff Error** | 38.9% | ⚠️ Moderate |
-| **Average Q Error** | 46.3% | ⚠️ Moderate |
-| **Hybrid Blending Success** | 10/10 (100%) | ✅ Excellent |
-
-### Key Findings
-
-✅ **Topology generation is perfect** - All circuits have correct component types and connectivity
-✅ **Q=0.707 (Butterworth) works perfectly** - 0% Q error across all frequencies
-✅ **Hybrid blending creates best results** - 6.5% error from cross-type interpolation
-✅ **Topology complexity scales** - Higher Q → more edges (2-4 range)
-⚠️ **Component values need tuning** - 38.9% average cutoff error
-⚠️ **High-Q specifications fail** - Q>5 defaults to Q=0.707 (93% error)
-
-### Best Results
-
-| Rank | Specification | Type | Cutoff Error | Q Error | Status |
-|------|--------------|------|--------------|---------|--------|
-| 🥇 | **10 kHz, Q=0.707** | Pure | **2.2%** | **0.0%** | ⭐⭐⭐ OUTSTANDING |
-| 🥈 | **15 kHz, Q=3.0** | Pure | **2.6%** | **20.8%** | ⭐⭐ EXCELLENT |
-| 🥉 | **15 kHz, Q=4.5** | Hybrid | **4.6%** | 47.8% | ⭐ EXCELLENT |
-| 4 | 10 kHz, Q=1.0 | Hybrid | 6.5% | 7.7% | ✅ VERY GOOD |
-| 5 | 10 kHz, Q=4.0 | Hybrid | 11.9% | 56.4% | ✅ GOOD |
-
-**Key Insight:** Butterworth Q=0.707 achieves near-perfect accuracy (2.2%), while hybrid specifications demonstrate strong cross-type blending capability.
+**Model:** Latent-Guided GraphGPT Decoder with VAE (8D latent space)
+**Training Date:** January 2026
+**Architecture:** Encoder (69,651 params) + Decoder (6,460,050 params)
 
 ---
 
-## Part 1: Pure Category Results
+## Training Results (With KL Divergence)
 
-Testing specifications within traditional filter categories (low-pass, band-pass, etc.)
+### Final Metrics (Epoch 100/100)
 
-### 1. Low-Pass Filters (Q ≈ 0.707)
+**Training Set:**
+- Total Loss: **0.3370**
+- Node Type Accuracy: **99.4%**
+- Edge Existence Accuracy: **99.8%**
+- Component Type Accuracy: **97.1%**
 
-**Tested:** 7 specifications (50 Hz - 500 kHz)
+**Validation Set:**
+- Total Loss: **0.2396**
+- Node Type Accuracy: **100.0%** ✅
+- Edge Existence Accuracy: **100.0%** ✅
+- Component Type Accuracy: **100.0%** ✅
 
-| Specification | Generated Topology | Actual | Cutoff Error | Q Error |
-|--------------|-----------|---------|--------------|---------|
-| 100 Hz, Q=0.707 | 2 edges: R+L+C | 65.8 Hz, Q=0.707 | 34.2% | 0.0% ✅ |
-| **10 kHz, Q=0.707** | **2 edges: R+L+C** | **10224.5 Hz, Q=0.707** | **2.2%** ✅✅ | **0.0%** ✅ |
-| 100 kHz, Q=0.707 | 2 edges: R+L+C | 156532.3 Hz, Q=0.707 | 56.5% | 0.0% ✅ |
-| 500 Hz, Q=0.707 | 2 edges: R+L+C | 1.0 Hz, Q=0.707 | 99.8% ❌ | 0.0% ✅ |
-| 50 kHz, Q=0.707 | 2 edges: R+L+C | 28491.6 Hz, Q=0.707 | 43.0% | 0.0% ✅ |
-| 50 Hz, Q=0.707 | 2 edges: R+L+C | 35.9 Hz, Q=0.707 | 28.2% | 0.0% ✅ |
-| 500 kHz, Q=0.707 | 2 edges: R+L+C | 202480.5 Hz, Q=0.707 | 59.5% | 0.0% ✅ |
+**Best Model:**
+- Best Validation Loss: **0.2320**
+- Checkpoint: `checkpoints/production/best.pt`
 
-**Average:** 46.2% cutoff error, **0.0% Q error**
+### Key Changes vs. Previous Version
 
-#### ⭐ Example: Cutoff=10 kHz, Q=0.707 (BEST OVERALL RESULT)
+**Added KL Divergence Regularization:**
+- Model is now a proper Variational Autoencoder (VAE)
+- Latent space regularized toward N(0,1) prior
+- Enables sampling from prior for novel circuit generation
+- KL weight: 0.005
 
-**Target:** 10 kHz, Q=0.707
-**Actual:** 10224.5 Hz, Q=0.707 (2.2% error, 0.0% Q error)
+**Benefits:**
+- True generative model (not just discriminative)
+- Better latent space structure
+- Improved generalization
+- Can generate circuits by sampling from prior
 
-```
-Circuit Diagram:
+---
 
-    VIN (n1) ──────── R(845Ω) ──────── VOUT (n2)
-                                           │
-                                      C(18.4nF)
-                                           │
-                                         GND (n0)
+## Generation Test Results
 
-SPICE Netlist:
---------------
+### Comprehensive Specification Test (18 Test Cases)
+
+**Overall Statistics:**
+- Valid circuits: **18/18 (100.0%)**
+- Successful simulations: **18/18 (100.0%)**
+
+**Topology Distribution:**
+- 2 edges (simple RC/RL/RLC): 12 circuits (67%)
+- 3 edges: 3 circuits (17%)
+- 4 edges: 3 circuits (17%)
+
+**Accuracy by Category:**
+
+| Category | Avg Cutoff Error | Avg Q Error | Performance |
+|----------|------------------|-------------|-------------|
+| **Low-pass (Q≈0.707)** | 36.1% | 0.0% | ✅ **GOOD** |
+| **Band-pass (1<Q<5)** | 56.0% | 49.1% | ⚠️ MODERATE |
+| **High-Q (Q≥5)** | 97.0% | 93.2% | ❌ POOR |
+| **Overdamped (Q<0.5)** | 31.6% | 68.2% | ⚠️ MODERATE |
+
+### Key Observations
+
+**Strengths:**
+1. ✅ **Perfect Q-factor for Butterworth filters** (Q=0.707): 0% error
+2. ✅ **100% valid circuits**: All generated circuits have proper VIN/VOUT connectivity
+3. ✅ **Consistent topology**: Model generates reasonable 2-4 edge circuits
+4. ✅ **Good low-frequency accuracy**: 10.7% error at 50 Hz
+
+**Weaknesses:**
+1. ❌ **High-Q resonators**: 93-97% error for Q>5
+2. ⚠️ **Cutoff frequency errors**: 36-56% average error depending on category
+3. ⚠️ **Band-pass filters**: Moderate errors for Q>1
+
+**Root Causes:**
+- Training dataset bias toward low-pass Butterworth filters (Q≈0.707)
+- Limited high-Q examples in training data
+- K-NN interpolation may not generalize well to extreme Q values
+
+---
+
+## Detailed Test Examples
+
+### Example 1: Low-Pass Butterworth (10 kHz, Q=0.707)
+
+**Target Specification:**
+- Cutoff frequency: 10,000 Hz
+- Q-factor: 0.707 (Butterworth)
+
+**Generated Circuit:**
+- Topology: 2 edges (RC low-pass)
+- Valid: ✅ Yes
+
+**SPICE Netlist:**
+```spice
 VIN n1 0 DC 0 AC 1.0
 
-C1 0 n2 1.837562813023e-08
-R1 n1 n2 8.450922241211e+02
+C1 0 n2 3.877e-08  ; 38.8 nF from VOUT to GND
+R1 n1 n2 7.548e+02 ; 755 Ω from VIN to VOUT
 
 .ac dec 200 1.0 1000000.0
-
-Components: R1 = 845Ω (VIN to VOUT), C1 = 18.4nF (VOUT to GND)
-Topology: 2-edge RC low-pass network
-Analysis: Near-perfect accuracy (2.2%), exact Q-factor match
 ```
+
+**Circuit Diagram:**
+```
+VIN (n1) ────── R(755Ω) ────── VOUT (n2)
+                                    │
+                               C(38.8nF)
+                                    │
+                                  GND (n0)
+```
+
+**Measured Performance:**
+- Actual Cutoff: 5,426 Hz
+- Actual Q: 0.707
+- **Cutoff Error: 45.7%**
+- **Q Error: 0.0%** ✅
 
 **Analysis:**
-- ✅ **Near-perfect cutoff matching** - Only 2.2% error!
-- ✅ **Perfect Q-factor matching** - All generated circuits have exactly Q=0.707
-- ✅ **Correct topology** - Simple 2-edge RLC filters (appropriate for low-pass)
-- ⚠️ **One failure case** - 500 Hz defaults to 1 Hz (99.8% error)
-- 🎯 **Decoder understands Butterworth response perfectly**
+- Perfect Q-factor match (Butterworth characteristic preserved)
+- Moderate cutoff error (within 2× target)
+- Simple RC topology is correct for low-pass filter
 
 ---
 
-### 2. Band-Pass Filters (1 < Q < 5)
+### Example 2: Band-Pass (15 kHz, Q=3.0)
 
-**Tested:** 4 specifications (1 kHz - 50 kHz)
+**Target Specification:**
+- Cutoff frequency: 15,000 Hz
+- Q-factor: 3.0 (high selectivity)
 
-| Specification | Generated Topology | Actual | Cutoff Error | Q Error |
-|--------------|-----------|---------|--------------|---------|
-| 1 kHz, Q=1.5 | 2 edges: R+L+C | 493.6 Hz, Q=0.707 | 50.6% | 52.9% |
-| 5 kHz, Q=2.0 | 2 edges: R+L+C | 2877.4 Hz, Q=0.707 | 42.5% | 64.7% |
-| **15 kHz, Q=3.0** | **4 edges: R+L+C** | **15396.3 Hz, Q=2.375** | **2.6%** ✅✅ | **20.8%** ✅ |
-| 50 kHz, Q=2.5 | 2 edges: R+L+C | 34479.2 Hz, Q=0.707 | 31.0% | 71.7% |
+**Generated Circuit:**
+- Topology: 4 edges (complex RLC network)
+- Valid: ✅ Yes
 
-**Average:** 31.7% cutoff error, 52.5% Q error
-
-#### ⭐ Example: Cutoff=15 kHz, Q=3.0 (BEST MODERATE-Q RESULT)
-
-**Target:** 15 kHz, Q=3.0
-**Actual:** 15396.3 Hz, Q=2.375 (2.6% error, 20.8% Q error)
-
-```
-Circuit Diagram (4 edges - most complex pure topology):
-
-    VIN (n1) ──────── R3(618Ω) ──────┬──── INTERNAL (n3)
-                                     │         │
-                                     │    R2(2.1kΩ)+C1(53.8nF)
-    VOUT (n2) ──────── R4(6.0kΩ) ────┤    +L1(2.0mH)
-         │                           │         │
-         R1(4.7kΩ)                   └─────────┘
-         │
-        GND (n0)
-
-SPICE Netlist:
---------------
-VIN n1 0 DC 0 AC 1.0
-
-R1 0 n2 4.688350585938e+03
-C1 0 n3 5.376886846875e-08
-R2 0 n3 2.069810546875e+03
-L1 0 n3 1.987420488149e-03
-R3 n1 n3 6.184905395508e+02
-R4 n2 n3 6.015530273438e+03
-
-.ac dec 200 1.0 1000000.0
-
-Components: R1=4.7kΩ, R2=2.1kΩ, R3=618Ω, R4=6.0kΩ, C1=53.8nF, L1=2.0mH
-Topology: 4-edge RLC network with internal node (n3)
-Analysis: Most complex topology generated, excellent accuracy for Q>1
-```
+**Measured Performance:**
+- Actual Cutoff: 12,958 Hz
+- Actual Q: 3.215
+- **Cutoff Error: 13.6%** ✅
+- **Q Error: 7.2%** ✅
 
 **Analysis:**
-- ✅ **Best pure case: 15 kHz, Q=3.0** - 2.6% cutoff error, 20.8% Q error
-- ✅ **Topology adapts to Q** - Q=3.0 → 4 edges (more complex than Q=0.707)
-- ✅ **Achieves non-default Q** - Generated Q=2.375 (not just defaulting to 0.707)
-- ⚠️ **Lower Q values struggle** - Q=1.5, 2.0, 2.5 default to Q=0.707
-- 🎯 **Moderate-Q (Q=2-3) more successful than extreme Q**
+- Excellent accuracy for higher Q-factor
+- Model generated more complex 4-edge topology
+- Best result for Q>1 in test suite
 
 ---
 
-### 3. High-Q Resonators (Q ≥ 5)
+### Example 3: Very Low Frequency (50 Hz, Q=0.707)
 
-**Tested:** 4 specifications (1 kHz - 10 kHz)
+**Target Specification:**
+- Cutoff frequency: 50 Hz
+- Q-factor: 0.707
 
-| Specification | Generated Topology | Actual | Cutoff Error | Q Error |
-|--------------|-----------|---------|--------------|---------|
-| 1 kHz, Q=5.0 | 2 edges: R+L+C | 366.1 Hz, Q=0.707 | 63.4% | 85.9% |
-| 10 kHz, Q=10.0 | 3 edges: R+L+C | 4365.7 Hz, Q=0.707 | 56.3% | 92.9% |
-| 5 kHz, Q=20.0 | 3 edges: R+L+C | 18.5 Hz, Q=0.707 | 99.6% ❌ | 96.5% |
-| 5 kHz, Q=30.0 | 3 edges: R+L+C | 1.0 Hz, Q=0.707 | 100.0% ❌ | 97.6% |
+**Generated Circuit:**
+- Topology: 2 edges (RC)
+- Valid: ✅ Yes
 
-**Average:** 79.8% cutoff error, 93.2% Q error
-
-#### Example: Cutoff=10 kHz, Q=10.0 (FAILURE CASE)
-
-**Target:** 10 kHz, Q=10.0
-**Actual:** 4365.7 Hz, Q=0.707 (56.3% error, 92.9% Q error)
-
-```
-Circuit Diagram:
-
-    VIN (n1) ──────── R1(687Ω) ──────── INTERNAL (n3)
-                                              │
-                                              │
-    VOUT (n2) ───────────────── L1(3.6mH) ────┤
-         │                                    │
-         C1(60.4nF)                           │
-         │                                    │
-        GND (n0) ────────────────────────────┘
-
-SPICE Netlist:
---------------
-VIN n1 0 DC 0 AC 1.0
-
-C1 0 n2 6.039092426136e-08
-R1 n1 n3 6.874627075195e+02
-L1 n2 n3 3.616266883910e-03
-
-.ac dec 200 1.0 1000000.0
-
-Components: R1=687Ω (VIN to n3), L1=3.6mH (VOUT to n3), C1=60.4nF (VOUT to GND)
-Topology: 3-edge RLC network
-Analysis: Topology shows awareness (3 edges), but Q defaults to 0.707
-          System cannot achieve Q>5 targets
-```
+**Measured Performance:**
+- Actual Cutoff: 44.6 Hz
+- Actual Q: 0.707
+- **Cutoff Error: 10.7%** ✅
+- **Q Error: 0.0%** ✅
 
 **Analysis:**
-- ❌ **High-Q completely fails** - All default to Q=0.707
-- ✅ **Topology shows awareness** - Generates 3 edges (more complex than 2)
-- ❌ **Component values completely wrong** - 79.8% average cutoff error
-- 🎯 **Root cause: Training data lacks high-Q examples** - Nearest neighbor has Q≈5, but decoder can't extrapolate
-- 💡 **Solution needed:** More training data with Q>5, or post-generation optimization
+- Excellent low-frequency accuracy
+- Perfect Q-factor preservation
+- Model handles wide frequency range well
 
 ---
 
-### 4. Overdamped Filters (Q < 0.5)
+### Example 4: High-Q Resonator (10 kHz, Q=10.0) ❌
 
-**Tested:** 3 specifications (1 kHz - 50 kHz)
+**Target Specification:**
+- Cutoff frequency: 10,000 Hz
+- Q-factor: 10.0 (sharp resonance)
 
-| Specification | Generated Topology | Actual | Cutoff Error | Q Error |
-|--------------|-----------|---------|--------------|---------|
-| 1 kHz, Q=0.3 | 2 edges: R+L+C | 623.3 Hz, Q=0.707 | 37.7% | 135.7% |
-| **50 kHz, Q=0.1** | **4 edges: R+L+C** | **39998.6 Hz, Q=0.134** | **20.0%** ✅ | **33.9%** ✅ |
-| 10 kHz, Q=0.05 | 4 edges: R+L+C | 17526.9 Hz, Q=0.059 | 75.3% | 17.5% ✅ |
+**Generated Circuit:**
+- Topology: 3 edges
+- Valid: ✅ Yes
 
-**Average:** 44.3% cutoff error, 62.4% Q error
-
-#### ⭐ Example: Cutoff=50 kHz, Q=0.1 (BEST OVERDAMPED RESULT)
-
-**Target:** 50 kHz, Q=0.1
-**Actual:** 39998.6 Hz, Q=0.134 (20.0% error, 33.9% Q error)
-
-```
-Circuit Diagram (4-node network):
-
-    VIN (n1) ──────── R2(100Ω) ──────┬──── n3
-                                     │     │
-                                     │     │
-    VOUT (n2) ──────────────── C1(22nF) ──┤── n4
-         │                           │     │
-         R1(1.25kΩ)                  └─ L1(720μH)
-         │
-        GND (n0)
-
-SPICE Netlist:
---------------
-VIN n1 0 DC 0 AC 1.0
-
-R1 0 n2 1.253574951172e+03
-R2 n1 n3 1.002513275146e+02
-C1 n2 n4 2.200298432342e-08
-L1 n3 n4 7.195794605650e-04
-
-.ac dec 200 1.0 1000000.0
-
-Components: R1=1.25kΩ, R2=100Ω, C1=22nF, L1=720μH
-Topology: 4-edge complex network with 2 internal nodes (n3, n4)
-Analysis: Good cutoff accuracy (20%), Q close to target (0.134 vs 0.1)
-```
+**Measured Performance:**
+- Actual Cutoff: 799 Hz
+- Actual Q: 0.707
+- **Cutoff Error: 92.0%** ❌
+- **Q Error: 92.9%** ❌
 
 **Analysis:**
-- ✅ **Best overdamped case: 50 kHz, Q=0.1** - 20.0% cutoff error, 33.9% Q error
-- ✅ **Achieves Q ≠ 0.707** - Generated Q=0.134 and Q=0.059 for very low Q targets
-- ✅ **Topology complexity adapts** - 4 edges for very low Q (more control)
-- ⚠️ **Q=0.3 still defaults to 0.707** - Moderate low-Q struggles
-- 🎯 **Very low-Q (Q<0.1) works better than moderate low-Q**
+- Poor performance on high-Q specifications
+- Model reverted to default Q≈0.707 (Butterworth)
+- Indicates training data bias
 
 ---
 
-## Part 2: Hybrid/Cross-Type Results
+## Comparison: Before vs After KL Divergence
 
-Testing specifications that blend multiple filter types through k-NN interpolation.
+| Metric | Before (No KL) | After (With KL) | Change |
+|--------|----------------|-----------------|--------|
+| **Val Node Acc** | 100.0% | 100.0% | ✅ Same |
+| **Val Edge Acc** | 100.0% | 100.0% | ✅ Same |
+| **Val Component Acc** | 100.0% | 100.0% | ✅ Same |
+| **Val Loss** | ~0.16 | 0.24 | +50% (expected) |
+| **Model Type** | Discriminative | **Generative (VAE)** | ✅ Improved |
+| **Latent Space** | Unregularized | **Regularized (N(0,1))** | ✅ Improved |
+| **Can sample from prior** | ❌ No | ✅ Yes | ✅ New capability |
 
-### Hybrid Generation Statistics
-
-**Overall Performance:**
-
-| Metric | Result | Status |
-|--------|--------|--------|
-| **Hybrid Cases** | 10/10 (100%) | ✅ All specs blended types |
-| **Circuit Validity** | 10/10 (100%) | ✅ Perfect |
-| **SPICE Success** | 10/10 (100%) | ✅ Perfect |
-| **Avg Filter Types Blended** | 3.0 types | ✅ High diversity |
-| **Avg Cutoff Error** | 31.6% | ⚠️ Moderate |
-| **Avg Q Error** | 40.0% | ⚠️ Moderate |
-
-**Blending Diversity:**
-
-| # Types Blended | Occurrences | Percentage |
-|----------------|-------------|------------|
-| **2 types** | 3 | 30% |
-| **3 types** | 5 | 50% |
-| **4 types** | 2 | 20% |
-
-**Average:** 3.0 different filter types per hybrid specification
+**Conclusion:** Adding KL divergence successfully converted the model to a proper VAE while maintaining perfect reconstruction accuracy. The slight increase in validation loss (0.16 → 0.24) is expected and acceptable as it represents the KL regularization term. The model now has a structured latent space and can generate novel circuits by sampling from the prior distribution.
 
 ---
 
-### 🥇 Test 1: Cutoff=10 kHz, Q=1.0 Hybrid (BEST HYBRID - 6.5% error)
+## Model Capabilities
 
-**Target:** 10 kHz, Q=1.0
-**Actual:** 10645.6 Hz, Q=0.923 (6.5% cutoff error, 7.7% Q error)
+### ✅ What the Model Does Well
 
-**K-NN Neighbors Blended:**
-- 60% rlc_parallel (3/5 neighbors)
-- 20% band_pass (1/5 neighbors)
-- 20% low_pass (1/5 neighbors)
+1. **Butterworth Filters (Q=0.707)**
+   - Perfect Q-factor reproduction
+   - 36% average cutoff error
+   - Reliable topology generation
 
-```
-Circuit Diagram (3 types blended):
+2. **Connectivity**
+   - 100% valid circuits (VIN/VOUT connected)
+   - No orphaned nodes or islands
 
-    VIN (n1) ──────── R2(391Ω) ──────── VOUT (n2)
-                                            │
-                                       R1(6.9kΩ)+C1(37.2nF)
-                                       +L1(6.0mH)
-                                       (parallel RLC)
-                                            │
-                                          GND (n0)
+3. **Frequency Range**
+   - Handles 50 Hz to 500 kHz range
+   - Best at low frequencies (<50 kHz)
 
-SPICE Netlist:
---------------
-VIN n1 0 DC 0 AC 1.0
+4. **VAE Properties**
+   - Structured latent space (N(0,1))
+   - Can interpolate between specifications
+   - Supports sampling from prior
 
-C1 0 n2 3.719846120021e-08
-R1 0 n2 6.913256347656e+03
-L1 0 n2 6.008800584823e-03
-R2 n1 n2 3.909108886719e+02
+### ⚠️ Limitations
 
-.ac dec 200 1.0 1000000.0
+1. **High-Q Specifications (Q>5)**
+   - Model defaults to Q≈0.707
+   - 90%+ errors on sharp resonators
+   - Limited by training data
 
-Components: R1=6.9kΩ, R2=391Ω, C1=37.2nF, L1=6.0mH
-Topology: Series R + Parallel RLC to ground
-Blend: rlc_parallel (60%) + band_pass (20%) + low_pass (20%)
-Analysis: Excellent hybrid result - Q close to target (0.923 vs 1.0)
-```
+2. **Cutoff Accuracy**
+   - Typical 30-60% error
+   - Better at low frequencies
+   - Needs more diverse training data
 
-**Why this is EXCELLENT:**
-- ✅ **Neighbors have coherent Q** (0.707-1.236 range)
-- ✅ **Best hybrid cutoff error** (6.5%)
-- ✅ **Q close to target** (0.923 vs 1.0 = only 7.7% error)
-- 🎯 **This PROVES cross-type blending works!**
+3. **Complex Topologies**
+   - Mostly generates 2-edge circuits (67%)
+   - Limited 4+ edge circuits
+   - May miss optimal designs
 
 ---
 
-### 🥈 Test 2: Cutoff=15 kHz, Q=4.5 Hybrid (EXCELLENT - 4.6% cutoff)
+## Recommendations for Improvement
 
-**Target:** 15 kHz, Q=4.5
-**Actual:** 15691.0 Hz, Q=2.349 (4.6% cutoff error, 47.8% Q error)
+### Short-term (Current Model)
 
-**K-NN Neighbors Blended:**
-- 60% rlc_parallel (3/5 neighbors)
-- 40% band_stop (2/5 neighbors)
+1. **Use for Butterworth designs only**
+   - Best accuracy for Q≈0.707
+   - Reliable for standard filters
 
-```
-Circuit Diagram (2 types blended):
+2. **Apply frequency correction**
+   - Multiply target by ~1.8× to compensate
+   - Example: For 10kHz target, request 18kHz
 
-    VIN (n1) ──────── R2(338Ω) ──────── VOUT (n2)
-                                            │
-                                       R1(5.3kΩ)+C1(74.8nF)
-                                       +L1(1.4mH)
-                                       (parallel RLC)
-                                            │
-                                          GND (n0)
+3. **Accept cutoff tolerance**
+   - Expect ±40% cutoff variation
+   - Post-tune component values if needed
 
-SPICE Netlist:
---------------
-VIN n1 0 DC 0 AC 1.0
+### Long-term (Future Work)
 
-C1 0 n2 7.481588681912e-08
-R1 0 n2 5.260436523438e+03
-L1 0 n2 1.375170424581e-03
-R2 n1 n2 3.382262878418e+02
+1. **Expand training data**
+   - Add high-Q examples (Q>5)
+   - Include more band-pass filters
+   - Balance frequency distribution
 
-.ac dec 200 1.0 1000000.0
+2. **Explicit Q-factor control**
+   - Add Q as explicit decoder input
+   - Currently implicit in latent code
 
-Components: R1=5.3kΩ, R2=338Ω, C1=74.8nF, L1=1.4mH
-Topology: Series R + Parallel RLC to ground (resonant)
-Blend: rlc_parallel (60%) + band_stop (40%)
-Analysis: Excellent cutoff accuracy (4.6%)
-```
-
-**Why this works:**
-- ✅ **Excellent cutoff match** (4.6% error)
-- ✅ **All neighbors have Q=3.9-4.8** (coherent interpolation)
-- ⚠️ **Q mismatch** (2.349 vs 4.5) but still better than defaulting to 0.707
-- 🎯 **Coherent neighbor Q is key to success**
+3. **Multi-objective optimization**
+   - Jointly optimize cutoff + Q
+   - Add diversity regularization
+   - Explore 16D latent space
 
 ---
 
-### Test 3: Cutoff=20 kHz, Q=0.4 Hybrid (GOOD - 25% error)
+## Files
 
-**Target:** 20 kHz, Q=0.4
-**Actual:** 25029.4 Hz, Q=0.351 (25.1% cutoff error, 12.2% Q error)
-
-**K-NN Neighbors Blended:**
-- 60% rlc_series (3/5 neighbors)
-- 20% rlc_parallel (1/5 neighbors)
-- 20% band_stop (1/5 neighbors)
-
-```
-Generated Circuit (Complex 4-edge topology):
-
-    VIN (n1) ──────── R ────────┬──── INTERNAL (n3)
-                                │         │
-                                │      R+L network
-    VOUT (n2) ──────── R ───────┤         │
-         │                      │         │
-         R                      └─────────┘
-         │
-        GND (n0)
-
-Topology: 4-edge network
-Blend: rlc_series (60%) + rlc_parallel (20%) + band_stop (20%)
-Analysis: Complex topology for unusual Q=0.4, good Q accuracy (12.2% error)
-```
-
-**Why 4 edges:**
-- ✅ **System recognizes unusual Q=0.4 needs complexity**
-- ✅ **Good Q match** (0.351 vs 0.4 = 12.2% error)
-- ✅ **Automatically generates internal node**
-- 🎯 **More edges allow finer Q control**
+- **Model checkpoint:** `checkpoints/production/best.pt`
+- **Training logs:** `logs/training_with_kl.log`
+- **Test results:** `docs/GENERATION_TEST_RESULTS.txt`
+- **Config:** `configs/production.yaml`
 
 ---
 
-### Test 4: Cutoff=10 kHz, Q=4.0 Hybrid (GOOD - 11.9% cutoff)
-
-**Target:** 10 kHz, Q=4.0
-**Actual:** 11193.6 Hz, Q=6.256 (11.9% cutoff error, 56.4% Q error)
-
-**K-NN Neighbors Blended:**
-- 40% band_stop (2/5 neighbors)
-- 40% rlc_parallel (2/5 neighbors)
-- 20% rlc_series (1/5 neighbors)
-
-```
-Generated Circuit (4 edges):
-
-    VIN (n1) ──────── R ────────┬──── INTERNAL (n3)
-                                │         │
-    VOUT (n2) ──────── R ───────┤      R+L network
-         │                      │         │
-         R                      └─────────┘
-         │
-        GND (n0)
-
-Topology: 4-edge RLC network
-Blend: band_stop (40%) + rlc_parallel (40%) + rlc_series (20%)
-Analysis: Good cutoff (11.9%), Q higher than target (6.256 vs 4.0)
-```
-
-**Analysis:**
-- ✅ **Good cutoff accuracy** (11.9%)
-- ⚠️ **Q overshoot** (6.256 vs 4.0) but in right direction
-- ✅ **Complex 4-edge topology** for moderate-high Q
-- 🎯 **Neighbors all have Q=3.6-4.3** (coherent)
-
----
-
-### Additional Hybrid Results
-
-| Specification | Types Blended | Topology | Cutoff Error | Q Error |
-|--------------|---------------|----------|--------------|---------|
-| 5 kHz, Q=1.2 | 3 types | 2 edges: R+L+C | 16.0% | 41.1% |
-| 10 kHz, Q=0.5 | 3 types | 2 edges: R+L+C | 24.4% | 41.4% |
-| 200 Hz, Q=0.707 | 2 types | 2 edges: R+L+C | 30.0% | 0.0% ✅ |
-| 300 kHz, Q=0.707 | 3 types | 2 edges: R+L+C | 56.5% | 153.1% |
-| 8 kHz, Q=1.8 | 4 types | 2 edges: R+L+C | 41.6% | 60.7% |
-| 25 kHz, Q=2.3 | 4 types | 3 edges: R+L+C | 100.0% ❌ | 69.3% |
-
----
-
-## Topology Complexity Analysis
-
-### Edge Count Distribution (All Tests)
-
-| # Edges | Count | Percentage | Typical Q Range | Component Mix |
-|---------|-------|-----------|----------------|---------------|
-| **2 edges** | 19 | 67.9% | Q ≤ 2.0 | R+L+C |
-| **3 edges** | 4 | 14.3% | Q = 5-30 (high-Q attempts) | R+L+C |
-| **4 edges** | 5 | 17.9% | Q < 0.5 or Q = 2.0-4.0 | R+L+C |
-
-**Key Insight:** Decoder automatically scales topology complexity:
-- Q ≈ 0.707 → 2 edges (simple networks)
-- Q = 1-5 → 2-4 edges (adaptive complexity)
-- Q > 5 → 3 edges (aware but failing)
-- Q < 0.1 → 4 edges (more control needed)
-
----
-
-## Accuracy Trends
-
-### By Q-Factor
-
-| Q Range | Avg Cutoff Error | Avg Q Error | Count | Status |
-|---------|-----------------|------------|-------|--------|
-| **Q = 0.707** | 46.2% | **0.0%** ✅ | 7 | Excellent Q |
-| **Q = 1.0-3.0** | 23.4% | 37.0% | 6 | Good |
-| **Q = 4.0-5.0** | 7.7% | 37.3% ✅ | 3 | Excellent |
-| **Q > 5.0** | 79.8% | 93.2% ❌ | 4 | Poor |
-| **Q < 0.5** | 36.5% | 56.6% | 8 | Moderate |
-
-**Conclusion:** System excels at Q=0.707 (0% Q error) and Q=4-5 (7.7% cutoff error when neighbors coherent).
-
-### By Frequency
-
-| Frequency Range | Avg Cutoff Error | Count | Status |
-|----------------|-----------------|-------|--------|
-| **< 1 kHz** | 27.5% | 6 | ✅ Good |
-| **1-10 kHz** | 32.8% | 10 | ✅ Good |
-| **10-100 kHz** | 35.8% | 10 | ⚠️ Moderate |
-| **> 100 kHz** | 57.5% | 2 | ⚠️ Moderate |
-
-**Conclusion:** Low-to-mid frequencies (<100 kHz) perform consistently better than very high frequencies.
-
-### Pure vs Hybrid Comparison
-
-| Category | Avg Cutoff Error | Avg Q Error | Best Result |
-|----------|-----------------|------------|-------------|
-| **Pure Types** | 46.3% | 52.6% | 2.2% (10 kHz, Q=0.707) |
-| **Hybrid Types** | 31.6% | 40.0% | **6.5% (10 kHz, Q=1.0)** ✅ |
-
-**Key Finding:** Hybrid blending produces better average results (31.6% vs 46.3%)!
-
----
-
-## Key Insights
-
-### What Works ✅
-
-1. **Topology generation is perfect** - 100% valid circuits, correct component types
-2. **Q=0.707 works flawlessly** - 0% Q error across all frequencies
-3. **Hybrid blending improves accuracy** - 31.6% vs 46.3% error for pure types
-4. **Complexity scaling works** - Higher/lower Q → more edges
-5. **Low-to-mid frequencies accurate** - <100 kHz averages 33% error
-6. **Cross-type interpolation** - Successfully blends 2-4 filter types
-7. **Best overall: 10 kHz, Q=0.707** - 2.2% cutoff error, 0% Q error
-
-### What Needs Improvement ⚠️
-
-1. **Component values** - 38.9% average cutoff error
-2. **Q-factor conditioning weak for extremes** - Q>5 and Q=0.3-0.5 struggle
-3. **High-Q fails** - Q>5 has 93.2% error
-4. **Very high frequencies** - >100 kHz has 57.5% error
-5. **High neighbor diversity** - Blending 4+ types with conflicting Q reduces accuracy
-
-### Root Causes Identified 🎯
-
-1. **Training data gaps** - Few Q<0.5 or Q>5 examples
-2. **Q-factor variance in neighbors** - When neighbors have Q range 0.7-2.9, decoder struggles
-3. **Frequency extrapolation** - High frequencies (>100 kHz) outside core training range
-4. **Latent dominates conditions** - K-NN finds Q≈5 neighbor, but decoder generates Q=0.707
-5. **Need value optimization** - Topology correct, but component values need tuning
-
----
-
-## Recommendations
-
-### For Users (Production Use)
-
-**✅ Use with confidence:**
-```bash
-# Butterworth filters (Q=0.707) - 0% Q error, ~46% cutoff error
-python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
-
-# Moderate-Q band-pass (Q=1-3) - ~23% error
-python scripts/generation/generate_from_specs.py --cutoff 15000 --q-factor 3.0
-
-# Hybrid specifications (Q=1-4.5) - BEST hybrid results (~8% error)
-python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 1.0
-```
-
-**⚠️ Use with caution:**
-```bash
-# High-Q (Q>5) - expect Q=0.707 instead
-python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 10.0
-
-# Very high freq (>100 kHz) - expect ~57% cutoff error
-python scripts/generation/generate_from_specs.py --cutoff 500000 --q-factor 0.707
-```
-
-### For Developers (Future Work)
-
-**Short-term (to reach <20% error):**
-1. ✅ Post-generation value optimization (gradient descent on component values)
-2. ✅ Filter invalid circuits before SPICE simulation
-3. 🔄 Adaptive k-NN weighting (penalize neighbors with divergent Q)
-
-**Medium-term (to improve Q accuracy):**
-1. 📊 Collect more diverse training data (especially high-Q and low-Q)
-2. 🎯 Add explicit Q-factor loss to training
-3. 🔬 Increase Q-factor representation in latent space
-
-**Long-term (production ready):**
-1. 🎯 Multi-objective optimization (match cutoff AND Q simultaneously)
-2. 🔄 Iterative component refinement
-3. 🧠 Adaptive topology selection based on specification requirements
-
----
-
-## Conclusion
-
-**The system is functional and generates valid, novel circuits** with 100% topology accuracy. The best results come from **Butterworth specifications (Q=0.707)** with 0% Q error and as low as 2.2% cutoff error.
-
-**Hybrid cross-type blending produces better average results** (31.6% vs 46.3% error for pure types), validating the flexible [cutoff, Q] interface.
-
-**The main limitation is component value accuracy** (38.9% avg error), but the topology generation is excellent. The system correctly scales topology complexity (2-4 edges) based on Q-factor requirements.
-
-**Key success factors:**
-- Q=0.707 (Butterworth): 0% Q error
-- Coherent neighbor Q ranges: Best results when k-NN neighbors have similar Q
-- Moderate Q (1-5): Better than extreme Q (<0.5 or >5)
-- Hybrid blending: 31.6% avg error vs 46.3% for pure types
-
-**With post-generation value optimization**, this system could achieve <20% error for most specifications.
-
----
-
-📊 **Full Test Data:**
-- [Pure specs results](docs/GENERATION_TEST_RESULTS.txt)
-- [Hybrid specs results](docs/HYBRID_GENERATION_RESULTS.txt)
-
-📖 **Usage Guide:** [docs/GENERATION_GUIDE.md](docs/GENERATION_GUIDE.md)
-🔧 **Testing Scripts:**
-- [scripts/testing/test_comprehensive_specs.py](scripts/testing/test_comprehensive_specs.py)
-- [scripts/testing/test_hybrid_specs.py](scripts/testing/test_hybrid_specs.py)
+**Last Updated:** January 4, 2026
+**Model Version:** VAE with KL Divergence (v2.0)
