@@ -115,7 +115,7 @@ output = {
     'val_distribution': dict(val_dist)
 }
 
-torch.save(output, 'stratified_split.pt')
+torch.save(output, 'rlc_dataset/stratified_split.pt')
 print(f"\n{'='*70}")
-print("Saved stratified split to: stratified_split.pt")
+print("Saved stratified split to: rlc_dataset/stratified_split.pt")
 print("="*70)

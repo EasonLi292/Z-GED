@@ -268,7 +268,7 @@ def main():
     print(f"Total samples: {len(dataset)}")
 
     # Load stratified split
-    split_data = torch.load('stratified_split.pt')
+    split_data = torch.load('rlc_dataset/stratified_split.pt')
     train_indices = split_data['train_indices']
     val_indices = split_data['val_indices']
 

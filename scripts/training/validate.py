@@ -61,7 +61,7 @@ decoder.eval()
 
 # Load stratified validation set
 dataset = CircuitDataset('rlc_dataset/filter_dataset.pkl')
-split_data = torch.load('stratified_split.pt')
+split_data = torch.load('rlc_dataset/stratified_split.pt')
 val_indices = split_data['val_indices']
 val_dataset = Subset(dataset, val_indices)
 

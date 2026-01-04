@@ -212,7 +212,7 @@ checkpoints/archive/
 experiments/*/checkpoints/
 analysis_results/
 TRAINING_IN_PROGRESS.md
-training_log*.txt
-stratified_split.pt
+logs/*.log
+rlc_dataset/stratified_split.pt
 *.pyc
 __pycache__/
