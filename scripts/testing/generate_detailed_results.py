@@ -110,51 +110,81 @@ def format_component_value(value, unit):
         return f"{value:.2e}{unit}"
 
 
-def generate_circuit_diagram(node_types, edge_existence, edge_values, impedance_mean, impedance_std):
-    """Generate ASCII circuit diagram."""
-    # Node type mapping
-    node_names = ['GND', 'VIN', 'VOUT', 'n3', 'n4']
+def parse_spice_netlist(netlist):
+    """Parse SPICE netlist and extract components."""
+    import re
 
-    # Parse circuit
-    edges = []
-    for i in range(5):
-        for j in range(i+1, 5):
-            if edge_existence[i, j] > 0.5:
-                # Denormalize values
-                denorm_vals = edge_values[i, j, :3].numpy() * impedance_std + impedance_mean
+    components = []
+    lines = netlist.strip().split('\n')
 
-                # Convert from log space
-                C = np.exp(denorm_vals[0])
-                G = denorm_vals[1]
-                L_inv = np.exp(denorm_vals[2])
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('*') or line.startswith('.') or line.startswith('VIN'):
+            continue
 
-                R = 1.0 / (G + 1e-15) if G > 1e-12 else float('inf')
-                L = 1.0 / (L_inv + 1e-15) if L_inv > 1e-12 else float('inf')
+        # Parse component lines: "C1 n1 n2 value" or "R1 n1 n2 value" or "L1 n1 n2 value"
+        parts = line.split()
+        if len(parts) >= 4:
+            comp_name = parts[0]
+            node1 = parts[1]
+            node2 = parts[2]
+            value = float(parts[3])
 
-                # Determine component types
-                components = []
-                if C > 1e-12 and C < 1:
-                    components.append(('C', C))
-                if R < 1e6 and R > 1:
-                    components.append(('R', R))
-                if L > 1e-9 and L < 1:
-                    components.append(('L', L))
+            comp_type = comp_name[0]  # C, R, or L
 
-                edges.append({
-                    'from': node_names[i],
-                    'to': node_names[j],
-                    'components': components
-                })
+            # Convert node names
+            node_map = {'0': 'GND', 'n1': 'VIN', 'n2': 'VOUT', 'n3': 'n3', 'n4': 'n4'}
+            node1_name = node_map.get(node1, node1)
+            node2_name = node_map.get(node2, node2)
+
+            components.append({
+                'type': comp_type,
+                'name': comp_name,
+                'node1': node1_name,
+                'node2': node2_name,
+                'value': value
+            })
+
+    return components
+
+
+def generate_circuit_diagram(netlist):
+    """Generate ASCII circuit diagram from SPICE netlist."""
+    components = parse_spice_netlist(netlist)
+
+    if not components:
+        return "No components found"
+
+    # Group components by edge (node pair)
+    edges = {}
+    for comp in components:
+        # Normalize edge key (always smaller node first for consistency)
+        nodes = tuple(sorted([comp['node1'], comp['node2']]))
+        if nodes not in edges:
+            edges[nodes] = []
+        edges[nodes].append(comp)
 
     # Build diagram
     diagram_lines = []
-    for edge in edges:
-        comp_str = ' + '.join([f"{c[0]}({format_component_value(c[1], 'F' if c[0]=='C' else 'H' if c[0]=='L' else 'Ω')})"
-                               for c in edge['components']])
-        if comp_str:
-            diagram_lines.append(f"{edge['from']} ({edge['from']}) ────── {comp_str} ────── {edge['to']} ({edge['to']})")
-        else:
-            diagram_lines.append(f"{edge['from']} ({edge['from']}) ──────────────────── {edge['to']} ({edge['to']})")
+    for (node1, node2), comps in sorted(edges.items()):
+        comp_strs = []
+        for comp in comps:
+            value = comp['value']
+            comp_type = comp['type']
+
+            if comp_type == 'C':
+                formatted = format_component_value(value, 'F')
+            elif comp_type == 'L':
+                formatted = format_component_value(value, 'H')
+            elif comp_type == 'R':
+                formatted = format_component_value(value, 'Ω')
+            else:
+                formatted = f"{value:.2e}"
+
+            comp_strs.append(f"{comp['name']}={formatted}")
+
+        components_str = ', '.join(comp_strs)
+        diagram_lines.append(f"{node1} ────── {components_str} ────── {node2}")
 
     return '\n'.join(diagram_lines)
 
@@ -293,13 +323,7 @@ def main():
                     edge_values=circuit['edge_values'][0]
                 )
 
-                diagram = generate_circuit_diagram(
-                    node_types_onehot,
-                    circuit['edge_existence'][0],
-                    circuit['edge_values'][0],
-                    impedance_mean,
-                    impedance_std
-                )
+                diagram = generate_circuit_diagram(netlist)
 
                 frequencies, response = simulator.run_ac_analysis(netlist)
                 specs = extract_cutoff_and_q(frequencies, response)
@@ -373,6 +397,8 @@ def main():
                 f.write(f"**SPICE Netlist:**\n")
                 f.write("```spice\n")
                 f.write(r['netlist'])
+                if not r['netlist'].endswith('\n'):
+                    f.write('\n')
                 f.write("```\n\n")
 
                 f.write(f"**Circuit Diagram:**\n")

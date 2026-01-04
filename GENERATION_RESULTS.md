@@ -84,9 +84,13 @@
 
 ---
 
+
+
+
+
 ## Detailed Test Examples (All 18 Test Cases)
 
-### Example 1: Low-pass (100 Hz, Butterworth)
+### Low-pass (100 Hz, Butterworth)
 
 **Target Specification:**
 - Cutoff frequency: 100 Hz
@@ -104,28 +108,37 @@
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 C1 0 n2 2.367803091374e-07
 R1 n1 n2 1.867808007812e+04
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(236.8nF) + L(36.2mH) ────── VOUT
-VIN ────── C(65.2nF) + L(24.5mH) ────── VOUT
+GND ────── C1=236.8nF ────── VOUT
+VIN ────── R1=18.7kΩ ────── VOUT
 ```
 
 **Analysis:**
-- Perfect Q-factor match (Butterworth characteristic)
-- Poor cutoff accuracy at very low frequencies
-- Model defaults to Q=0.707 correctly
+- Poor accuracy, likely due to training data bias
+- Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Example 2: Low-pass (10 kHz, Butterworth)
+### Low-pass (10 kHz, Butterworth)
 
 **Target Specification:**
 - Cutoff frequency: 10,000 Hz
@@ -143,28 +156,37 @@ VIN ────── C(65.2nF) + L(24.5mH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 C1 0 n2 3.876950316339e-08
 R1 n1 n2 7.548328857422e+02
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(38.8nF) + L(8.0mH) ────── VOUT
-VIN ────── C(3.1nF) + L(2.3mH) ────── VOUT
+GND ────── C1=38.8nF ────── VOUT
+VIN ────── R1=754.8Ω ────── VOUT
 ```
 
 **Analysis:**
-- Perfect Q-factor match (Butterworth characteristic preserved)
-- Moderate cutoff error (within 2× target)
-- Simple 2-edge topology is correct for low-pass filter
+- Moderate accuracy, within acceptable range
+- Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Example 3: Low-pass (100 kHz, Butterworth)
+### Low-pass (100 kHz, Butterworth)
 
 **Target Specification:**
 - Cutoff frequency: 100,000 Hz
@@ -182,28 +204,37 @@ VIN ────── C(3.1nF) + L(2.3mH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 C1 0 n2 7.146294223048e-09
 R1 n1 n2 2.533620910645e+02
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(7.1nF) + L(1.3mH) ────── VOUT
-VIN ────── C(1.7nF) + L(447.8uH) ────── VOUT
+GND ────── C1=7.1nF ────── VOUT
+VIN ────── R1=253.4Ω ────── VOUT
 ```
 
 **Analysis:**
 - Excellent accuracy on both metrics
-- Best performance in high-frequency range
-- Model handles 100 kHz specifications very well
+- Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Example 4: High-pass-like (500 Hz, Butterworth)
+### High-pass-like (500 Hz, Butterworth)
 
 **Target Specification:**
 - Cutoff frequency: 500 Hz
@@ -221,28 +252,37 @@ VIN ────── C(1.7nF) + L(447.8uH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 C1 0 n2 9.983003224079e-08
 R1 n1 n2 1.062946484375e+04
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(99.8nF) + L(25.4mH) ────── VOUT
-VIN ────── C(20.9nF) + L(14.8mH) ────── VOUT
+GND ────── C1=99.8nF ────── VOUT
+VIN ────── R1=10.6kΩ ────── VOUT
 ```
 
 **Analysis:**
-- Perfect Q-factor preservation
-- Poor cutoff accuracy in mid-low frequency range
-- Butterworth characteristic maintained
+- Poor accuracy, likely due to training data bias
+- Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Example 5: High-pass-like (50 kHz, Butterworth)
+### High-pass-like (50 kHz, Butterworth)
 
 **Target Specification:**
 - Cutoff frequency: 50,000 Hz
@@ -260,28 +300,37 @@ VIN ────── C(20.9nF) + L(14.8mH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 C1 0 n2 8.706861009955e-09
 R1 n1 n2 4.223875122070e+02
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(8.7nF) + L(2.5mH) ────── VOUT
-VIN ────── C(2.1nF) + L(861.1uH) ────── VOUT
+GND ────── C1=8.7nF ────── VOUT
+VIN ────── R1=422.4Ω ────── VOUT
 ```
 
 **Analysis:**
 - Excellent accuracy on both metrics
-- Strong performance in 50 kHz range
-- Butterworth filter well-represented
+- Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Example 6: Band-pass (1 kHz, Q=1.5)
+### Band-pass (1 kHz, Q=1.5)
 
 **Target Specification:**
 - Cutoff frequency: 1,000 Hz
@@ -299,28 +348,36 @@ VIN ────── C(2.1nF) + L(861.1uH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 R1 0 n2 1.569016601562e+04
 C1 n1 n2 1.874838595484e-08
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(77.3nF) + L(18.3mH) ────── VOUT
-VIN ────── C(18.7nF) + L(11.6mH) ────── VOUT
+GND ────── R1=15.7kΩ ────── VOUT
+VIN ────── C1=18.7nF ────── VOUT
 ```
 
 **Analysis:**
-- Model defaults to Q=0.707 instead of requested 1.5
-- Moderate cutoff error
-- Shows training data bias toward Butterworth filters
+- Poor accuracy, likely due to training data bias
 
 ---
 
-### Example 7: Band-pass (5 kHz, Q=2.0)
+### Band-pass (5 kHz, Q=2.0)
 
 **Target Specification:**
 - Cutoff frequency: 5,000 Hz
@@ -338,28 +395,36 @@ VIN ────── C(18.7nF) + L(11.6mH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 R1 0 n2 8.708450195312e+03
 C1 n1 n2 1.040948482967e-08
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(21.9nF) + L(9.6mH) ────── VOUT
-VIN ────── C(10.4nF) + L(5.2mH) ────── VOUT
+GND ────── R1=8.7kΩ ────── VOUT
+VIN ────── C1=10.4nF ────── VOUT
 ```
 
 **Analysis:**
-- Poor accuracy on both metrics
-- Model struggles with Q=2.0 (reverts to 0.707)
-- Limited training examples for Q>1
+- Poor accuracy, likely due to training data bias
 
 ---
 
-### Example 8: Band-pass (15 kHz, Q=3.0)
+### Band-pass (15 kHz, Q=3.0)
 
 **Target Specification:**
 - Cutoff frequency: 15,000 Hz
@@ -377,6 +442,8 @@ VIN ────── C(10.4nF) + L(5.2mH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 R1 0 n2 6.973394042969e+03
@@ -387,24 +454,30 @@ R3 n1 n3 8.019754638672e+02
 R4 n2 n3 7.484071289062e+03
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(17.2nF) + L(8.8mH) ────── VOUT
-GND ────── C(79.0nF) + L(1.9mH) ────── n3
-VIN ────── C(458.1pF) + L(1.2mH) ────── n3
-VOUT ────── C(1.2nF) + L(1.4mH) ────── n3
+GND ────── R1=7.0kΩ ────── VOUT
+GND ────── C1=79.0nF, R2=1.5kΩ, L1=1.9mH ────── n3
+VIN ────── R3=802.0Ω ────── n3
+VOUT ────── R4=7.5kΩ ────── n3
 ```
 
 **Analysis:**
-- Excellent accuracy for higher Q-factor
-- Model generated more complex 4-edge topology
-- Best result for Q>1 in test suite
+- Excellent accuracy on both metrics
 
 ---
 
-### Example 9: Band-pass (50 kHz, Q=2.5)
+### Band-pass (50 kHz, Q=2.5)
 
 **Target Specification:**
 - Cutoff frequency: 50,000 Hz
@@ -422,28 +495,36 @@ VOUT ────── C(1.2nF) + L(1.4mH) ────── n3
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 R1 0 n1 1.715607604980e+02
 R2 0 n2 3.833218750000e+03
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(1.2uF) + L(465.3uH) ────── VIN
-GND ────── C(5.4nF) + L(2.8mH) ────── VOUT
+GND ────── R1=171.6Ω ────── VIN
+GND ────── R2=3.8kΩ ────── VOUT
 ```
 
 **Analysis:**
-- Very poor performance (complete failure)
-- Model unable to handle high-frequency + high-Q combination
-- Reverts to default Q=0.707
+- Poor accuracy, likely due to training data bias
 
 ---
 
-### Example 10: Resonator (1 kHz, Q=5.0)
+### Resonator (1 kHz, Q=5.0)
 
 **Target Specification:**
 - Cutoff frequency: 1,000 Hz
@@ -461,28 +542,37 @@ GND ────── C(5.4nF) + L(2.8mH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 R1 0 n2 1.877421289062e+04
 R2 n1 n2 5.990598144531e+03
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(238.0nF) + L(10.7mH) ────── VOUT
-VIN ────── C(28.7nF) + L(6.5mH) ────── VOUT
+GND ────── R1=18.8kΩ ────── VOUT
+VIN ────── R2=6.0kΩ ────── VOUT
 ```
 
 **Analysis:**
-- Poor performance on high-Q specifications
-- Model reverts to default Q≈0.707
+- Poor accuracy, likely due to training data bias
 - High-Q specification outside typical training data
 
 ---
 
-### Example 11: Resonator (10 kHz, Q=10.0)
+### Resonator (10 kHz, Q=10.0)
 
 **Target Specification:**
 - Cutoff frequency: 10,000 Hz
@@ -500,6 +590,8 @@ VIN ────── C(28.7nF) + L(6.5mH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 C1 0 n2 9.997695116226e-08
@@ -507,23 +599,30 @@ R1 n1 n3 1.999337524414e+03
 L1 n2 n3 2.124639926478e-03
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(100.0nF) + L(11.5mH) ────── VOUT
-VIN ────── C(545.5pF) + L(1.8mH) ────── n3
-VOUT ────── C(843.7pF) + L(2.1mH) ────── n3
+GND ────── C1=100.0nF ────── VOUT
+VIN ────── R1=2.0kΩ ────── n3
+VOUT ────── L1=2.1mH ────── n3
 ```
 
 **Analysis:**
-- Poor performance on high-Q specifications
-- Model generated 3-edge topology but still defaults to Q=0.707
-- Indicates training data bias toward Butterworth filters
+- Poor accuracy, likely due to training data bias
+- High-Q specification outside typical training data
 
 ---
 
-### Example 12: Sharp resonator (5 kHz, Q=20.0)
+### Sharp resonator (5 kHz, Q=20.0)
 
 **Target Specification:**
 - Cutoff frequency: 5,000 Hz
@@ -541,6 +640,8 @@ VOUT ────── C(843.7pF) + L(2.1mH) ────── n3
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 C1 0 n2 1.893288867905e-07
@@ -548,23 +649,30 @@ R1 n1 n3 3.751474365234e+03
 R2 n2 n3 3.419339453125e+04
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(189.3nF) + L(13.1mH) ────── VOUT
-VIN ────── C(988.8pF) + L(1.9mH) ────── n3
-VOUT ────── C(1.9nF) + L(2.6mH) ────── n3
+GND ────── C1=189.3nF ────── VOUT
+VIN ────── R1=3.8kΩ ────── n3
+VOUT ────── R2=34.2kΩ ────── n3
 ```
 
 **Analysis:**
-- Very poor performance on extreme high-Q
-- Model completely unable to handle Q=20
-- Training data lacks high-Q examples
+- Poor accuracy, likely due to training data bias
+- High-Q specification outside typical training data
 
 ---
 
-### Example 13: Overdamped (1 kHz, Q=0.3)
+### Overdamped (1 kHz, Q=0.3)
 
 **Target Specification:**
 - Cutoff frequency: 1,000 Hz
@@ -582,28 +690,36 @@ VOUT ────── C(1.9nF) + L(2.6mH) ────── n3
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 R1 0 n2 1.471995214844e+04
 C1 n1 n2 1.955441319978e-08
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(32.1nF) + L(22.8mH) ────── VOUT
-VIN ────── C(19.6nF) + L(13.5mH) ────── VOUT
+GND ────── R1=14.7kΩ ────── VOUT
+VIN ────── C1=19.6nF ────── VOUT
 ```
 
 **Analysis:**
-- Model defaults to Q=0.707 instead of 0.3
-- Moderate cutoff error
-- Limited training data for overdamped filters
+- Poor accuracy, likely due to training data bias
 
 ---
 
-### Example 14: Very overdamped (50 kHz, Q=0.1)
+### Very overdamped (50 kHz, Q=0.1)
 
 **Target Specification:**
 - Cutoff frequency: 50,000 Hz
@@ -621,6 +737,8 @@ VIN ────── C(19.6nF) + L(13.5mH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 R1 0 n2 2.254170166016e+03
@@ -629,24 +747,30 @@ C1 n2 n4 2.985834868241e-08
 L1 n3 n4 5.789948627353e-04
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(4.9nF) + L(4.9mH) ────── VOUT
-VIN ────── C(589.0pF) + L(1.3mH) ────── n3
-VOUT ────── C(29.9nF) + L(3.4mH) ────── n4
-n3 ────── C(672.0pF) + L(579.0uH) ────── n4
+GND ────── R1=2.3kΩ ────── VOUT
+VIN ────── R2=231.0Ω ────── n3
+VOUT ────── C1=29.9nF ────── n4
+n3 ────── L1=579.0uH ────── n4
 ```
 
 **Analysis:**
-- Moderate accuracy on both metrics
-- Model generated 4-edge complex topology
-- Better performance on very low Q than mid-range Q
+- Moderate accuracy, within acceptable range
 
 ---
 
-### Example 15: Very low frequency (50 Hz)
+### Very low frequency (50 Hz)
 
 **Target Specification:**
 - Cutoff frequency: 50 Hz
@@ -664,28 +788,37 @@ n3 ────── C(672.0pF) + L(579.0uH) ────── n4
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 R1 0 n2 3.158770507812e+04
 C1 n1 n2 1.131662727971e-07
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(330.0nF) + L(40.7mH) ────── VOUT
-VIN ────── C(113.2nF) + L(30.3mH) ────── VOUT
+GND ────── R1=31.6kΩ ────── VOUT
+VIN ────── C1=113.2nF ────── VOUT
 ```
 
 **Analysis:**
-- Excellent low-frequency accuracy
-- Perfect Q-factor preservation
-- Model handles wide frequency range well
+- Excellent accuracy on both metrics
+- Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Example 16: Very high frequency (500 kHz)
+### Very high frequency (500 kHz)
 
 **Target Specification:**
 - Cutoff frequency: 500,000 Hz
@@ -703,28 +836,37 @@ VIN ────── C(113.2nF) + L(30.3mH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 R1 0 n2 1.099987060547e+03
 C1 n1 n2 1.411597394529e-09
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(901.3pF) + L(447.8uH) ────── VOUT
-VIN ────── C(1.4nF) + L(245.4uH) ────── VOUT
+GND ────── R1=1.1kΩ ────── VOUT
+VIN ────── C1=1.4nF ────── VOUT
 ```
 
 **Analysis:**
-- Perfect Q-factor but poor cutoff accuracy
-- Model struggles at very high frequencies (500 kHz)
-- Training data limited at extreme frequencies
+- Poor accuracy, likely due to training data bias
+- Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Example 17: Very low Q (10 kHz, Q=0.05)
+### Very low Q (10 kHz, Q=0.05)
 
 **Target Specification:**
 - Cutoff frequency: 10,000 Hz
@@ -742,6 +884,8 @@ VIN ────── C(1.4nF) + L(245.4uH) ────── VOUT
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 R1 0 n2 1.841528198242e+03
@@ -750,24 +894,30 @@ C1 n2 n4 1.669020406325e-07
 L1 n3 n4 9.441070724279e-04
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(64.7nF) + L(6.0mH) ────── VOUT
-VIN ────── C(11.4nF) + L(2.0mH) ────── n3
-VOUT ────── C(166.9nF) + L(4.6mH) ────── n4
-n3 ────── C(4.7nF) + L(944.1uH) ────── n4
+GND ────── R1=1.8kΩ ────── VOUT
+VIN ────── R2=169.8Ω ────── n3
+VOUT ────── C1=166.9nF ────── n4
+n3 ────── L1=944.1uH ────── n4
 ```
 
 **Analysis:**
-- Moderate accuracy on both metrics
-- 4-edge topology for very low Q
-- Model performs reasonably well on extreme low Q
+- Moderate accuracy, within acceptable range
 
 ---
 
-### Example 18: Very high Q (5 kHz, Q=30.0)
+### Very high Q (5 kHz, Q=30.0)
 
 **Target Specification:**
 - Cutoff frequency: 5,000 Hz
@@ -785,6 +935,8 @@ n3 ────── C(4.7nF) + L(944.1uH) ────── n4
 
 **SPICE Netlist:**
 ```spice
+* Auto-generated circuit netlist
+
 VIN n1 0 DC 0 AC 1.0
 
 C1 0 n2 2.081799692633e-07
@@ -792,19 +944,26 @@ R1 n1 n3 4.531442382812e+03
 L1 n2 n3 2.566894982010e-03
 
 .ac dec 200 1.0 1000000.0
+.print ac v(n2)
+.control
+run
+set hcopydevtype=ascii
+print frequency v(n2)
+.endc
+
+.end
 ```
 
 **Circuit Diagram:**
 ```
-GND ────── C(208.2nF) + L(13.2mH) ────── VOUT
-VIN ────── C(1.2nF) + L(1.9mH) ────── n3
-VOUT ────── C(1.9nF) + L(2.6mH) ────── n3
+GND ────── C1=208.2nF ────── VOUT
+VIN ────── R1=4.5kΩ ────── n3
+VOUT ────── L1=2.6mH ────── n3
 ```
 
 **Analysis:**
-- Very poor performance on extreme high-Q
-- Model completely reverts to Q=0.707
-- Training data critically lacks high-Q examples
+- Poor accuracy, likely due to training data bias
+- High-Q specification outside typical training data
 
 ---
 

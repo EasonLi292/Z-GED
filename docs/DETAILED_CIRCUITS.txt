@@ -38,12 +38,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(236.8nF) + L(36.2mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(65.2nF) + L(24.5mH) ────── VOUT (VOUT)
+GND ────── C1=236.8nF ────── VOUT
+VIN ────── R1=18.7kΩ ────── VOUT
 ```
 
 **Analysis:**
@@ -87,12 +88,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(38.8nF) + L(8.0mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(3.1nF) + L(2.3mH) ────── VOUT (VOUT)
+GND ────── C1=38.8nF ────── VOUT
+VIN ────── R1=754.8Ω ────── VOUT
 ```
 
 **Analysis:**
@@ -136,12 +138,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(7.1nF) + L(1.3mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(1.7nF) + L(447.8uH) ────── VOUT (VOUT)
+GND ────── C1=7.1nF ────── VOUT
+VIN ────── R1=253.4Ω ────── VOUT
 ```
 
 **Analysis:**
@@ -185,12 +188,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(99.8nF) + L(25.4mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(20.9nF) + L(14.8mH) ────── VOUT (VOUT)
+GND ────── C1=99.8nF ────── VOUT
+VIN ────── R1=10.6kΩ ────── VOUT
 ```
 
 **Analysis:**
@@ -234,12 +238,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(8.7nF) + L(2.5mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(2.1nF) + L(861.1uH) ────── VOUT (VOUT)
+GND ────── C1=8.7nF ────── VOUT
+VIN ────── R1=422.4Ω ────── VOUT
 ```
 
 **Analysis:**
@@ -283,12 +288,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(77.3nF) + L(18.3mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(18.7nF) + L(11.6mH) ────── VOUT (VOUT)
+GND ────── R1=15.7kΩ ────── VOUT
+VIN ────── C1=18.7nF ────── VOUT
 ```
 
 **Analysis:**
@@ -331,12 +337,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(21.9nF) + L(9.6mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(10.4nF) + L(5.2mH) ────── VOUT (VOUT)
+GND ────── R1=8.7kΩ ────── VOUT
+VIN ────── C1=10.4nF ────── VOUT
 ```
 
 **Analysis:**
@@ -383,14 +390,15 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(17.2nF) + L(8.8mH) ────── VOUT (VOUT)
-GND (GND) ────── C(79.0nF) + L(1.9mH) ────── n3 (n3)
-VIN (VIN) ────── C(458.1pF) + L(1.2mH) ────── n3 (n3)
-VOUT (VOUT) ────── C(1.2nF) + L(1.4mH) ────── n3 (n3)
+GND ────── R1=7.0kΩ ────── VOUT
+GND ────── C1=79.0nF, R2=1.5kΩ, L1=1.9mH ────── n3
+VIN ────── R3=802.0Ω ────── n3
+VOUT ────── R4=7.5kΩ ────── n3
 ```
 
 **Analysis:**
@@ -433,12 +441,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(1.2uF) + L(465.3uH) ────── VIN (VIN)
-GND (GND) ────── C(5.4nF) + L(2.8mH) ────── VOUT (VOUT)
+GND ────── R1=171.6Ω ────── VIN
+GND ────── R2=3.8kΩ ────── VOUT
 ```
 
 **Analysis:**
@@ -481,12 +490,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(238.0nF) + L(10.7mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(28.7nF) + L(6.5mH) ────── VOUT (VOUT)
+GND ────── R1=18.8kΩ ────── VOUT
+VIN ────── R2=6.0kΩ ────── VOUT
 ```
 
 **Analysis:**
@@ -531,13 +541,14 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(100.0nF) + L(11.5mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(545.5pF) + L(1.8mH) ────── n3 (n3)
-VOUT (VOUT) ────── C(843.7pF) + L(2.1mH) ────── n3 (n3)
+GND ────── C1=100.0nF ────── VOUT
+VIN ────── R1=2.0kΩ ────── n3
+VOUT ────── L1=2.1mH ────── n3
 ```
 
 **Analysis:**
@@ -582,13 +593,14 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(189.3nF) + L(13.1mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(988.8pF) + L(1.9mH) ────── n3 (n3)
-VOUT (VOUT) ────── C(1.9nF) + L(2.6mH) ────── n3 (n3)
+GND ────── C1=189.3nF ────── VOUT
+VIN ────── R1=3.8kΩ ────── n3
+VOUT ────── R2=34.2kΩ ────── n3
 ```
 
 **Analysis:**
@@ -632,12 +644,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(32.1nF) + L(22.8mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(19.6nF) + L(13.5mH) ────── VOUT (VOUT)
+GND ────── R1=14.7kΩ ────── VOUT
+VIN ────── C1=19.6nF ────── VOUT
 ```
 
 **Analysis:**
@@ -682,14 +695,15 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(4.9nF) + L(4.9mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(589.0pF) + L(1.3mH) ────── n3 (n3)
-VOUT (VOUT) ────── C(29.9nF) + L(3.4mH) ────── n4 (n4)
-n3 (n3) ────── C(672.0pF) + L(579.0uH) ────── n4 (n4)
+GND ────── R1=2.3kΩ ────── VOUT
+VIN ────── R2=231.0Ω ────── n3
+VOUT ────── C1=29.9nF ────── n4
+n3 ────── L1=579.0uH ────── n4
 ```
 
 **Analysis:**
@@ -732,12 +746,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(330.0nF) + L(40.7mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(113.2nF) + L(30.3mH) ────── VOUT (VOUT)
+GND ────── R1=31.6kΩ ────── VOUT
+VIN ────── C1=113.2nF ────── VOUT
 ```
 
 **Analysis:**
@@ -781,12 +796,13 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(901.3pF) + L(447.8uH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(1.4nF) + L(245.4uH) ────── VOUT (VOUT)
+GND ────── R1=1.1kΩ ────── VOUT
+VIN ────── C1=1.4nF ────── VOUT
 ```
 
 **Analysis:**
@@ -832,14 +848,15 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(64.7nF) + L(6.0mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(11.4nF) + L(2.0mH) ────── n3 (n3)
-VOUT (VOUT) ────── C(166.9nF) + L(4.6mH) ────── n4 (n4)
-n3 (n3) ────── C(4.7nF) + L(944.1uH) ────── n4 (n4)
+GND ────── R1=1.8kΩ ────── VOUT
+VIN ────── R2=169.8Ω ────── n3
+VOUT ────── C1=166.9nF ────── n4
+n3 ────── L1=944.1uH ────── n4
 ```
 
 **Analysis:**
@@ -883,13 +900,14 @@ set hcopydevtype=ascii
 print frequency v(n2)
 .endc
 
-.end```
+.end
+```
 
 **Circuit Diagram:**
 ```
-GND (GND) ────── C(208.2nF) + L(13.2mH) ────── VOUT (VOUT)
-VIN (VIN) ────── C(1.2nF) + L(1.9mH) ────── n3 (n3)
-VOUT (VOUT) ────── C(1.9nF) + L(2.6mH) ────── n3 (n3)
+GND ────── C1=208.2nF ────── VOUT
+VIN ────── R1=4.5kΩ ────── n3
+VOUT ────── L1=2.6mH ────── n3
 ```
 
 **Analysis:**
