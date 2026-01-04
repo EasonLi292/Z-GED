@@ -162,7 +162,98 @@ Based on training data analysis:
 
 ---
 
+## Topology Novelty Analysis
 
+### Are Novel Topologies Being Generated?
+
+**Yes - but they're all invalid!**
+
+The training dataset contains only **4 unique topologies**:
+- 1R+1C (40 circuits, 33.3%)
+- 2R+1C+1L (40 circuits, 33.3%)
+- 1R+1C+1L (20 circuits, 16.7%)
+- 4R+1C+1L (20 circuits, 16.7%)
+
+Out of 18 test cases, the model generated:
+- **15 circuits** (83.3%) with training topologies ✅
+- **3 circuits** (16.7%) with novel topologies ❌
+
+### Novel Topologies Generated
+
+**Novel Topology 1: `2R` (Pure Resistive)**
+- Generated for:
+  - 50 kHz, Q=2.5
+  - 1 kHz, Q=5.0
+- **Validity**: ❌ **INVALID**
+- **Why**: Pure resistive circuits cannot provide frequency selectivity
+- **Conclusion**: Generation failure - physically impossible to create a filter
+
+**Novel Topology 2: `2R+1C` (Missing Inductor)**
+- Generated for:
+  - 5 kHz, Q=20.0
+- **Validity**: ❌ **INVALID for target spec**
+- **Why**: High-Q (Q=20) requires both L and C for resonance
+- **Conclusion**: Generation failure - cannot achieve Q>1 without inductor
+
+### Key Finding: "Novelty" = Failure Mode
+
+The model's novel topologies are not creative solutions - they are **invalid extrapolations** when the model encounters unfamiliar specifications:
+
+| Specification | Nearest Training | Model Behavior |
+|---------------|------------------|----------------|
+| 50 kHz, Q=2.5 | No close match | Generates 2R (invalid) ❌ |
+| 1 kHz, Q=5.0 | Only 11 high-Q examples | Generates 2R (invalid) ❌ |
+| 5 kHz, Q=20.0 | Only 7 Q≥10 examples | Generates 2R+1C (missing L) ❌ |
+
+When specifications are **within training distribution** (e.g., Butterworth filters):
+- Model uses familiar topologies ✅
+- Component values are interpolated ✅
+- Results are valid and accurate ✅
+
+When specifications are **outside training distribution** (high-Q):
+- Model generates novel topologies ❌
+- But these topologies violate physical constraints ❌
+- "Novelty" indicates model confusion, not creativity ❌
+
+### What the Model Actually Does
+
+The model is fundamentally a **sophisticated interpolation system**, not a true generative designer:
+
+1. **K-NN retrieval**: Finds 5 similar circuits from training data
+2. **Latent interpolation**: Blends their latent codes
+3. **Topology selection**: Decoder outputs topology (usually from training set)
+4. **Component value generation**: Interpolates component values
+
+**Successful cases (within training distribution):**
+- Uses training topologies (1R+1C, 2R+1C+1L, etc.)
+- Interpolates component values between neighbors
+- Produces valid, working circuits
+
+**Failure cases (outside training distribution):**
+- Attempts to extrapolate to unseen topologies
+- Generates invalid combinations (2R, 2R+1C for high-Q)
+- Violates physical constraints
+
+### Implications for "Generative" Model
+
+This is more accurately described as:
+- ✅ **Retrieval + Interpolation** system
+- ✅ Component value optimization within known topologies
+- ❌ NOT true creative circuit design
+- ❌ NOT exploring novel valid architectures
+
+**Pros:**
+- Reliable within training distribution
+- Avoids most invalid topologies (only 3/18 invalid)
+- Good at parameter tuning for familiar structures
+
+**Cons:**
+- Cannot design truly novel circuits
+- Limited to 4 topology templates from training
+- Extrapolation beyond training → invalid outputs
+- No understanding of physical constraints
+
+---
 
 ## Detailed Test Examples (All 18 Test Cases)
 
