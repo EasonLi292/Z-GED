@@ -158,8 +158,8 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
             target_edges=targets['edge_existence']
         )
 
-        # Compute loss (joint edge-component prediction)
-        loss, metrics = loss_fn(predictions, targets)
+        # Compute loss (joint edge-component prediction with VAE regularization)
+        loss, metrics = loss_fn(predictions, targets, mu=mu, logvar=logvar)
 
         # Backward and optimize
         optimizer.zero_grad()
@@ -231,8 +231,8 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
                 target_edges=targets['edge_existence']
             )
 
-            # Compute loss
-            loss, metrics = loss_fn(predictions, targets)
+            # Compute loss (with VAE regularization)
+            loss, metrics = loss_fn(predictions, targets, mu=mu, logvar=logvar)
 
             # Accumulate metrics
             total_loss += loss.item()
@@ -329,7 +329,8 @@ def main():
         component_type_weight=5.0,    # DECREASED from 10.0 (Phase 2 recommendation)
         component_value_weight=0.5,
         use_connectivity_loss=True,
-        connectivity_weight=2.0
+        connectivity_weight=2.0,
+        kl_weight=0.005              # VAE regularization
     )
 
     print("\nPhase 3 Loss Configuration:")

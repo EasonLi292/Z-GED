@@ -51,7 +51,9 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
         use_connectivity_loss: bool = True,
         connectivity_weight: float = 5.0,
         # Gumbel-Softmax parameters
-        gumbel_temperature: float = 0.5
+        gumbel_temperature: float = 0.5,
+        # VAE regularization
+        kl_weight: float = 0.005
     ):
         super().__init__()
 
@@ -61,6 +63,7 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
         self.component_value_weight = component_value_weight
         self.is_parallel_weight = is_parallel_weight
         self.gumbel_temperature = gumbel_temperature
+        self.kl_weight = kl_weight
 
         # Connectivity loss
         self.use_connectivity_loss = use_connectivity_loss
@@ -77,6 +80,8 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
         self,
         predictions: Dict[str, torch.Tensor],
         targets: Dict[str, torch.Tensor],
+        mu: Optional[torch.Tensor] = None,
+        logvar: Optional[torch.Tensor] = None,
         latent: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
@@ -316,7 +321,19 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
             metrics_connectivity = {}
 
         # ==================================================================
-        # 7. Combine Losses
+        # 7. KL Divergence (VAE Regularization)
+        # ==================================================================
+
+        if mu is not None and logvar is not None:
+            # Standard analytical KL divergence for VAE
+            # KL(q(z|x) || p(z)) where p(z) = N(0,1)
+            kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+            kl_loss = kl_loss / mu.shape[0]  # Average over batch
+        else:
+            kl_loss = torch.tensor(0.0, device=device)
+
+        # ==================================================================
+        # 8. Combine Losses
         # ==================================================================
 
         total_loss = (
@@ -325,7 +342,8 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
             self.component_type_weight * loss_component_type +  # NEW!
             self.component_value_weight * loss_component_value +
             self.is_parallel_weight * loss_is_parallel +
-            self.connectivity_weight * loss_connectivity
+            self.connectivity_weight * loss_connectivity +
+            self.kl_weight * kl_loss
         )
 
         # ==================================================================
@@ -339,6 +357,7 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
             'loss_component_value': loss_component_value.item(),
             'loss_is_parallel': loss_is_parallel.item(),
             'loss_connectivity': loss_connectivity.item() if self.use_connectivity_loss else 0.0,
+            'loss_kl': kl_loss.item(),
             'node_type_acc': node_type_acc,
             'edge_exist_acc': edge_acc,
             'component_type_acc': comp_type_acc,  # NEW!
