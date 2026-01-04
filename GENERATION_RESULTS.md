@@ -88,16 +88,17 @@
 
 
 
+
 ## Detailed Test Examples (All 18 Test Cases)
 
-### Low-pass (100 Hz, Butterworth)
+### 100 Hz, Q=0.707
 
 **Target Specification:**
 - Cutoff frequency: 100 Hz
 - Q-factor: 0.707
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (1R+1C)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -133,19 +134,20 @@ VIN ────── R1=18.7kΩ ────── VOUT
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
+- ❌ Poor accuracy, likely due to training data bias
+- Topology is theoretically capable but parameters are poorly tuned
 - Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Low-pass (10 kHz, Butterworth)
+### 10 kHz, Q=0.707
 
 **Target Specification:**
 - Cutoff frequency: 10,000 Hz
 - Q-factor: 0.707
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (1R+1C)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -181,19 +183,20 @@ VIN ────── R1=754.8Ω ────── VOUT
 ```
 
 **Analysis:**
-- Moderate accuracy, within acceptable range
+- ⚠️ Moderate accuracy, within acceptable range
+- Topology is appropriate but parameter tuning could improve
 - Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Low-pass (100 kHz, Butterworth)
+### 100 kHz, Q=0.707
 
 **Target Specification:**
 - Cutoff frequency: 100,000 Hz
 - Q-factor: 0.707
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (1R+1C)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -229,19 +232,20 @@ VIN ────── R1=253.4Ω ────── VOUT
 ```
 
 **Analysis:**
-- Excellent accuracy on both metrics
+- ✅ Excellent accuracy on both metrics
+- Topology is appropriate and parameters are well-tuned
 - Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### High-pass-like (500 Hz, Butterworth)
+### 500 Hz, Q=0.707
 
 **Target Specification:**
 - Cutoff frequency: 500 Hz
 - Q-factor: 0.707
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (1R+1C)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -277,19 +281,20 @@ VIN ────── R1=10.6kΩ ────── VOUT
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
+- ❌ Poor accuracy, likely due to training data bias
+- Topology is theoretically capable but parameters are poorly tuned
 - Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### High-pass-like (50 kHz, Butterworth)
+### 50 kHz, Q=0.707
 
 **Target Specification:**
 - Cutoff frequency: 50,000 Hz
 - Q-factor: 0.707
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (1R+1C)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -325,20 +330,23 @@ VIN ────── R1=422.4Ω ────── VOUT
 ```
 
 **Analysis:**
-- Excellent accuracy on both metrics
+- ✅ Excellent accuracy on both metrics
+- Topology is appropriate and parameters are well-tuned
 - Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Band-pass (1 kHz, Q=1.5)
+### 1 kHz, Q=1.5
 
 **Target Specification:**
 - Cutoff frequency: 1,000 Hz
 - Q-factor: 1.500
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (1R+1C)
 - Valid: ✅ Yes
+- **Topology Issues:**
+  - ❌ RC filter cannot achieve Q=1.5 (max ~0.707)
 
 **Measured Performance:**
 - Actual Cutoff: 542.3 Hz
@@ -373,19 +381,24 @@ VIN ────── C1=18.7nF ────── VOUT
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
+- **⚠️ Topology cannot produce desired response:**
+  - RC filter cannot achieve Q=1.5 (max ~0.707)
+- Generated topology is fundamentally incapable of meeting specifications
+- Even with perfect parameter tuning, this circuit cannot achieve the target Q-factor
 
 ---
 
-### Band-pass (5 kHz, Q=2.0)
+### 5 kHz, Q=2.0
 
 **Target Specification:**
 - Cutoff frequency: 5,000 Hz
 - Q-factor: 2.000
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (1R+1C)
 - Valid: ✅ Yes
+- **Topology Issues:**
+  - ❌ RC filter cannot achieve Q=2.0 (max ~0.707)
 
 **Measured Performance:**
 - Actual Cutoff: 1,759.9 Hz
@@ -420,18 +433,21 @@ VIN ────── C1=10.4nF ────── VOUT
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
+- **⚠️ Topology cannot produce desired response:**
+  - RC filter cannot achieve Q=2.0 (max ~0.707)
+- Generated topology is fundamentally incapable of meeting specifications
+- Even with perfect parameter tuning, this circuit cannot achieve the target Q-factor
 
 ---
 
-### Band-pass (15 kHz, Q=3.0)
+### 15 kHz, Q=3.0
 
 **Target Specification:**
 - Cutoff frequency: 15,000 Hz
 - Q-factor: 3.000
 
 **Generated Circuit:**
-- Topology: 4 edges
+- Topology: 4 edges (4R+1C+1L)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -473,19 +489,22 @@ VOUT ────── R4=7.5kΩ ────── n3
 ```
 
 **Analysis:**
-- Excellent accuracy on both metrics
+- ✅ Excellent accuracy on both metrics
+- Topology is appropriate and parameters are well-tuned
 
 ---
 
-### Band-pass (50 kHz, Q=2.5)
+### 50 kHz, Q=2.5
 
 **Target Specification:**
 - Cutoff frequency: 50,000 Hz
 - Q-factor: 2.500
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (2R)
 - Valid: ✅ Yes
+- **Topology Issues:**
+  - ❌ Pure resistive (2R) cannot provide frequency selectivity
 
 **Measured Performance:**
 - Actual Cutoff: 1.0 Hz
@@ -520,19 +539,25 @@ GND ────── R2=3.8kΩ ────── VOUT
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
+- **⚠️ Topology cannot produce desired response:**
+  - Pure resistive (2R) cannot provide frequency selectivity
+- Generated topology is fundamentally incapable of meeting specifications
+- Even with perfect parameter tuning, this circuit cannot achieve the target Q-factor
 
 ---
 
-### Resonator (1 kHz, Q=5.0)
+### 1 kHz, Q=5.0
 
 **Target Specification:**
 - Cutoff frequency: 1,000 Hz
 - Q-factor: 5.000
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (2R)
 - Valid: ✅ Yes
+- **Topology Issues:**
+  - ❌ Pure resistive (2R) cannot provide frequency selectivity
+  - ❌ High-Q (Q=5.0) requires both L and C for resonance
 
 **Measured Performance:**
 - Actual Cutoff: 1.0 Hz
@@ -567,19 +592,22 @@ VIN ────── R2=6.0kΩ ────── VOUT
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
-- High-Q specification outside typical training data
+- **⚠️ Topology cannot produce desired response:**
+  - Pure resistive (2R) cannot provide frequency selectivity
+  - High-Q (Q=5.0) requires both L and C for resonance
+- Generated topology is fundamentally incapable of meeting specifications
+- Even with perfect parameter tuning, this circuit cannot achieve the target Q-factor
 
 ---
 
-### Resonator (10 kHz, Q=10.0)
+### 10 kHz, Q=10.0
 
 **Target Specification:**
 - Cutoff frequency: 10,000 Hz
 - Q-factor: 10.000
 
 **Generated Circuit:**
-- Topology: 3 edges
+- Topology: 3 edges (1R+1C+1L)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -617,20 +645,23 @@ VOUT ────── L1=2.1mH ────── n3
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
+- ❌ Poor accuracy, likely due to training data bias
+- Topology is theoretically capable but parameters are poorly tuned
 - High-Q specification outside typical training data
 
 ---
 
-### Sharp resonator (5 kHz, Q=20.0)
+### 5 kHz, Q=20.0
 
 **Target Specification:**
 - Cutoff frequency: 5,000 Hz
 - Q-factor: 20.000
 
 **Generated Circuit:**
-- Topology: 3 edges
+- Topology: 3 edges (2R+1C)
 - Valid: ✅ Yes
+- **Topology Issues:**
+  - ❌ High-Q (Q=20.0) requires both L and C for resonance
 
 **Measured Performance:**
 - Actual Cutoff: 22.1 Hz
@@ -667,19 +698,21 @@ VOUT ────── R2=34.2kΩ ────── n3
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
-- High-Q specification outside typical training data
+- **⚠️ Topology cannot produce desired response:**
+  - High-Q (Q=20.0) requires both L and C for resonance
+- Generated topology is fundamentally incapable of meeting specifications
+- Even with perfect parameter tuning, this circuit cannot achieve the target Q-factor
 
 ---
 
-### Overdamped (1 kHz, Q=0.3)
+### 1 kHz, Q=0.3
 
 **Target Specification:**
 - Cutoff frequency: 1,000 Hz
 - Q-factor: 0.300
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (1R+1C)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -715,18 +748,19 @@ VIN ────── C1=19.6nF ────── VOUT
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
+- ❌ Poor accuracy, likely due to training data bias
+- Topology is theoretically capable but parameters are poorly tuned
 
 ---
 
-### Very overdamped (50 kHz, Q=0.1)
+### 50 kHz, Q=0.1
 
 **Target Specification:**
 - Cutoff frequency: 50,000 Hz
 - Q-factor: 0.100
 
 **Generated Circuit:**
-- Topology: 4 edges
+- Topology: 4 edges (2R+1C+1L)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -766,18 +800,19 @@ n3 ────── L1=579.0uH ────── n4
 ```
 
 **Analysis:**
-- Moderate accuracy, within acceptable range
+- ⚠️ Moderate accuracy, within acceptable range
+- Topology is appropriate but parameter tuning could improve
 
 ---
 
-### Very low frequency (50 Hz)
+### 50 Hz, Q=0.707
 
 **Target Specification:**
 - Cutoff frequency: 50 Hz
 - Q-factor: 0.707
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (1R+1C)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -813,19 +848,20 @@ VIN ────── C1=113.2nF ────── VOUT
 ```
 
 **Analysis:**
-- Excellent accuracy on both metrics
+- ✅ Excellent accuracy on both metrics
+- Topology is appropriate and parameters are well-tuned
 - Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Very high frequency (500 kHz)
+### 500 kHz, Q=0.707
 
 **Target Specification:**
 - Cutoff frequency: 500,000 Hz
 - Q-factor: 0.707
 
 **Generated Circuit:**
-- Topology: 2 edges
+- Topology: 2 edges (1R+1C)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -861,19 +897,20 @@ VIN ────── C1=1.4nF ────── VOUT
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
+- ❌ Poor accuracy, likely due to training data bias
+- Topology is theoretically capable but parameters are poorly tuned
 - Butterworth filter (Q≈0.707) matches training data well
 
 ---
 
-### Very low Q (10 kHz, Q=0.05)
+### 10 kHz, Q=0.05
 
 **Target Specification:**
 - Cutoff frequency: 10,000 Hz
 - Q-factor: 0.050
 
 **Generated Circuit:**
-- Topology: 4 edges
+- Topology: 4 edges (2R+1C+1L)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -913,18 +950,19 @@ n3 ────── L1=944.1uH ────── n4
 ```
 
 **Analysis:**
-- Moderate accuracy, within acceptable range
+- ⚠️ Moderate accuracy, within acceptable range
+- Topology is appropriate but parameter tuning could improve
 
 ---
 
-### Very high Q (5 kHz, Q=30.0)
+### 5 kHz, Q=30.0
 
 **Target Specification:**
 - Cutoff frequency: 5,000 Hz
 - Q-factor: 30.000
 
 **Generated Circuit:**
-- Topology: 3 edges
+- Topology: 3 edges (1R+1C+1L)
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -962,7 +1000,8 @@ VOUT ────── L1=2.6mH ────── n3
 ```
 
 **Analysis:**
-- Poor accuracy, likely due to training data bias
+- ❌ Poor accuracy, likely due to training data bias
+- Topology is theoretically capable but parameters are poorly tuned
 - High-Q specification outside typical training data
 
 ---

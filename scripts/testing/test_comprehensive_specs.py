@@ -186,34 +186,34 @@ def main():
     # Test specifications
     test_cases = [
         # Low-pass filters (Q ≈ 0.707)
-        (100, 0.707, "Low-pass (100 Hz, Butterworth)"),
-        (10000, 0.707, "Low-pass (10 kHz, Butterworth)"),
-        (100000, 0.707, "Low-pass (100 kHz, Butterworth)"),
+        (100, 0.707, "100 Hz, Q=0.707"),
+        (10000, 0.707, "10 kHz, Q=0.707"),
+        (100000, 0.707, "100 kHz, Q=0.707"),
 
         # High-pass filters (Q ≈ 0.707, but should differ by frequency)
-        (500, 0.707, "High-pass-like (500 Hz, Butterworth)"),
-        (50000, 0.707, "High-pass-like (50 kHz, Butterworth)"),
+        (500, 0.707, "500 Hz, Q=0.707"),
+        (50000, 0.707, "50 kHz, Q=0.707"),
 
         # Band-pass filters (moderate Q)
-        (1000, 1.5, "Band-pass (1 kHz, Q=1.5)"),
-        (5000, 2.0, "Band-pass (5 kHz, Q=2.0)"),
-        (15000, 3.0, "Band-pass (15 kHz, Q=3.0)"),
-        (50000, 2.5, "Band-pass (50 kHz, Q=2.5)"),
+        (1000, 1.5, "1 kHz, Q=1.5"),
+        (5000, 2.0, "5 kHz, Q=2.0"),
+        (15000, 3.0, "15 kHz, Q=3.0"),
+        (50000, 2.5, "50 kHz, Q=2.5"),
 
         # High-Q resonators
-        (1000, 5.0, "Resonator (1 kHz, Q=5.0)"),
-        (10000, 10.0, "Resonator (10 kHz, Q=10.0)"),
-        (5000, 20.0, "Sharp resonator (5 kHz, Q=20.0)"),
+        (1000, 5.0, "1 kHz, Q=5.0"),
+        (10000, 10.0, "10 kHz, Q=10.0"),
+        (5000, 20.0, "5 kHz, Q=20.0"),
 
         # Overdamped filters (low Q)
-        (1000, 0.3, "Overdamped (1 kHz, Q=0.3)"),
-        (50000, 0.1, "Very overdamped (50 kHz, Q=0.1)"),
+        (1000, 0.3, "1 kHz, Q=0.3"),
+        (50000, 0.1, "50 kHz, Q=0.1"),
 
         # Edge cases
-        (50, 0.707, "Very low frequency (50 Hz)"),
-        (500000, 0.707, "Very high frequency (500 kHz)"),
-        (10000, 0.05, "Very low Q (10 kHz, Q=0.05)"),
-        (5000, 30.0, "Very high Q (5 kHz, Q=30.0)"),
+        (50, 0.707, "50 Hz, Q=0.707"),
+        (500000, 0.707, "500 kHz, Q=0.707"),
+        (10000, 0.05, "10 kHz, Q=0.05"),
+        (5000, 30.0, "5 kHz, Q=30.0"),
     ]
 
     results = []

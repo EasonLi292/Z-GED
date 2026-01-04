@@ -148,6 +148,38 @@ def parse_spice_netlist(netlist):
     return components
 
 
+def analyze_topology_validity(netlist, target_q):
+    """Check if circuit topology can theoretically produce desired response."""
+    import re
+
+    # Count component types
+    num_R = len(re.findall(r'^R\d+', netlist, re.MULTILINE))
+    num_C = len(re.findall(r'^C\d+', netlist, re.MULTILINE))
+    num_L = len(re.findall(r'^L\d+', netlist, re.MULTILINE))
+
+    issues = []
+
+    # Simple RC can't do high Q
+    if num_R == 1 and num_C == 1 and num_L == 0 and target_q > 1.0:
+        issues.append(f"RC filter cannot achieve Q={target_q:.1f} (max ~0.707)")
+
+    # Pure resistive can't do frequency selectivity
+    if num_R > 0 and num_C == 0 and num_L == 0:
+        issues.append(f"Pure resistive ({num_R}R) cannot provide frequency selectivity")
+
+    # High-Q needs L and C
+    if target_q >= 5.0 and (num_L == 0 or num_C == 0):
+        issues.append(f"High-Q (Q={target_q:.1f}) requires both L and C for resonance")
+
+    topology_str = f"{num_R}R"
+    if num_C > 0:
+        topology_str += f"+{num_C}C"
+    if num_L > 0:
+        topology_str += f"+{num_L}L"
+
+    return topology_str, issues
+
+
 def generate_circuit_diagram(netlist):
     """Generate ASCII circuit diagram from SPICE netlist."""
     components = parse_spice_netlist(netlist)
@@ -241,34 +273,34 @@ def main():
     # Test specifications
     test_cases = [
         # Low-pass filters (Q ≈ 0.707)
-        (100, 0.707, "Low-pass (100 Hz, Butterworth)"),
-        (10000, 0.707, "Low-pass (10 kHz, Butterworth)"),
-        (100000, 0.707, "Low-pass (100 kHz, Butterworth)"),
+        (100, 0.707, "100 Hz, Q=0.707"),
+        (10000, 0.707, "10 kHz, Q=0.707"),
+        (100000, 0.707, "100 kHz, Q=0.707"),
 
         # High-pass filters (Q ≈ 0.707, but should differ by frequency)
-        (500, 0.707, "High-pass-like (500 Hz, Butterworth)"),
-        (50000, 0.707, "High-pass-like (50 kHz, Butterworth)"),
+        (500, 0.707, "500 Hz, Q=0.707"),
+        (50000, 0.707, "50 kHz, Q=0.707"),
 
         # Band-pass filters (moderate Q)
-        (1000, 1.5, "Band-pass (1 kHz, Q=1.5)"),
-        (5000, 2.0, "Band-pass (5 kHz, Q=2.0)"),
-        (15000, 3.0, "Band-pass (15 kHz, Q=3.0)"),
-        (50000, 2.5, "Band-pass (50 kHz, Q=2.5)"),
+        (1000, 1.5, "1 kHz, Q=1.5"),
+        (5000, 2.0, "5 kHz, Q=2.0"),
+        (15000, 3.0, "15 kHz, Q=3.0"),
+        (50000, 2.5, "50 kHz, Q=2.5"),
 
         # High-Q resonators
-        (1000, 5.0, "Resonator (1 kHz, Q=5.0)"),
-        (10000, 10.0, "Resonator (10 kHz, Q=10.0)"),
-        (5000, 20.0, "Sharp resonator (5 kHz, Q=20.0)"),
+        (1000, 5.0, "1 kHz, Q=5.0"),
+        (10000, 10.0, "10 kHz, Q=10.0"),
+        (5000, 20.0, "5 kHz, Q=20.0"),
 
         # Overdamped filters (low Q)
-        (1000, 0.3, "Overdamped (1 kHz, Q=0.3)"),
-        (50000, 0.1, "Very overdamped (50 kHz, Q=0.1)"),
+        (1000, 0.3, "1 kHz, Q=0.3"),
+        (50000, 0.1, "50 kHz, Q=0.1"),
 
         # Edge cases
-        (50, 0.707, "Very low frequency (50 Hz)"),
-        (500000, 0.707, "Very high frequency (500 kHz)"),
-        (10000, 0.05, "Very low Q (10 kHz, Q=0.05)"),
-        (5000, 30.0, "Very high Q (5 kHz, Q=30.0)"),
+        (50, 0.707, "50 Hz, Q=0.707"),
+        (500000, 0.707, "500 kHz, Q=0.707"),
+        (10000, 0.05, "10 kHz, Q=0.05"),
+        (5000, 30.0, "5 kHz, Q=30.0"),
     ]
 
     detailed_results = []
@@ -309,6 +341,8 @@ def main():
         actual_cutoff = None
         actual_q = None
         sim_success = False
+        topology_str = "Unknown"
+        topology_issues = []
 
         if valid:
             try:
@@ -324,6 +358,9 @@ def main():
                 )
 
                 diagram = generate_circuit_diagram(netlist)
+
+                # Analyze topology validity
+                topology_str, topology_issues = analyze_topology_validity(netlist, target_q)
 
                 frequencies, response = simulator.run_ac_analysis(netlist)
                 specs = extract_cutoff_and_q(frequencies, response)
@@ -345,7 +382,9 @@ def main():
             'diagram': diagram,
             'actual_cutoff': actual_cutoff,
             'actual_q': actual_q,
-            'sim_success': sim_success
+            'sim_success': sim_success,
+            'topology_str': topology_str,
+            'topology_issues': topology_issues
         })
 
     # Save to file
@@ -367,8 +406,15 @@ def main():
             f.write(f"- Q-factor: {r['target_q']:.3f}\n\n")
 
             f.write(f"**Generated Circuit:**\n")
-            f.write(f"- Topology: {r['num_edges']} edges\n")
-            f.write(f"- Valid: {'✅ Yes' if r['valid'] else '❌ No'}\n\n")
+            f.write(f"- Topology: {r['num_edges']} edges ({r['topology_str']})\n")
+            f.write(f"- Valid: {'✅ Yes' if r['valid'] else '❌ No'}\n")
+
+            # Add topology validity warnings
+            if r['topology_issues']:
+                f.write(f"- **Topology Issues:**\n")
+                for issue in r['topology_issues']:
+                    f.write(f"  - ❌ {issue}\n")
+            f.write("\n")
 
             if r['sim_success']:
                 cutoff_error = abs(r['target_cutoff'] - r['actual_cutoff']) / r['target_cutoff'] * 100
@@ -408,14 +454,26 @@ def main():
 
                 # Analysis
                 f.write(f"**Analysis:**\n")
-                if cutoff_error < 20 and q_error < 20:
-                    f.write("- Excellent accuracy on both metrics\n")
-                elif cutoff_error < 50 and q_error < 50:
-                    f.write("- Moderate accuracy, within acceptable range\n")
-                else:
-                    f.write("- Poor accuracy, likely due to training data bias\n")
 
-                if r['target_q'] >= 5.0:
+                # Topology validity analysis
+                if r['topology_issues']:
+                    f.write("- **⚠️ Topology cannot produce desired response:**\n")
+                    for issue in r['topology_issues']:
+                        f.write(f"  - {issue}\n")
+                    f.write("- Generated topology is fundamentally incapable of meeting specifications\n")
+                    f.write("- Even with perfect parameter tuning, this circuit cannot achieve the target Q-factor\n")
+                else:
+                    if cutoff_error < 20 and q_error < 20:
+                        f.write("- ✅ Excellent accuracy on both metrics\n")
+                        f.write("- Topology is appropriate and parameters are well-tuned\n")
+                    elif cutoff_error < 50 and q_error < 50:
+                        f.write("- ⚠️ Moderate accuracy, within acceptable range\n")
+                        f.write("- Topology is appropriate but parameter tuning could improve\n")
+                    else:
+                        f.write("- ❌ Poor accuracy, likely due to training data bias\n")
+                        f.write("- Topology is theoretically capable but parameters are poorly tuned\n")
+
+                if r['target_q'] >= 5.0 and not any('High-Q' in issue for issue in r['topology_issues']):
                     f.write("- High-Q specification outside typical training data\n")
                 elif abs(r['target_q'] - 0.707) < 0.1:
                     f.write("- Butterworth filter (Q≈0.707) matches training data well\n")
