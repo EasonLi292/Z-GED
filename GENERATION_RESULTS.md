@@ -84,8 +84,83 @@
 
 ---
 
+## Training Data Composition
 
+Understanding the training data helps explain the model's strengths and limitations.
 
+### Dataset Statistics
+- **Total circuits**: 120
+- **Filter types**: Evenly distributed (20 each of low-pass, high-pass, band-pass, band-stop, RLC series, RLC parallel)
+
+### Q-Factor Distribution in Training Data
+
+| Q Range | Count | Percentage | Notes |
+|---------|-------|------------|-------|
+| **Q < 0.5** (Very low) | 27 | 22.5% | Overdamped filters |
+| **0.5 ≤ Q < 0.8** (Butterworth) | 56 | 46.7% | **Dominant category** |
+| **0.8 ≤ Q < 2.0** (Moderate) | 11 | 9.2% | Limited examples |
+| **2.0 ≤ Q < 5.0** (Medium-high) | 15 | 12.5% | Sparse coverage |
+| **5.0 ≤ Q < 10.0** (High) | 4 | 3.3% | Very few examples |
+| **Q ≥ 10.0** (Very high) | 7 | 5.8% | Extremely limited |
+
+**Key Finding**: 35.8% of training circuits have Q ≈ 0.707 (within ±10%), creating a strong Butterworth bias.
+
+### Topology Distribution in Training Data
+
+| Topology | Count | Percentage | Q Capability |
+|----------|-------|------------|--------------|
+| **1R+1C** | 40 | 33.3% | Q ≤ 0.707 (RC limit) |
+| **2R+1C+1L** | 40 | 33.3% | Can achieve any Q |
+| **1R+1C+1L** | 20 | 16.7% | Can achieve any Q |
+| **4R+1C+1L** | 20 | 16.7% | Can achieve any Q |
+
+**Key Finding**: 33.3% of training circuits are RC-only, which cannot achieve Q > 0.707. This biases the model toward generating RC topologies even when inappropriate.
+
+### High-Q Training Examples (Q ≥ 5.0)
+
+**Only 11 circuits** (9.2%) in the training set have Q ≥ 5.0:
+- **All 11** have both inductors and capacitors (required for resonance)
+- **7 circuits** (63.6%) use 4R+1C+1L topology
+- **4 circuits** (36.4%) use 2R+1C+1L topology
+
+**Key Finding**: With only 11 high-Q examples and 7 examples of Q ≥ 10, the model has insufficient data to learn high-Q circuit generation.
+
+### Frequency Distribution
+
+| Range | Count | Percentage |
+|-------|-------|------------|
+| < 100 Hz | 4 | 3.3% |
+| 100 Hz - 1 kHz | 11 | 9.2% |
+| **1 kHz - 10 kHz** | 33 | 27.5% |
+| **10 kHz - 100 kHz** | 59 | 49.2% |
+| > 100 kHz | 13 | 10.8% |
+
+**Key Finding**: Model is best trained on 1 kHz - 100 kHz range (76.7% of data).
+
+### Why the Model Struggles
+
+Based on training data analysis:
+
+1. **Excellent on Butterworth filters** (Q ≈ 0.707)
+   - 46.7% of training data in this range
+   - 35.8% specifically at Q ≈ 0.707
+   - **Result**: 0% Q error on all Butterworth test cases ✅
+
+2. **Poor on high-Q specifications** (Q ≥ 5.0)
+   - Only 9.2% of training examples
+   - Just 7 examples with Q ≥ 10
+   - **Result**: 85-98% error on high-Q test cases ❌
+
+3. **Defaults to RC topologies** for unfamiliar specs
+   - 33.3% of training data is RC-only
+   - RC is most common single topology
+   - **Result**: Generates RC for Q=1.5 (impossible) ❌
+
+4. **Lacks diversity** in moderate Q range (1 < Q < 5)
+   - Only 26 circuits (21.7%) in this range
+   - **Result**: Inconsistent performance, 49-72% error ⚠️
+
+---
 
 
 

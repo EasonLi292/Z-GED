@@ -1,0 +1,116 @@
+Loading training dataset...
+Total circuits in dataset: 120
+
+================================================================================
+Q-FACTOR DISTRIBUTION
+================================================================================
+
+Overall Statistics:
+  Mean Q: 2.358
+  Median Q: 0.707
+  Std Dev: 5.079
+  Min Q: 0.300
+  Max Q: 32.176
+
+Q-factor Distribution:
+  Very low (Q < 0.5)                 :  27 circuits ( 22.5%)
+  Butterworth range (0.5 ≤ Q < 0.8)  :  56 circuits ( 46.7%)
+  Moderate (0.8 ≤ Q < 2.0)           :  11 circuits (  9.2%)
+  Medium-high (2.0 ≤ Q < 5.0)        :  15 circuits ( 12.5%)
+  High (5.0 ≤ Q < 10.0)              :   4 circuits (  3.3%)
+  Very high (Q ≥ 10.0)               :   7 circuits (  5.8%)
+
+Butterworth (Q ≈ 0.707) circuits:
+  Within ±10% of 0.707: 43 circuits (35.8%)
+
+================================================================================
+FILTER TYPE DISTRIBUTION
+================================================================================
+
+Filter Types:
+  low_pass       :  20 circuits ( 16.7%)
+  high_pass      :  20 circuits ( 16.7%)
+  band_pass      :  20 circuits ( 16.7%)
+  band_stop      :  20 circuits ( 16.7%)
+  rlc_series     :  20 circuits ( 16.7%)
+  rlc_parallel   :  20 circuits ( 16.7%)
+
+================================================================================
+FREQUENCY DISTRIBUTION
+================================================================================
+
+Overall Statistics:
+  Mean: 50,895.4 Hz
+  Median: 19,168.5 Hz
+  Min: 14.4 Hz
+  Max: 885,978.2 Hz
+
+Frequency Distribution:
+  < 100 Hz            :   4 circuits (  3.3%)
+  100 Hz - 1 kHz      :  11 circuits (  9.2%)
+  1 kHz - 10 kHz      :  33 circuits ( 27.5%)
+  10 kHz - 100 kHz    :  59 circuits ( 49.2%)
+  > 100 kHz           :  13 circuits ( 10.8%)
+
+================================================================================
+TOPOLOGY DISTRIBUTION
+================================================================================
+
+Most Common Topologies:
+  1R+1C          :  40 circuits ( 33.3%)
+  2R+1C+1L       :  40 circuits ( 33.3%)
+  1R+1C+1L       :  20 circuits ( 16.7%)
+  4R+1C+1L       :  20 circuits ( 16.7%)
+
+
+Component Type Usage:
+  Circuits with Resistors: 120 (100.0%)
+  Circuits with Capacitors: 120 (100.0%)
+  Circuits with Inductors:  80 (66.7%)
+
+Component Combinations:
+  RC only (no L):  40 (33.3%)
+  RL only (no C):  0 (0.0%)
+  CL only (no R):  0 (0.0%)
+  RLC (all three): 80 (66.7%)
+
+================================================================================
+HIGH-Q CIRCUIT ANALYSIS
+================================================================================
+
+Circuits with Q ≥ 5.0: 11 total
+
+Topologies in high-Q circuits:
+  4R+1C+1L       :   7 circuits ( 63.6%)
+  2R+1C+1L       :   4 circuits ( 36.4%)
+
+High-Q Circuit Components:
+  With inductors (L): 11/11 (100.0%)
+  With capacitors (C): 11/11 (100.0%)
+  With both L and C: 11/11 (100.0%)
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+1. Training data is heavily biased toward Butterworth filters:
+   - 35.8% of circuits have Q ≈ 0.707
+
+2. Very few high-Q training examples:
+   - Only 9.2% of circuits have Q ≥ 5.0
+   - Only 7 circuits have Q ≥ 10.0
+
+3. Most common topology is RC (no inductor):
+   - 33.3% of circuits are RC-only
+   - RC filters are limited to Q ≤ 0.707
+
+4. High-Q circuits in training data:
+   - 100.0% have both L and C (required for resonance)
+   - Model has seen only 11 examples of high-Q behavior
+
+This explains why the model:
+- Excels at Butterworth filters (dominant training examples)
+- Struggles with Q > 1.0 (limited training data)
+- Often generates RC topologies (most common in training)
+- Fails on high-Q specs (insufficient diverse examples)
+
