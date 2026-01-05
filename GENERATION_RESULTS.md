@@ -265,6 +265,7 @@ This is more accurately described as:
 
 **Generated Circuit:**
 - Topology: 2 edges (1R+1C)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -314,6 +315,7 @@ VIN ────── R1=18.7kΩ ────── VOUT
 
 **Generated Circuit:**
 - Topology: 2 edges (1R+1C)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -363,6 +365,7 @@ VIN ────── R1=754.8Ω ────── VOUT
 
 **Generated Circuit:**
 - Topology: 2 edges (1R+1C)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -412,6 +415,7 @@ VIN ────── R1=253.4Ω ────── VOUT
 
 **Generated Circuit:**
 - Topology: 2 edges (1R+1C)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -461,6 +465,7 @@ VIN ────── R1=10.6kΩ ────── VOUT
 
 **Generated Circuit:**
 - Topology: 2 edges (1R+1C)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -510,6 +515,7 @@ VIN ────── R1=422.4Ω ────── VOUT
 
 **Generated Circuit:**
 - Topology: 2 edges (1R+1C)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 - **Topology Issues:**
   - ❌ RC filter cannot achieve Q=1.5 (max ~0.707)
@@ -562,6 +568,7 @@ VIN ────── C1=18.7nF ────── VOUT
 
 **Generated Circuit:**
 - Topology: 2 edges (1R+1C)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 - **Topology Issues:**
   - ❌ RC filter cannot achieve Q=2.0 (max ~0.707)
@@ -614,6 +621,7 @@ VIN ────── C1=10.4nF ────── VOUT
 
 **Generated Circuit:**
 - Topology: 4 edges (4R+1C+1L)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -668,6 +676,7 @@ VOUT ────── R4=7.5kΩ ────── n3
 
 **Generated Circuit:**
 - Topology: 2 edges (2R)
+- **Topology Status:** ❌ NOVEL (not in training) - Invalid!
 - Valid: ✅ Yes
 - **Topology Issues:**
   - ❌ Pure resistive (2R) cannot provide frequency selectivity
@@ -720,6 +729,7 @@ GND ────── R2=3.8kΩ ────── VOUT
 
 **Generated Circuit:**
 - Topology: 2 edges (2R)
+- **Topology Status:** ❌ NOVEL (not in training) - Invalid!
 - Valid: ✅ Yes
 - **Topology Issues:**
   - ❌ Pure resistive (2R) cannot provide frequency selectivity
@@ -774,6 +784,7 @@ VIN ────── R2=6.0kΩ ────── VOUT
 
 **Generated Circuit:**
 - Topology: 3 edges (1R+1C+1L)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -825,6 +836,7 @@ VOUT ────── L1=2.1mH ────── n3
 
 **Generated Circuit:**
 - Topology: 3 edges (2R+1C)
+- **Topology Status:** ❌ NOVEL (not in training) - Invalid!
 - Valid: ✅ Yes
 - **Topology Issues:**
   - ❌ High-Q (Q=20.0) requires both L and C for resonance
@@ -879,6 +891,7 @@ VOUT ────── R2=34.2kΩ ────── n3
 
 **Generated Circuit:**
 - Topology: 2 edges (1R+1C)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -927,6 +940,7 @@ VIN ────── C1=19.6nF ────── VOUT
 
 **Generated Circuit:**
 - Topology: 4 edges (2R+1C+1L)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -979,6 +993,7 @@ n3 ────── L1=579.0uH ────── n4
 
 **Generated Circuit:**
 - Topology: 2 edges (1R+1C)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -1028,6 +1043,7 @@ VIN ────── C1=113.2nF ────── VOUT
 
 **Generated Circuit:**
 - Topology: 2 edges (1R+1C)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -1077,6 +1093,7 @@ VIN ────── C1=1.4nF ────── VOUT
 
 **Generated Circuit:**
 - Topology: 4 edges (2R+1C+1L)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
@@ -1129,6 +1146,7 @@ n3 ────── L1=944.1uH ────── n4
 
 **Generated Circuit:**
 - Topology: 3 edges (1R+1C+1L)
+- **Topology Status:** ✅ Seen in training data
 - Valid: ✅ Yes
 
 **Measured Performance:**
