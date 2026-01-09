@@ -47,6 +47,13 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
         component_type_weight: float = 2.0,  # Important for discrete selection
         component_value_weight: float = 1.0,
         is_parallel_weight: float = 0.5,
+        # Learned stopping criterion
+        stop_weight: float = 1.0,  # Weight for stopping criterion loss
+        # NEW: Stop-Node correlation loss (Fix 2 from Generation Plan)
+        # Forces consistency between stop prediction and node type prediction
+        stop_node_correlation_weight: float = 2.0,
+        # NEW: Direct node count prediction loss
+        node_count_weight: float = 5.0,  # High weight - this is CRITICAL for correct stopping
         # Connectivity loss
         use_connectivity_loss: bool = True,
         connectivity_weight: float = 5.0,
@@ -62,6 +69,9 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
         self.component_type_weight = component_type_weight
         self.component_value_weight = component_value_weight
         self.is_parallel_weight = is_parallel_weight
+        self.stop_weight = stop_weight
+        self.stop_node_correlation_weight = stop_node_correlation_weight
+        self.node_count_weight = node_count_weight  # NEW
         self.gumbel_temperature = gumbel_temperature
         self.kl_weight = kl_weight
 
@@ -129,6 +139,114 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
         with torch.no_grad():
             pred_nodes = torch.argmax(node_logits_flat, dim=-1)
             node_type_acc = (pred_nodes == target_nodes_flat).float().mean().item() * 100
+
+        # ==================================================================
+        # 1.5 Stopping Criterion Loss (NEW - Method 1)
+        # ==================================================================
+
+        if 'stop_logits' in predictions and predictions['stop_logits'] is not None:
+            stop_logits = predictions['stop_logits']  # [batch, max_nodes]
+
+            # Create stop targets: 1 if position should be MASK, 0 if real node
+            # Node type 4 = MASK
+            target_stop = (target_nodes == 4).float()  # [batch, max_nodes]
+
+            # BCE loss for stopping criterion
+            loss_stop = F.binary_cross_entropy_with_logits(
+                stop_logits,
+                target_stop,
+                reduction='mean'
+            )
+
+            # Compute stop accuracy
+            with torch.no_grad():
+                pred_stop = (torch.sigmoid(stop_logits) > 0.5).float()
+                stop_acc = (pred_stop == target_stop).float().mean().item() * 100
+
+            # ==================================================================
+            # 1.6 Stop-Node Correlation Loss (Fix 2 from Generation Plan)
+            # ==================================================================
+            # This loss forces consistency between stop prediction and node type:
+            # - When should_stop=1 (MASK position): penalize high INTERNAL prob
+            # - When should_stop=0 (real node): penalize high MASK prob
+            #
+            # Without this, the model can have:
+            #   stop_prob=0.55 (predicts stop) but node_logits favor INTERNAL
+            # Leading to: "100% stop accuracy" but wrong node count during generation
+
+            # Only apply to positions >= 3 (where stopping is possible)
+            # Positions 0,1,2 are always GND, VIN, VOUT
+            max_nodes = node_logits.shape[1]
+
+            if max_nodes > 3:
+                # Get node probabilities for positions 3+
+                node_probs = F.softmax(node_logits[:, 3:, :], dim=-1)  # [batch, max_nodes-3, 5]
+                internal_prob = node_probs[:, :, 3]  # INTERNAL class = 3
+                mask_prob = node_probs[:, :, 4]      # MASK class = 4
+
+                # Get stop targets for positions 3+
+                stop_targets_3plus = target_stop[:, 3:]  # [batch, max_nodes-3]
+
+                # Correlation loss:
+                # 1. When should_stop=1: penalize high INTERNAL probability
+                #    Loss = stop_target * internal_prob
+                # 2. When should_stop=0: penalize high MASK probability
+                #    Loss = (1 - stop_target) * mask_prob
+
+                loss_stop_internal = (stop_targets_3plus * internal_prob).mean()
+                loss_stop_mask = ((1 - stop_targets_3plus) * mask_prob).mean()
+
+                loss_stop_node_correlation = loss_stop_internal + loss_stop_mask
+
+                # Compute correlation accuracy: do stop and node type agree?
+                with torch.no_grad():
+                    # Check if predictions are consistent
+                    pred_node_types_3plus = torch.argmax(node_logits[:, 3:, :], dim=-1)  # [batch, max_nodes-3]
+                    pred_is_mask = (pred_node_types_3plus == 4).float()
+                    pred_stop_3plus = (torch.sigmoid(stop_logits[:, 3:]) > 0.5).float()
+
+                    # Correlation = both predict stop (stop=1 AND node=MASK)
+                    #            OR both predict continue (stop=0 AND node!=MASK)
+                    consistent = ((pred_stop_3plus == 1) & (pred_is_mask == 1)) | \
+                                 ((pred_stop_3plus == 0) & (pred_is_mask == 0))
+                    stop_node_correlation_acc = consistent.float().mean().item() * 100
+            else:
+                loss_stop_node_correlation = torch.tensor(0.0, device=device)
+                stop_node_correlation_acc = 100.0  # No positions to check
+
+        else:
+            loss_stop = torch.tensor(0.0, device=device)
+            loss_stop_node_correlation = torch.tensor(0.0, device=device)
+            stop_acc = 0.0
+            stop_node_correlation_acc = 0.0
+
+        # ==================================================================
+        # 1.7 Direct Node Count Loss (NEW - avoids train/test mismatch!)
+        # ==================================================================
+        # This loss trains a head to directly predict the number of nodes
+        # Target: count non-MASK nodes in target_nodes → 3, 4, or 5
+        # Output: 3-class classification (0=3 nodes, 1=4 nodes, 2=5 nodes)
+
+        if 'node_count_logits' in predictions and predictions['node_count_logits'] is not None:
+            node_count_logits = predictions['node_count_logits']  # [batch, 3]
+
+            # Compute target node count for each sample in batch
+            # Count nodes that are NOT MASK (type 4)
+            with torch.no_grad():
+                target_node_counts = (target_nodes != 4).sum(dim=1)  # [batch]
+                # Convert to class index: 3 nodes → 0, 4 nodes → 1, 5 nodes → 2
+                target_count_class = (target_node_counts - 3).clamp(0, 2).long()
+
+            # Cross-entropy loss for node count prediction
+            loss_node_count = F.cross_entropy(node_count_logits, target_count_class)
+
+            # Compute node count accuracy
+            with torch.no_grad():
+                pred_count_class = torch.argmax(node_count_logits, dim=-1)
+                node_count_acc = (pred_count_class == target_count_class).float().mean().item() * 100
+        else:
+            loss_node_count = torch.tensor(0.0, device=device)
+            node_count_acc = 0.0
 
         # ==================================================================
         # 2-3. Edge-Component Loss (UNIFIED - Phase 3)
@@ -338,8 +456,11 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
 
         total_loss = (
             self.node_type_weight * loss_node_type +
+            self.stop_weight * loss_stop +  # Stopping criterion
+            self.stop_node_correlation_weight * loss_stop_node_correlation +  # Fix 2 correlation
+            self.node_count_weight * loss_node_count +  # NEW: Direct node count prediction
             self.edge_exist_weight * loss_edge_exist +
-            self.component_type_weight * loss_component_type +  # NEW!
+            self.component_type_weight * loss_component_type +
             self.component_value_weight * loss_component_value +
             self.is_parallel_weight * loss_is_parallel +
             self.connectivity_weight * loss_connectivity +
@@ -352,15 +473,21 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
 
         metrics = {
             'loss_node_type': loss_node_type.item(),
+            'loss_stop': loss_stop.item(),
+            'loss_stop_correlation': loss_stop_node_correlation.item(),
+            'loss_node_count': loss_node_count.item(),  # NEW: Direct count
             'loss_edge_exist': loss_edge_exist.item(),
-            'loss_component_type': loss_component_type.item(),  # NEW!
+            'loss_component_type': loss_component_type.item(),
             'loss_component_value': loss_component_value.item(),
             'loss_is_parallel': loss_is_parallel.item(),
             'loss_connectivity': loss_connectivity.item() if self.use_connectivity_loss else 0.0,
             'loss_kl': kl_loss.item(),
             'node_type_acc': node_type_acc,
+            'stop_acc': stop_acc,
+            'stop_node_corr_acc': stop_node_correlation_acc,
+            'node_count_acc': node_count_acc,  # NEW: This is the KEY metric for generation!
             'edge_exist_acc': edge_acc,
-            'component_type_acc': comp_type_acc,  # NEW!
+            'component_type_acc': comp_type_acc,
         }
 
         # Add connectivity metrics if available

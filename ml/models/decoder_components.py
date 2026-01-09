@@ -148,6 +148,25 @@ class LatentGuidedEdgeDecoder(nn.Module):
         )
 
         # ==================================================================
+        # 3.5. Layer Normalization (CRITICAL FIX for numerical stability)
+        # ==================================================================
+
+        # Normalize after each attention module
+        self.norm_topo = nn.LayerNorm(hidden_dim)
+        self.norm_tf = nn.LayerNorm(hidden_dim)
+        self.norm_values = nn.LayerNorm(hidden_dim)
+        self.norm_conditions = nn.LayerNorm(hidden_dim)
+
+        # Normalize after base encoding
+        self.norm_base = nn.LayerNorm(hidden_dim)
+
+        # Normalize before fusion
+        self.norm_before_fusion = nn.LayerNorm(hidden_dim * 5)
+
+        # Normalize after fusion (before output heads)
+        self.norm_after_fusion = nn.LayerNorm(hidden_dim)
+
+        # ==================================================================
         # 4. Feature Fusion
         # ==================================================================
 
@@ -240,10 +259,13 @@ class LatentGuidedEdgeDecoder(nn.Module):
             torch.cat([node_i, node_j], dim=-1)
         )  # [batch, hidden_dim]
 
+        # APPLY LAYER NORM to base features (stabilizes attention inputs)
+        edge_base = self.norm_base(edge_base)
+
         edge_base_expanded = edge_base.unsqueeze(1)  # [batch, 1, hidden_dim]
 
         # ==================================================================
-        # 2. Cross-Attention to Latent Components
+        # 2. Cross-Attention to Latent Components (with Layer Normalization)
         # ==================================================================
 
         # Project latent components
@@ -262,6 +284,7 @@ class LatentGuidedEdgeDecoder(nn.Module):
             need_weights=True
         )
         edge_topo_guided = edge_topo_guided.squeeze(1)  # [batch, hidden_dim]
+        edge_topo_guided = self.norm_topo(edge_topo_guided)  # APPLY LAYER NORM
 
         # TF attention: "Does this edge help achieve target TF?"
         edge_tf_guided, tf_attn_weights = self.tf_attention(
@@ -271,6 +294,7 @@ class LatentGuidedEdgeDecoder(nn.Module):
             need_weights=True
         )
         edge_tf_guided = edge_tf_guided.squeeze(1)  # [batch, hidden_dim]
+        edge_tf_guided = self.norm_tf(edge_tf_guided)  # APPLY LAYER NORM
 
         # Values attention: "What component values for this edge?"
         edge_values_guided, values_attn_weights = self.values_attention(
@@ -280,6 +304,7 @@ class LatentGuidedEdgeDecoder(nn.Module):
             need_weights=True
         )
         edge_values_guided = edge_values_guided.squeeze(1)  # [batch, hidden_dim]
+        edge_values_guided = self.norm_values(edge_values_guided)  # APPLY LAYER NORM
 
         # NEW: Conditions attention: "Adjust values for target specifications"
         edge_conditions_guided, conditions_attn_weights = self.conditions_attention(
@@ -289,9 +314,10 @@ class LatentGuidedEdgeDecoder(nn.Module):
             need_weights=True
         )
         edge_conditions_guided = edge_conditions_guided.squeeze(1)  # [batch, hidden_dim]
+        edge_conditions_guided = self.norm_conditions(edge_conditions_guided)  # APPLY LAYER NORM
 
         # ==================================================================
-        # 3. Feature Fusion
+        # 3. Feature Fusion (with Layer Normalization)
         # ==================================================================
 
         # Combine all features
@@ -303,7 +329,13 @@ class LatentGuidedEdgeDecoder(nn.Module):
             edge_conditions_guided  # NEW: Guided by target specifications
         ], dim=-1)  # [batch, hidden_dim * 5]
 
+        # APPLY LAYER NORM before fusion (prevents large concatenated activations)
+        edge_features = self.norm_before_fusion(edge_features)
+
         edge_features_fused = self.fusion(edge_features)  # [batch, hidden_dim]
+
+        # APPLY LAYER NORM after fusion (stabilizes output head inputs)
+        edge_features_fused = self.norm_after_fusion(edge_features_fused)
 
         # ==================================================================
         # 4. Output Predictions (JOINT EDGE-COMPONENT PREDICTION - Phase 3)

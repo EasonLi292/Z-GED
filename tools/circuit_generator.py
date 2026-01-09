@@ -71,7 +71,7 @@ class FilterGenerator:
         return fc
 
     def generate_band_pass_filter(self):
-        """RLC Band-pass filter (series RLC)"""
+        """RLC Band-pass filter (series RLC, measure across R)"""
         self.filter_type = 'band_pass'
         self.components = []
         self.graph.clear()
@@ -84,18 +84,21 @@ class FilterGenerator:
         # Center frequency: f0 = 1 / (2*pi*sqrt(L*C))
         f0 = 1 / (2 * np.pi * np.sqrt(L * C))
 
-        # Series RLC: Vin --R--L--C-- GND, Vout across C
+        # Series RLC: Vin --L--C-- Vout --R-- GND, measure across R
+        # At DC: C blocks → I=0 → V_R=0
+        # At resonance: Z_LC=0 (short) → I_max → V_R max (band-pass peak)
+        # At HF: L blocks → I→0 → V_R→0
         self.components = [
-            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 1, 'node2': 3},
-            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 3, 'node2': 2},
-            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 2, 'node2': 0}
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 1, 'node2': 3},
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 3, 'node2': 2},
+            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 2, 'node2': 0}
         ]
 
         self._build_graph()
         return f0
 
     def generate_band_stop_filter(self):
-        """RLC Band-stop (notch) filter (parallel RLC)"""
+        """RLC Band-stop (notch) filter (series LC in shunt path)"""
         self.filter_type = 'band_stop'
         self.components = []
         self.graph.clear()
@@ -109,12 +112,13 @@ class FilterGenerator:
         # Center frequency: f0 = 1 / (2*pi*sqrt(L*C))
         f0 = 1 / (2 * np.pi * np.sqrt(L * C))
 
-        # Vin --R_series-- (parallel RLC to GND) -- Vout -- R_load -- GND
+        # Vin --R_series-- Node3[series LC to GND] --R_load-- Vout --R_out-- GND
+        # At resonance: series LC shorts to ground → maximum attenuation (notch)
+        # Away from resonance: series LC has high impedance → signal passes through
         self.components = [
             {'name': 'R_series', 'type': 'R', 'value': R, 'node1': 1, 'node2': 3},
-            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 3, 'node2': 0},
-            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 3, 'node2': 0},
-            {'name': 'R_parallel', 'type': 'R', 'value': R * 2, 'node1': 3, 'node2': 0},
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 3, 'node2': 4},
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 4, 'node2': 0},
             {'name': 'R_load', 'type': 'R', 'value': R_load, 'node1': 3, 'node2': 2},
             {'name': 'R_out', 'type': 'R', 'value': R_load, 'node1': 2, 'node2': 0}
         ]
@@ -372,7 +376,7 @@ class FilterGenerator:
         """
         Generate band-pass series RLC filter from specification.
 
-        Circuit topology: Vin --R--L--C-- GND, Vout across C
+        Circuit topology: Vin --L--C-- Vout --R-- GND, measure across R
 
         Args:
             f0: Center frequency (Hz)
@@ -443,11 +447,11 @@ class FilterGenerator:
                     f"with practical components. Original error: {e}"
                 )
 
-        # Build component list (series RLC)
+        # Build component list (series RLC, measure across R)
         self.components = [
-            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 1, 'node2': 3},
-            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 3, 'node2': 2},
-            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 2, 'node2': 0}
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 1, 'node2': 3},
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 3, 'node2': 2},
+            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 2, 'node2': 0}
         ]
 
         self._build_graph()
@@ -458,9 +462,9 @@ class FilterGenerator:
 
     def from_band_stop_spec(self, f0, Q=10.0, C=100e-9):
         """
-        Generate band-stop (notch) parallel RLC filter from specification.
+        Generate band-stop (notch) series LC shunt filter from specification.
 
-        Circuit topology: Vin --R_series-- Node3[L||C||R_parallel to GND]
+        Circuit topology: Vin --R_series-- Node3[series LC to GND]
                           --R_load-- Vout --R_out-- GND
 
         Args:
@@ -477,6 +481,7 @@ class FilterGenerator:
         Notes:
             - Higher Q = sharper notch (more selective rejection)
             - Typical Q for notch filters: 5-20
+            - Uses series LC in shunt path for proper notch behavior
         """
         self.filter_type = 'band_stop'
         self.components = []
@@ -493,53 +498,21 @@ class FilterGenerator:
         # Calculate L from resonance
         L = 1 / (ω_0**2 * C)
 
-        # For band-stop filter, the Q factor depends on effective resistance
-        # Q = R_eff * √(C/L) where R_eff is complex parallel combination
-        # R_right = R_load + R_out
-        # R_load_eff = R_series || R_right
-        # R_eff = R_parallel || R_load_eff
+        # For series LC shunt notch filter:
+        # Q factor relates to how sharp the notch is
+        # Q ≈ (1/R_eff) × ω₀L where R_eff is the effective series resistance
         #
-        # We'll use typical values for R_series, R_load, R_out
-        # and solve for R_parallel to achieve desired Q
+        # We'll use typical values for R_series and R_load
+        # The damping of the LC comes primarily from the loading resistances
 
         R_series = 1000   # 1kΩ typical
         R_load = 10000    # 10kΩ typical
         R_out = R_load    # Same as R_load
 
-        # For band-stop, we need to increase R_series and R_load to support higher Q
-        # The effective resistance R_eff = R_parallel || R_load_eff
-        # where R_load_eff = R_series || R_right
-        #
-        # To achieve high Q, we need R_load_eff to be large
-        # Strategy: Scale R_series and R_load proportionally with Q
-
-        R_series = max(1000, 100 * Q)   # Scale with Q
-        R_load = max(10000, 1000 * Q)   # Scale with Q
-        R_out = R_load
-
-        # Calculate effective resistance from loading
-        R_right = R_load + R_out
-        R_load_eff = (R_series * R_right) / (R_series + R_right)
-
-        # Now solve for R_parallel from Q = R_eff * √(C/L)
-        # where R_eff = (R_parallel * R_load_eff) / (R_parallel + R_load_eff)
-        #
-        # Rearranging: R_parallel = R_load_eff * target_R_eff / (R_load_eff - target_R_eff)
-        # But we want R_parallel >> R_load_eff for high Q
-        # Simpler approach: R_parallel ≈ target_R_eff (when R_parallel >> R_load_eff)
-
-        target_R_eff = Q * np.sqrt(L / C)
-
-        # For high Q notch, R_parallel should be much larger than R_load_eff
-        # Use R_parallel = 2 * target_R_eff as a good starting point
-        # This ensures R_eff ≈ 0.67 * target_R_eff (acceptable for notch filters)
-        R_parallel = 2 * target_R_eff
-
         # Validate components
         try:
             self._validate_component('L', L)
             self._validate_component('C', C)
-            self._validate_component('R', R_parallel)
         except ValueError as e:
             # Try different C values
             found_valid = False
@@ -547,13 +520,11 @@ class FilterGenerator:
 
             for C_try in C_candidates:
                 L_try = 1 / (ω_0**2 * C_try)
-                R_parallel_try = Q * np.sqrt(L_try / C_try)
 
                 try:
                     self._validate_component('L', L_try)
                     self._validate_component('C', C_try)
-                    self._validate_component('R', R_parallel_try)
-                    L, C, R_parallel = L_try, C_try, R_parallel_try
+                    L, C = L_try, C_try
                     found_valid = True
                     break
                 except ValueError:
@@ -565,12 +536,11 @@ class FilterGenerator:
                     f"with practical components. Original error: {e}"
                 )
 
-        # Build component list
+        # Build component list (series LC in shunt path)
         self.components = [
             {'name': 'R_series', 'type': 'R', 'value': R_series, 'node1': 1, 'node2': 3},
-            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 3, 'node2': 0},
-            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 3, 'node2': 0},
-            {'name': 'R_parallel', 'type': 'R', 'value': R_parallel, 'node1': 3, 'node2': 0},
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 3, 'node2': 4},
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 4, 'node2': 0},
             {'name': 'R_load', 'type': 'R', 'value': R_load, 'node1': 3, 'node2': 2},
             {'name': 'R_out', 'type': 'R', 'value': R_load, 'node1': 2, 'node2': 0}
         ]
@@ -796,19 +766,18 @@ def extract_poles_zeros_gain_analytical(filter_type, components):
             gain = 1.0  # HF gain is 1 (already correct)
 
     elif filter_type == 'band_pass':
-        # Series RLC: Vin(1) --R1-- (3) --L1-- Vout(2) --C1-- GND(0)
-        # Measuring voltage at node 2 (between L and C)
-        # This measures voltage across C only
-        # I = Vin / (R + sL + 1/(sC))
-        # V_C = I / (sC) = Vin / (sC(R + sL + 1/(sC)))
-        # H(s) = 1 / (s²LC + sRC + 1)
+        # Series RLC: Vin(1) --L1-- (3) --C1-- Vout(2) --R1-- GND(0)
+        # Measuring voltage across R (node 2)
+        # I = Vin / (sL + 1/(sC) + R)
+        # V_R = I × R = Vin × R / (sL + 1/(sC) + R)
+        # H(s) = R / (sL + 1/(sC) + R) = sRC / (s²LC + sRC + 1)
         R = comp_dict.get('R1', 0)
         L = comp_dict.get('L1', 0)
         C = comp_dict.get('C1', 0)
 
         if R > 0 and L > 0 and C > 0:
-            # Numerator: 1 (constant, no zeros)
-            zeros = []
+            # Numerator: sRC → zero at s=0
+            zeros = [0.0]
 
             # Denominator: s²LC + sRC + 1
             # Standard form: s² + (R/L)s + 1/(LC)
@@ -823,22 +792,22 @@ def extract_poles_zeros_gain_analytical(filter_type, components):
                 sqrt_term = np.sqrt((R / (2 * L))**2 - 1 / (L * C))
                 poles = [-R / (2 * L) + sqrt_term, -R / (2 * L) - sqrt_term]
 
-            # Gain: H(s) = K / ((s-p1)(s-p2))
-            # At s=0: H(0) = K/(p1*p2) = 1, so K = p1*p2
-            # Note: p1*p2 = omega_0^2 = 1/(LC)
-            gain = poles[0] * poles[1]
-            gain = np.abs(gain)  # Make it real and positive
+            # Gain: H(s) = K·s / ((s-p1)(s-p2))
+            # From transfer function: H(s) = (RC)·s / (LC·s² + RC·s + 1)
+            # The coefficient of s in numerator is RC
+            # K = RC × |p1·p2| where p1·p2 = 1/(LC)
+            gain = R * C * np.abs(poles[0] * poles[1])
 
     elif filter_type == 'band_stop':
         # Band-stop (notch) filter
-        # Vin(1) --R_series-- Node3[L||C||R_parallel to GND] --R_load-- Vout(2) --R_out-- GND
+        # Vin(1) --R_series-- Node3[series LC to GND] --R_load-- Vout(2) --R_out-- GND
+        # Series LC in shunt: L(3→4), C(4→0)
         #
-        # The parallel LC creates high impedance at resonance, passing signal through
-        # At DC and HF, the LC shorts to ground, attenuating the signal
+        # At resonance: series LC shorts to ground → maximum attenuation (notch)
+        # Away from resonance: series LC has high impedance → signal passes through
         L = comp_dict.get('L1', 0)
         C = comp_dict.get('C1', 0)
         R_series = comp_dict.get('R_series', 0)
-        R_parallel = comp_dict.get('R_parallel', 0)
         R_load = comp_dict.get('R_load', 0)
         R_out = comp_dict.get('R_out', 0)
 
@@ -846,60 +815,46 @@ def extract_poles_zeros_gain_analytical(filter_type, components):
             omega_0 = 1.0 / np.sqrt(L * C)
 
             # Zeros: at resonance frequency on imaginary axis
-            # The parallel LC impedance becomes very high
+            # The series LC impedance becomes zero (short to ground)
             zeros = [complex(0, omega_0), complex(0, -omega_0)]
 
-            # Poles: The full network is 4th order, but we approximate with dominant 2nd order poles
-            # The effective damping comes from the ratio of series to parallel resistance
-            # and the LC network. Better approximation accounts for loading.
-            if R_parallel > 0:
-                # Effective resistance seen by LC tank includes loading from R_series and R_right
-                R_right = R_load + R_out if R_load > 0 else R_out
-                R_load_eff = (R_series * R_right) / (R_series + R_right) if (R_series + R_right) > 0 else R_series
+            # Poles: The effective damping comes from the resistances
+            # Z_LC = sL + 1/(sC) is in parallel with Z_right = R_load + R_out
+            R_right = (R_load + R_out) if R_load > 0 else R_out
 
-                # Total parallel resistance is R_parallel || R_load_eff
-                R_eff = (R_parallel * R_load_eff) / (R_parallel + R_load_eff) if (R_parallel + R_load_eff) > 0 else R_parallel
+            # The quality factor for the notch depends on how much the resistances damp the LC
+            # For a series LC in shunt, Q ≈ (1/R_eff) × √(L/C)
+            # where R_eff accounts for loading from R_series and R_right
+            R_eff = (R_series * R_right) / (R_series + R_right) if (R_series + R_right) > 0 else R_series
 
-                # Quality factor with effective resistance
-                Q = R_eff * np.sqrt(C / L)
-                damping = 1.0 / Q
-
-                # For high-Q notch filters, poles are very close to imaginary axis
-                # Use more accurate pole placement
-                real_part = -omega_0 / (2 * Q)  # More accurate than -omega_0*damping/2
-                imag_part = omega_0 * np.sqrt(1 - 1/(4*Q**2)) if Q > 0.5 else omega_0 * 0.5
-
-                poles = [complex(real_part, imag_part), complex(real_part, -imag_part)]
+            # For series LC: Q = (1/R_series_LC) × ω₀L
+            # Approximate with effective resistance
+            if R_eff > 0:
+                Q = (1.0 / R_eff) * omega_0 * L
             else:
-                # Without R_parallel, poles are on imaginary axis (undamped)
-                poles = [complex(-omega_0*0.01, omega_0), complex(-omega_0*0.01, -omega_0)]
+                Q = 10.0  # Default moderate Q
+
+            # Clamp Q to reasonable range
+            Q = max(0.5, min(Q, 100.0))
+
+            # Poles near resonance with damping
+            real_part = -omega_0 / (2 * Q)
+            imag_part = omega_0 * np.sqrt(1 - 1/(4*Q**2)) if Q > 0.5 else omega_0 * 0.5
+            poles = [complex(real_part, imag_part), complex(real_part, -imag_part)]
 
             # Gain: The transfer function in pole-zero form is:
-            # H(s) = K*(s² + ω₀²) / ((s-p1)(s-p2))
-            #
-            # Near resonance (s ≈ jω), both numerator and denominator ≈ 0
-            # Away from resonance, the gain approaches a constant
-            #
-            # At very low or very high frequencies, the LC shorts out, so H→0
-            # This means we need K to be small enough that H→0 as s→0 or s→∞
-            #
-            # The passband gain (at resonance vicinity) depends on voltage division
-            # At resonance specifically, H = 0 due to zeros
-            # Just below/above resonance, we get the peak passband response
+            # H(s) = K(s² + ω₀²) / ((s-p1)(s-p2))
+            # At DC or HF, away from resonance, the gain depends on voltage division
+            # H(s→0) or H(s→∞) should approach the passband level
 
-            R_right = (R_load + R_out) if R_load > 0 else R_out
-            if R_parallel > 0 and R_right > 0:
-                # At resonance, parallel combination of R_parallel and R_right
-                Z_par_res = (R_parallel * R_right) / (R_parallel + R_right)
-                V3_gain = Z_par_res / (R_series + Z_par_res) if R_series + Z_par_res > 0 else 0
-                Vout_gain = R_out / R_right if R_right > 0 else 1.0
-                H_passband = V3_gain * Vout_gain
-            else:
-                H_passband = 0.5
+            # Passband gain (away from notch): voltage divider from Vin to Vout
+            # When Z_LC is large, Z_parallel ≈ Z_right
+            Z_parallel_passband = R_right
+            V3_gain = Z_parallel_passband / (R_series + Z_parallel_passband) if (R_series + Z_parallel_passband) > 0 else 0.5
+            Vout_gain = R_out / R_right if R_right > 0 else 1.0
+            H_passband = V3_gain * Vout_gain
 
-            # The gain K must be chosen to match the passband level
-            # For the pole-zero form: H(s) = K(s² + ω₀²) / ((s-p1)(s-p2))
-            # The gain is: K = H_passband × |p1·p2| / ω₀²
+            # For the pole-zero form: K = H_passband × |p1·p2| / ω₀²
             gain = H_passband * np.abs(poles[0] * poles[1]) / (omega_0**2)
 
     elif filter_type == 'rlc_series':

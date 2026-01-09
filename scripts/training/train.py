@@ -16,8 +16,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, WeightedRandomSampler
 import numpy as np
+import pickle
 from tqdm import tqdm
 
 from ml.data.dataset import CircuitDataset
@@ -57,13 +58,37 @@ def collate_circuit_batch(batch_list):
     }
 
 
-def graph_to_dense_format(graph, max_nodes=5):
-    """Convert PyG graph to dense format for decoder."""
+def graph_to_dense_format(graph, max_nodes=None):
+    """
+    Convert PyG graph to dense format for decoder.
+
+    Args:
+        graph: Batched PyG graph
+        max_nodes: Maximum nodes to pad to. If None, uses FIXED padding for proper stop learning.
+
+    Returns:
+        Dictionary with dense tensors padded to max_nodes
+    """
     batch_size = graph.batch.max().item() + 1
     device = graph.x.device
 
+    # FIXED PADDING: Always pad to a consistent max to enable stop criterion learning
+    # This ensures every sample sees positions BEYOND its actual node count,
+    # so the model can learn where to stop generating.
+    # Without this, a batch of 3-node circuits would only see [0,1,2] positions
+    # with stop_targets=[0,0,0] (never stop!) - causing mode collapse.
+    if max_nodes is None:
+        # Use fixed max = 6 (one more than largest circuits in dataset: 5)
+        # This creates clear stopping positions:
+        #   3-node: stop_targets = [0,0,0,1,1,1] -> learn to stop at position 3
+        #   4-node: stop_targets = [0,0,0,0,1,1] -> learn to stop at position 4
+        #   5-node: stop_targets = [0,0,0,0,0,1] -> learn to stop at position 5
+        max_nodes = 6
+
     # Initialize dense tensors
-    node_types = torch.zeros(batch_size, max_nodes, dtype=torch.long, device=device)
+    # CRITICAL: Initialize node_types to MASK (4) not GND (0)
+    # Unfilled positions should be padding, not valid nodes!
+    node_types = torch.full((batch_size, max_nodes), 4, dtype=torch.long, device=device)  # MASK = 4
     edge_existence = torch.zeros(batch_size, max_nodes, max_nodes, device=device)
     component_types = torch.zeros(batch_size, max_nodes, max_nodes, dtype=torch.long, device=device)
     component_values = torch.zeros(batch_size, max_nodes, max_nodes, 3, device=device)
@@ -147,8 +172,9 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
         # Use real circuit specifications from batch
         conditions = batch['specifications'].to(device)
 
-        # Convert graph to dense format for decoder targets
-        targets = graph_to_dense_format(graph, max_nodes=decoder.max_nodes)
+        # Convert graph to dense format for decoder targets (VARIABLE LENGTH!)
+        # Pass max_nodes=None to use actual max in batch, not fixed limit
+        targets = graph_to_dense_format(graph, max_nodes=None)
 
         # Forward pass through decoder (now returns edge_component_logits)
         predictions = decoder(
@@ -160,6 +186,16 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
 
         # Compute loss (joint edge-component prediction with VAE regularization)
         loss, metrics = loss_fn(predictions, targets, mu=mu, logvar=logvar)
+
+        # Monitor logit magnitudes (detect numerical issues early)
+        if 'edge_component_logits' in predictions:
+            logits = predictions['edge_component_logits']
+            logit_max = logits.abs().max().item()
+            metrics['logit_max'] = logit_max
+
+            # Warn if logits are exploding
+            if logit_max > 20 and num_batches == 0:
+                print(f"\n⚠️  WARNING: Logits are large ({logit_max:.1f}). May indicate numerical instability.")
 
         # Backward and optimize
         optimizer.zero_grad()
@@ -220,8 +256,8 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
             # Use real circuit specifications from batch
             conditions = batch['specifications'].to(device)
 
-            # Convert graph to dense format
-            targets = graph_to_dense_format(graph, max_nodes=decoder.max_nodes)
+            # Convert graph to dense format (VARIABLE LENGTH!)
+            targets = graph_to_dense_format(graph, max_nodes=None)
 
             # Forward pass through decoder
             predictions = decoder(
@@ -233,6 +269,12 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
 
             # Compute loss (with VAE regularization)
             loss, metrics = loss_fn(predictions, targets, mu=mu, logvar=logvar)
+
+            # Monitor logit magnitudes (detect numerical issues early)
+            if 'edge_component_logits' in predictions:
+                logits = predictions['edge_component_logits']
+                logit_max = logits.abs().max().item()
+                metrics['logit_max'] = logit_max
 
             # Accumulate metrics
             total_loss += loss.item()
@@ -247,12 +289,64 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
     return avg_metrics
 
 
+def get_kl_weight(epoch, warmup_epochs=20, target_weight=0.005):
+    """KL warm-up schedule (Section 3.1 of Generation Plan).
+
+    Gradually increase KL weight to keep latent active during early training.
+    This prevents posterior collapse where the decoder ignores the latent.
+    """
+    if epoch < warmup_epochs:
+        # Linear warm-up
+        return target_weight * (epoch / warmup_epochs)
+    return target_weight
+
+
+def create_balanced_sampler(dataset_path, indices):
+    """Create a weighted sampler for balanced node count distribution (Section 3.3).
+
+    Ensures batches have balanced representation of 3, 4, and 5 node circuits
+    to prevent the model from collapsing to the most common node count.
+    """
+    # Load raw data to count nodes per circuit
+    with open(dataset_path, 'rb') as f:
+        raw_data = pickle.load(f)
+
+    # Count nodes for each sample
+    node_counts = []
+    for idx in indices:
+        circuit = raw_data[idx]
+        nodes = set()
+        for comp in circuit['components']:
+            nodes.add(comp['node1'])
+            nodes.add(comp['node2'])
+        node_counts.append(len(nodes))
+
+    # Calculate weights: inverse of class frequency
+    from collections import Counter
+    count_freq = Counter(node_counts)
+    total = len(node_counts)
+
+    # Weight = 1 / frequency (inverse frequency weighting)
+    weights = []
+    for count in node_counts:
+        weights.append(total / (len(count_freq) * count_freq[count]))
+
+    print(f"\nData balancing (Section 3.3):")
+    print(f"  Node count distribution: {dict(count_freq)}")
+    print(f"  Sample weights: 3-node={weights[node_counts.index(3)] if 3 in node_counts else 'N/A':.2f}, "
+          f"4-node={weights[node_counts.index(4)] if 4 in node_counts else 'N/A':.2f}, "
+          f"5-node={weights[node_counts.index(5)] if 5 in node_counts else 'N/A':.2f}")
+
+    return WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+
+
 def main():
     # Configuration
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     batch_size = 16
     learning_rate = 1e-4
     num_epochs = 100
+    kl_warmup_epochs = 20  # NEW: KL warm-up period
 
     print("="*70)
     print("Phase 3: Joint Edge-Component Prediction Training")
@@ -261,6 +355,7 @@ def main():
     print(f"Batch size: {batch_size}")
     print(f"Learning rate: {learning_rate}")
     print(f"Epochs: {num_epochs}")
+    print(f"KL warm-up epochs: {kl_warmup_epochs}")
 
     # Load dataset
     print("\nLoading dataset...")
@@ -275,11 +370,14 @@ def main():
     train_dataset = Subset(dataset, train_indices)
     val_dataset = Subset(dataset, val_indices)
 
+    # NEW: Create balanced sampler for training (Section 3.3)
+    train_sampler = create_balanced_sampler('rlc_dataset/filter_dataset.pkl', train_indices)
+
     # Create data loaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        sampler=train_sampler,  # NEW: Use balanced sampler instead of shuffle
         collate_fn=collate_circuit_batch,
         num_workers=0
     )
@@ -315,28 +413,35 @@ def main():
         hidden_dim=256,
         num_heads=8,
         num_node_layers=4,
-        max_nodes=5,
+        max_nodes=50,  # CHANGED: Safety limit for generation (can generate up to 50 nodes!)
+        max_training_nodes=10,  # Max nodes expected in training data
         enforce_vin_connectivity=True
     ).to(device)
 
     print(f"Encoder parameters: {sum(p.numel() for p in encoder.parameters()):,}")
     print(f"Decoder parameters: {sum(p.numel() for p in decoder.parameters()):,}")
 
-    # PHASE 3: REBALANCED LOSS WEIGHTS (from solution plan)
+    # METHOD 1: LEARNED STOPPING CRITERION (from solution plan)
+    # + FIX 2: Stop-Node Correlation Loss (ties stop and node type predictions)
     loss_fn = GumbelSoftmaxCircuitLoss(
         node_type_weight=1.0,
+        stop_weight=2.0,              # Stopping criterion
+        stop_node_correlation_weight=2.0,  # Middle ground: 1.0 too weak, 3.0 too aggressive
         edge_exist_weight=3.0,        # INCREASED from 1.0 (Phase 1 recommendation)
         component_type_weight=5.0,    # DECREASED from 10.0 (Phase 2 recommendation)
         component_value_weight=0.5,
-        use_connectivity_loss=True,
-        connectivity_weight=2.0,
+        use_connectivity_loss=False,  # DISABLED - asymmetric penalties cause model collapse
+        connectivity_weight=2.0,      # (not used when use_connectivity_loss=False)
         kl_weight=0.005              # VAE regularization
     )
 
-    print("\nPhase 3 Loss Configuration:")
+    print("\nMethod 1: Learned Stopping Criterion + Fix 2 (Correlation Loss)")
+    print(f"  stop_weight: 2.0 (learns when to stop generating nodes)")
+    print(f"  stop_node_correlation_weight: 2.0 (middle ground: 1.0 too weak, 3.0 too aggressive)")
     print(f"  edge_exist_weight: 3.0 (increased from 1.0)")
     print(f"  component_type_weight: 5.0 (decreased from 10.0)")
-    print(f"  → Better balance for joint prediction!")
+    print(f"  use_connectivity_loss: False (DISABLED - was causing model collapse)")
+    print(f"  → Model will learn: stop=1 → MASK, stop=0 → INTERNAL")
 
     # Optimizer
     optimizer = torch.optim.Adam(
@@ -371,8 +476,12 @@ def main():
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     for epoch in range(1, num_epochs + 1):
+        # NEW: Update KL weight based on warm-up schedule (Section 3.1)
+        current_kl_weight = get_kl_weight(epoch, warmup_epochs=kl_warmup_epochs)
+        loss_fn.kl_weight = current_kl_weight
+
         print(f"\n{'='*70}")
-        print(f"Epoch {epoch}/{num_epochs}")
+        print(f"Epoch {epoch}/{num_epochs} (KL weight: {current_kl_weight:.5f})")
         print(f"{'='*70}")
 
         # Train
@@ -384,13 +493,19 @@ def main():
         # Print metrics
         print(f"\nTrain Loss: {train_metrics['total_loss']:.4f}")
         print(f"  Node Acc: {train_metrics['node_type_acc']:.1f}%")
+        print(f"  Node Count Acc: {train_metrics.get('node_count_acc', 0):.1f}% ← KEY METRIC!")
         print(f"  Edge Acc: {train_metrics['edge_exist_acc']:.1f}%")
         print(f"  Component Type Acc: {train_metrics['component_type_acc']:.1f}%")
+        if 'logit_max' in train_metrics:
+            print(f"  Max Logit Magnitude: {train_metrics['logit_max']:.2f} (should be < 10)")
 
         print(f"\nVal Loss: {val_metrics['total_loss']:.4f}")
         print(f"  Node Acc: {val_metrics['node_type_acc']:.1f}%")
+        print(f"  Node Count Acc: {val_metrics.get('node_count_acc', 0):.1f}% ← KEY METRIC!")
         print(f"  Edge Acc: {val_metrics['edge_exist_acc']:.1f}%")
         print(f"  Component Type Acc: {val_metrics['component_type_acc']:.1f}%")
+        if 'logit_max' in val_metrics:
+            print(f"  Max Logit Magnitude: {val_metrics['logit_max']:.2f} (should be < 10)")
 
         # Save best model
         if val_metrics['total_loss'] < best_val_loss:
