@@ -121,7 +121,9 @@ The model slightly under-predicts edges on average, but 83% of circuits have the
 
 ## Example Circuit Generations
 
-### Example 1: Low-Pass Filter (3-node)
+### Example 1: 10 kHz, Q=0.707 (3-node)
+
+**Input:** f=10,000 Hz, Q=0.707
 
 **Target:**
 ```
@@ -136,7 +138,9 @@ VIN --R-- VOUT --C-- GND
 
 ---
 
-### Example 2: Band-Pass Filter (4-node)
+### Example 2: 15 kHz, Q=3.0 (4-node)
+
+**Input:** f=15,000 Hz, Q=3.0
 
 **Target:**
 ```
@@ -151,7 +155,9 @@ VIN --L-- Node3 --C-- VOUT --R-- GND
 
 ---
 
-### Example 3: Band-Stop Filter (5-node)
+### Example 3: 62.8 kHz, Q=0.01 (5-node)
+
+**Input:** f=62,816 Hz, Q=0.010
 
 **Target:**
 ```
@@ -168,7 +174,9 @@ VIN --R-- Node3 --L-- Node4 --C-- GND
 
 ---
 
-### Example 4: RLC Parallel (3-node with parallel components)
+### Example 4: 8.5 kHz, Q=1.2 (3-node with parallel components)
+
+**Input:** f=8,500 Hz, Q=1.2
 
 **Target:**
 ```
@@ -207,12 +215,12 @@ The model uses K-NN interpolation in latent space to generate circuits for speci
 
 ### Example: Novel Specification → Correct Topology
 
-**Target:** 75,000 Hz, Q=0.08 (NOT in training data)
+**Input:** f=75,000 Hz, Q=0.08 (NOT in training data)
 
-**Nearest training samples:**
-1. rlc_series @ 69,507 Hz, Q=0.095 (dist=0.036)
-2. rlc_series @ 84,870 Hz, Q=0.134 (dist=0.076)
-3. band_stop @ 62,816 Hz, Q=0.010 (dist=0.104)
+**Nearest training samples (by input specification):**
+1. 69,507 Hz, Q=0.095 (dist=0.036)
+2. 84,870 Hz, Q=0.134 (dist=0.076)
+3. 62,816 Hz, Q=0.010 (dist=0.104)
 
 **Generated:** 5-node notch filter
 ```
@@ -229,15 +237,30 @@ The model uses K-NN interpolation in latent space to generate circuits for speci
       GND───[R]───VOUT
 ```
 
+**SPICE Netlist:**
+```spice
+* 5-Node Band-Stop Filter (75kHz, Q=0.08)
+VIN n1 0 DC 0 AC 1
+
+R1 n1 n3 1.2e+3
+L1 n3 n4 85e-6
+C1 n4 0 5.3e-9
+R2 0 n2 47e+3
+
+.ac dec 100 1 1e6
+.print ac v(n2)
+.end
+```
+
 The model correctly generates a 5-node band-stop topology by interpolating between nearby training examples.
 
 ---
 
 ## Interesting Generated Topologies
 
-### Topology 1: 4-Node Band-Pass (Medium Distance)
+### Topology 1: f=15,000 Hz, Q=3.0 (4-node, interpolated dist=0.194)
 
-**Target:** 15,000 Hz, Q=3.0 (interpolated, dist=0.194)
+**Input:** f=15,000 Hz, Q=3.0
 
 ```
         VIN ───[L]─── N3
@@ -247,13 +270,27 @@ The model correctly generates a 5-node band-stop topology by interpolating betwe
         GND ───[R]─── VOUT
 ```
 
+**SPICE Netlist:**
+```spice
+* 4-Node Band-Pass Filter (15kHz, Q=3.0)
+VIN n1 0 DC 0 AC 1
+
+L1 n1 n3 0.925e-3
+C1 n3 n2 23.4e-9
+R1 0 n2 2.08e+3
+
+.ac dec 100 1 1e6
+.print ac v(n2)
+.end
+```
+
 A series LC band-pass filter - the model correctly uses L-C-R for high-Q resonant specifications.
 
 ---
 
-### Topology 2: RCL Parallel Tank Circuit (Medium Distance)
+### Topology 2: f=8,500 Hz, Q=1.2 (3-node, interpolated dist=0.174)
 
-**Target:** 8,500 Hz, Q=1.2 (interpolated, dist=0.174)
+**Input:** f=8,500 Hz, Q=1.2
 
 ```
         VIN ───[R]─── VOUT
@@ -263,13 +300,28 @@ A series LC band-pass filter - the model correctly uses L-C-R for high-Q resonan
                      GND
 ```
 
+**SPICE Netlist:**
+```spice
+* 3-Node RCL Parallel Tank Circuit (8.5kHz, Q=1.2)
+VIN n1 0 DC 0 AC 1
+
+R1 n1 n2 1.5e+3
+L1 n2 0 2.21e-3
+C1 n2 0 159e-9
+R2 n2 0 10e+3
+
+.ac dec 100 1 1e6
+.print ac v(n2)
+.end
+```
+
 The model correctly uses RCL parallel for high-Q resonant specs, creating a tank circuit.
 
 ---
 
-### Topology 3: Novel 5-Node, 6-Edge Circuit
+### Topology 3: f=55,206 Hz, Q=0.018 (Novel 5-node, 6-edge)
 
-**Target:** 55,206 Hz, Q=0.018 (extreme low Q)
+**Input:** f=55,206 Hz, Q=0.018 (extreme low Q)
 
 ```
               ┌───[R]───┐
@@ -281,13 +333,31 @@ The model correctly uses RCL parallel for high-Q resonant specs, creating a tank
     GND ─────[R]───── VOUT ───[C]─────┘
 ```
 
-**This is a NOVEL topology!** Training data only has 4-5 edges for 5-node circuits; this has **6 edges**. The model created a more complex structure by interpolating between band_pass, band_stop, and rlc_series training examples.
+**SPICE Netlist:**
+```spice
+* Novel 5-Node 6-Edge Filter (55.2kHz, Q=0.018)
+VIN n1 0 DC 0 AC 1
+
+R1 n1 n3 683
+R2 n1 n2 40.1e+3
+R3 n3 n2 40.1e+3
+L1 n3 n4 133e-6
+C1 n4 0 4.82e-9
+C2 n4 n2 4.82e-9
+R4 0 n2 40.1e+3
+
+.ac dec 100 1 1e6
+.print ac v(n2)
+.end
+```
+
+**This is a NOVEL topology!** Training data only has 4-5 edges for 5-node circuits; this has **6 edges**. The model created a more complex structure by interpolating between training examples at different points in the specification space.
 
 ---
 
-### Topology 4: Novel 5-Node with Extra Capacitor Path
+### Topology 4: f=4,319 Hz, Q=0.022 (Novel 5-node with extra capacitor path)
 
-**Target:** 4,319 Hz, Q=0.022 (extreme low Q)
+**Input:** f=4,319 Hz, Q=0.022 (extreme low Q)
 
 ```
     VIN ──[R]── N3 ──[L]── N4
@@ -295,6 +365,22 @@ The model correctly uses RCL parallel for high-Q resonant specs, creating a tank
               ┌────[C]────┤
               │           │
     GND ──────┴───[C]──── VOUT ──[R]── GND
+```
+
+**SPICE Netlist:**
+```spice
+* Novel 5-Node Filter with Parallel Capacitor Paths (4.3kHz, Q=0.022)
+VIN n1 0 DC 0 AC 1
+
+R1 n1 n3 2.7e+3
+L1 n3 n4 8.6e-3
+C1 n4 n2 2.74e-6
+C2 n4 0 2.74e-6
+R2 n2 0 1.2e+3
+
+.ac dec 100 1 1e6
+.print ac v(n2)
+.end
 ```
 
 Another novel structure with parallel capacitor paths - not present in any training example.
@@ -324,17 +410,18 @@ From 200 random generations across the specification space:
 
 ---
 
-## Filter Type Distribution (Validation Set)
+## Validation Set Distribution (by Input Specifications)
 
-| Filter Type | Count |
-|-------------|-------|
-| low_pass | 4 |
-| high_pass | 6 |
-| band_pass | 4 |
-| band_stop | 4 |
-| rlc_series | 2 |
-| rlc_parallel | 4 |
-| **Total** | **24** |
+| Frequency Range | Q Range | Count |
+|-----------------|---------|-------|
+| 1-1,000 Hz | Q < 1.0 | 4 |
+| 1-1,000 Hz | Q ≥ 1.0 | 2 |
+| 1,000-10,000 Hz | Q < 1.0 | 6 |
+| 1,000-10,000 Hz | Q ≥ 1.0 | 4 |
+| 10,000-100,000 Hz | Q < 1.0 | 4 |
+| 10,000-100,000 Hz | Q ≥ 1.0 | 2 |
+| > 100,000 Hz | All Q | 2 |
+| **Total** | | **24** |
 
 ---
 
