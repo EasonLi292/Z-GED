@@ -44,7 +44,7 @@ decoder = LatentGuidedGraphGPTDecoder(
     hidden_dim=256,
     num_heads=8,
     num_node_layers=4,
-    max_nodes=5,
+    max_nodes=50,
     enforce_vin_connectivity=True
 ).to(device)
 

@@ -157,7 +157,7 @@ def main():
         hidden_dim=256,
         num_heads=8,
         num_node_layers=4,
-        max_nodes=5
+        max_nodes=50
     ).to(device)
 
     checkpoint = torch.load('checkpoints/production/best.pt', map_location=device)

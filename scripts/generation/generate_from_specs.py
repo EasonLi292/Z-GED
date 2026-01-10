@@ -270,7 +270,7 @@ def main():
         hidden_dim=256,
         num_heads=8,
         num_node_layers=4,
-        max_nodes=5
+        max_nodes=50  # Must match training config
     ).to(device)
 
     checkpoint = torch.load(args.checkpoint, map_location=device)

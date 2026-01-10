@@ -12,7 +12,7 @@ from circuit_generator import FilterGenerator, extract_poles_zeros_gain_analytic
 import numpy as np
 
 
-def test_filter_spec(filter_type, gen_method, spec, tolerance_freq=0.01, tolerance_Q=0.05):
+def check_filter_spec(filter_type, gen_method, spec, tolerance_freq=0.01, tolerance_Q=0.05):
     """
     Generic test for any filter specification method.
 
@@ -148,42 +148,42 @@ def run_all_tests():
     results = []
 
     # Test 1: Low-pass at 1kHz
-    results.append(test_filter_spec(
+    results.append(check_filter_spec(
         'low_pass',
         gen.from_low_pass_spec,
         {'fc': 1000}
     ))
 
     # Test 2: High-pass at 10kHz
-    results.append(test_filter_spec(
+    results.append(check_filter_spec(
         'high_pass',
         gen.from_high_pass_spec,
         {'fc': 10000}
     ))
 
     # Test 3: Band-pass at 10kHz, Q=5
-    results.append(test_filter_spec(
+    results.append(check_filter_spec(
         'band_pass',
         gen.from_band_pass_spec,
         {'f0': 10000, 'Q': 5.0}
     ))
 
     # Test 4: Band-stop at 10kHz, Q=10
-    results.append(test_filter_spec(
+    results.append(check_filter_spec(
         'band_stop',
         gen.from_band_stop_spec,
         {'f0': 10000, 'Q': 10.0}
     ))
 
     # Test 5: RLC series at 20kHz, Q=5
-    results.append(test_filter_spec(
+    results.append(check_filter_spec(
         'rlc_series',
         gen.from_rlc_series_spec,
         {'f0': 20000, 'Q': 5.0}
     ))
 
     # Test 6: RLC parallel at 20kHz, Q=5
-    results.append(test_filter_spec(
+    results.append(check_filter_spec(
         'rlc_parallel',
         gen.from_rlc_parallel_spec,
         {'f0': 20000, 'Q': 5.0}

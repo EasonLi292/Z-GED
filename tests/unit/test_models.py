@@ -12,7 +12,7 @@ sys.path.insert(0, 'ml')
 sys.path.insert(0, '.')
 
 from ml.models import ImpedanceConv, ImpedanceGNN, GlobalPooling, DeepSets
-from ml.models import HierarchicalEncoder, HybridDecoder, CIRCUIT_TEMPLATES
+from ml.models import HierarchicalEncoder, LatentGuidedGraphGPTDecoder, CIRCUIT_TEMPLATES
 from ml.data import CircuitDataset, collate_circuit_batch
 from torch.utils.data import DataLoader
 
@@ -100,6 +100,7 @@ def test_encoder():
     print("="*70)
 
     batch_size = 4
+    latent_dim = 8  # Production config: 2D topo + 2D values + 4D pz
 
     # Create synthetic batch
     x = torch.randn(15, 4)  # Mixed nodes from 4 graphs
@@ -107,7 +108,7 @@ def test_encoder():
         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
         [1, 2, 0, 4, 5, 3, 7, 8, 6, 10, 11, 9]
     ], dtype=torch.long)
-    edge_attr = torch.randn(12, 3)
+    edge_attr = torch.randn(12, 7)  # 7 edge features
     batch = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3])
 
     # Poles and zeros for each graph
@@ -126,9 +127,9 @@ def test_encoder():
 
     encoder = HierarchicalEncoder(
         node_feature_dim=4,
-        edge_feature_dim=3,
+        edge_feature_dim=7,
         gnn_hidden_dim=64,
-        latent_dim=24
+        latent_dim=latent_dim
     )
 
     z, mu, logvar = encoder(x, edge_index, edge_attr, batch, poles_list, zeros_list)
@@ -149,57 +150,60 @@ def test_encoder():
 
     print(f"\nModel parameters: {sum(p.numel() for p in encoder.parameters()):,}")
 
-    assert z.shape == (batch_size, 24)
-    assert z_topo.shape == (batch_size, 8)
+    assert z.shape == (batch_size, latent_dim)
+    assert z_topo.shape == (batch_size, 2)
+    assert z_values.shape == (batch_size, 2)
+    assert z_pz.shape == (batch_size, 4)
     print("\n✅ HierarchicalEncoder test passed")
 
 
 def test_decoder():
-    """Test HybridDecoder."""
+    """Test LatentGuidedGraphGPTDecoder."""
     print("\n" + "="*70)
-    print("TEST: HybridDecoder")
+    print("TEST: LatentGuidedGraphGPTDecoder")
     print("="*70)
 
-    batch_size = 4
-    z = torch.randn(batch_size, 24)
+    batch_size = 2
+    latent_dim = 8
+    conditions_dim = 2
 
-    decoder = HybridDecoder(
-        latent_dim=24,
-        edge_feature_dim=3,
-        hidden_dim=128
+    # Create decoder
+    decoder = LatentGuidedGraphGPTDecoder(
+        latent_dim=latent_dim,
+        conditions_dim=conditions_dim,
+        hidden_dim=128,
+        num_heads=4,
+        num_node_layers=2,
+        max_nodes=5
     )
 
-    # Test soft decoding (training mode)
-    decoder.train()
-    output = decoder(z, temperature=1.0, hard=False)
+    # Create inputs
+    z = torch.randn(batch_size, latent_dim)
+    conditions = torch.randn(batch_size, conditions_dim)
 
     print(f"\nInput z shape: {z.shape}")
-    print(f"\nOutput (soft):")
-    print(f"  topo_logits:    {output['topo_logits'].shape}")
-    print(f"  topo_probs:     {output['topo_probs'].shape}")
-    print(f"  edge_features:  {output['edge_features'].shape}")
-    print(f"  poles:          {output['poles'].shape}")
-    print(f"  zeros:          {output['zeros'].shape}")
+    print(f"Conditions shape: {conditions.shape}")
 
-    # Check topology probabilities sum to 1
-    topo_sum = output['topo_probs'].sum(dim=-1)
-    print(f"\nTopology prob sums: {topo_sum}")
-    assert torch.allclose(topo_sum, torch.ones_like(topo_sum), atol=1e-5)
-
-    # Test hard decoding (inference mode)
+    # Test generation
     decoder.eval()
-    output_hard = decoder(z, hard=True)
+    with torch.no_grad():
+        output = decoder.generate(z, conditions, verbose=False)
 
-    print(f"\nOutput (hard):")
-    print(f"  graphs: {len(output_hard['graphs'])} PyG Data objects")
+    num_nodes = output['node_types'].shape[1]
+    print(f"\nOutput:")
+    print(f"  node_types:      {output['node_types'].shape}")
+    print(f"  edge_existence:  {output['edge_existence'].shape}")
+    print(f"  edge_values:     {output['edge_values'].shape}")
+    print(f"  num_nodes:       {num_nodes}")
 
-    for i, graph in enumerate(output_hard['graphs']):
-        print(f"    Graph {i}: {graph.filter_type}, {graph.num_nodes} nodes, {graph.num_edges} edges")
+    # Verify shapes (num_nodes is variable, typically 3-5)
+    assert output['node_types'].shape[0] == batch_size
+    assert output['node_types'].shape[1] <= 5
+    assert output['edge_existence'].shape == (batch_size, num_nodes, num_nodes)
+    assert output['edge_values'].shape == (batch_size, num_nodes, num_nodes, 7)
 
     print(f"\nModel parameters: {sum(p.numel() for p in decoder.parameters()):,}")
-
-    assert len(output_hard['graphs']) == batch_size
-    print("\n✅ HybridDecoder test passed")
+    print("\n✅ LatentGuidedGraphGPTDecoder test passed")
 
 
 def test_end_to_end():
@@ -209,44 +213,46 @@ def test_end_to_end():
     print("="*70)
 
     batch_size = 2
+    latent_dim = 8
 
     # Create synthetic batch (simpler)
     x = torch.randn(6, 4)
     edge_index = torch.tensor([[0, 1, 2, 3, 4], [1, 2, 0, 4, 5]], dtype=torch.long)
-    edge_attr = torch.randn(5, 3)
+    edge_attr = torch.randn(5, 7)  # 7 features for edge
     batch = torch.tensor([0, 0, 0, 1, 1, 1])
 
     poles_list = [torch.randn(1, 2), torch.randn(2, 2)]
     zeros_list = [torch.zeros(0, 2), torch.randn(1, 2)]
 
     # Create encoder and decoder
-    encoder = HierarchicalEncoder(latent_dim=24)
-    decoder = HybridDecoder(latent_dim=24)
+    encoder = HierarchicalEncoder(
+        node_feature_dim=4,
+        edge_feature_dim=7,
+        latent_dim=latent_dim
+    )
+    decoder = LatentGuidedGraphGPTDecoder(
+        latent_dim=latent_dim,
+        conditions_dim=2,
+        hidden_dim=128,
+        num_heads=4,
+        num_node_layers=2,
+        max_nodes=5
+    )
 
     # Encode
     z, mu, logvar = encoder(x, edge_index, edge_attr, batch, poles_list, zeros_list)
     print(f"\nEncoded to latent: {z.shape}")
 
-    # Decode
+    # Decode (generation mode)
     decoder.eval()
-    output = decoder(z, hard=True)
-    print(f"Decoded to {len(output['graphs'])} graphs")
+    conditions = torch.randn(batch_size, 2)
+    with torch.no_grad():
+        output = decoder.generate(z, conditions, verbose=False)
 
-    for i, graph in enumerate(output['graphs']):
-        print(f"  Graph {i}: {graph.filter_type}")
+    print(f"Generated {batch_size} circuits")
+    print(f"  node_types shape: {output['node_types'].shape}")
+    print(f"  edge_existence shape: {output['edge_existence'].shape}")
 
-    # Check that we can backprop through the whole pipeline
-    encoder.train()
-    decoder.train()
-
-    z, mu, logvar = encoder(x, edge_index, edge_attr, batch, poles_list, zeros_list)
-    output = decoder(z, hard=False)
-
-    # Dummy loss
-    loss = output['topo_logits'].sum() + output['edge_features'].sum()
-    loss.backward()
-
-    print(f"\n✅ Gradient flow works (loss = {loss.item():.4f})")
     print("\n✅ End-to-end test passed")
 
 
@@ -277,9 +283,12 @@ def test_with_real_data():
     print(f"  Poles:        {len(batch['poles'])} lists")
     print(f"  Zeros:        {len(batch['zeros'])} lists")
 
-    # Create models
-    encoder = HierarchicalEncoder()
-    decoder = HybridDecoder()
+    # Create encoder with matching dimensions
+    encoder = HierarchicalEncoder(
+        node_feature_dim=4,
+        edge_feature_dim=7,
+        latent_dim=8
+    )
 
     # Encode
     z, mu, logvar = encoder(
@@ -296,17 +305,25 @@ def test_with_real_data():
     print(f"  mu:     {mu.shape}")
     print(f"  logvar: {logvar.shape}")
 
-    # Decode
+    # Create decoder and generate
+    decoder = LatentGuidedGraphGPTDecoder(
+        latent_dim=8,
+        conditions_dim=2,
+        hidden_dim=128,
+        num_heads=4,
+        num_node_layers=2,
+        max_nodes=5
+    )
+
     decoder.eval()
-    output = decoder(z, hard=True)
+    # Create dummy conditions (normalized frequency, Q)
+    conditions = torch.randn(z.shape[0], 2)
+    with torch.no_grad():
+        output = decoder.generate(z, conditions, verbose=False)
 
-    print(f"\nDecoded:")
-    print(f"  Graphs: {len(output['graphs'])}")
-
-    for i, (graph, true_type) in enumerate(zip(output['graphs'], batch['circuit_id'])):
-        true_type_idx = batch['filter_type'][i].argmax().item()
-        true_type_name = dataset.FILTER_TYPES[true_type_idx]
-        print(f"  Graph {i}: Predicted={graph.filter_type}, True={true_type_name}")
+    print(f"\nGenerated:")
+    print(f"  node_types:     {output['node_types'].shape}")
+    print(f"  edge_existence: {output['edge_existence'].shape}")
 
     print("\n✅ Real data test passed")
 

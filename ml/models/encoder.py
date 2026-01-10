@@ -300,12 +300,13 @@ class HierarchicalEncoder(nn.Module):
             z: Latent vector [B, latent_dim]
 
         Returns:
-            z_topo: Topology latent [B, 8]
-            z_values: Values latent [B, 8]
-            z_pz: Poles/zeros latent [B, 8]
+            z_topo: Topology latent [B, topo_latent_dim]
+            z_values: Values latent [B, values_latent_dim]
+            z_pz: Poles/zeros latent [B, pz_latent_dim]
         """
-        dim = self.latent_dim_per_branch
-        z_topo = z[:, :dim]
-        z_values = z[:, dim:2*dim]
-        z_pz = z[:, 2*dim:]
+        topo_end = self.topo_latent_dim
+        values_end = topo_end + self.values_latent_dim
+        z_topo = z[:, :topo_end]
+        z_values = z[:, topo_end:values_end]
+        z_pz = z[:, values_end:]
         return z_topo, z_values, z_pz
