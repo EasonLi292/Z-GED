@@ -106,8 +106,9 @@ def analyze_topology(circuit):
     has_L = False
     has_C = False
 
-    for i in range(5):
-        for j in range(i+1, 5):
+    num_nodes = edge_exist.shape[0]
+    for i in range(num_nodes):
+        for j in range(i+1, num_nodes):
             if edge_exist[i, j] > 0.5:
                 log_C = abs(edge_values[i, j, 0].item())
                 log_G = abs(edge_values[i, j, 1].item())
@@ -259,7 +260,8 @@ def main():
         if valid:
             try:
                 node_types_indices = circuit['node_types'][0]
-                node_types_onehot = torch.zeros(5, 5)
+                num_nodes = len(node_types_indices)
+                node_types_onehot = torch.zeros(num_nodes, 5)
                 for i, node_type_idx in enumerate(node_types_indices):
                     node_types_onehot[i, int(node_type_idx.item())] = 1.0
 

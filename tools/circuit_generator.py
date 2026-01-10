@@ -487,8 +487,8 @@ class FilterGenerator:
         self.components = []
         self.graph.clear()
 
-        if Q < 1.0:
-            raise ValueError(f"Q={Q} too low for band-stop filter. Minimum Q=1.0")
+        if Q < 0.5:
+            raise ValueError(f"Q={Q} too low for band-stop filter. Minimum Q=0.5")
 
         if Q > 50:
             print(f"Warning: Q={Q} is very high for notch filter")
@@ -499,42 +499,46 @@ class FilterGenerator:
         L = 1 / (ω_0**2 * C)
 
         # For series LC shunt notch filter:
-        # Q factor relates to how sharp the notch is
-        # Q ≈ (1/R_eff) × ω₀L where R_eff is the effective series resistance
+        # The characteristic impedance is Z0 = sqrt(L/C)
+        # Q factor for the notch: Q = Z0 / R_series
+        # Therefore: R_series = Z0 / Q = sqrt(L/C) / Q
         #
-        # We'll use typical values for R_series and R_load
-        # The damping of the LC comes primarily from the loading resistances
+        # R_load and R_out provide the output voltage divider
+        # They should be high enough not to load the notch significantly
 
-        R_series = 1000   # 1kΩ typical
-        R_load = 10000    # 10kΩ typical
-        R_out = R_load    # Same as R_load
+        Z0 = np.sqrt(L / C)  # Characteristic impedance
+        R_series = Z0 / Q    # Calculate R_series from Q
 
-        # Validate components
-        try:
-            self._validate_component('L', L)
-            self._validate_component('C', C)
-        except ValueError as e:
-            # Try different C values
-            found_valid = False
-            C_candidates = [10e-9, 22e-9, 47e-9, 100e-9, 220e-9, 470e-9, 1e-6]
+        # R_load should be much larger than R_series to avoid loading
+        R_load = max(10 * R_series, 1000)  # At least 10x R_series or 1kΩ
+        R_out = R_load
 
-            for C_try in C_candidates:
-                L_try = 1 / (ω_0**2 * C_try)
+        # Validate and adjust components
+        found_valid = False
+        C_candidates = [10e-9, 22e-9, 47e-9, 100e-9, 220e-9, 470e-9, 1e-6]
 
-                try:
-                    self._validate_component('L', L_try)
-                    self._validate_component('C', C_try)
-                    L, C = L_try, C_try
-                    found_valid = True
-                    break
-                except ValueError:
-                    continue
+        for C_try in C_candidates:
+            L_try = 1 / (ω_0**2 * C_try)
+            Z0_try = np.sqrt(L_try / C_try)
+            R_series_try = Z0_try / Q
+            R_load_try = max(10 * R_series_try, 1000)
 
-            if not found_valid:
-                raise ValueError(
-                    f"Cannot realize band-stop at f0={f0}Hz, Q={Q} "
-                    f"with practical components. Original error: {e}"
-                )
+            try:
+                self._validate_component('L', L_try)
+                self._validate_component('C', C_try)
+                self._validate_component('R', R_series_try)
+                self._validate_component('R', R_load_try)
+                L, C, R_series, R_load, R_out = L_try, C_try, R_series_try, R_load_try, R_load_try
+                found_valid = True
+                break
+            except ValueError:
+                continue
+
+        if not found_valid:
+            raise ValueError(
+                f"Cannot realize band-stop at f0={f0}Hz, Q={Q} "
+                f"with practical components."
+            )
 
         # Build component list (series LC in shunt path)
         self.components = [
@@ -542,7 +546,7 @@ class FilterGenerator:
             {'name': 'L1', 'type': 'L', 'value': L, 'node1': 3, 'node2': 4},
             {'name': 'C1', 'type': 'C', 'value': C, 'node1': 4, 'node2': 0},
             {'name': 'R_load', 'type': 'R', 'value': R_load, 'node1': 3, 'node2': 2},
-            {'name': 'R_out', 'type': 'R', 'value': R_load, 'node1': 2, 'node2': 0}
+            {'name': 'R_out', 'type': 'R', 'value': R_out, 'node1': 2, 'node2': 0}
         ]
 
         self._build_graph()
@@ -818,37 +822,32 @@ def extract_poles_zeros_gain_analytical(filter_type, components):
             # The series LC impedance becomes zero (short to ground)
             zeros = [complex(0, omega_0), complex(0, -omega_0)]
 
-            # Poles: The effective damping comes from the resistances
-            # Z_LC = sL + 1/(sC) is in parallel with Z_right = R_load + R_out
-            R_right = (R_load + R_out) if R_load > 0 else R_out
-
-            # The quality factor for the notch depends on how much the resistances damp the LC
-            # For a series LC in shunt, Q ≈ (1/R_eff) × √(L/C)
-            # where R_eff accounts for loading from R_series and R_right
-            R_eff = (R_series * R_right) / (R_series + R_right) if (R_series + R_right) > 0 else R_series
-
-            # For series LC: Q = (1/R_series_LC) × ω₀L
-            # Approximate with effective resistance
-            if R_eff > 0:
-                Q = (1.0 / R_eff) * omega_0 * L
+            # For series LC shunt notch filter:
+            # Q = Z0 / R_series where Z0 = sqrt(L/C) is characteristic impedance
+            Z0 = np.sqrt(L / C)
+            if R_series > 0:
+                Q = Z0 / R_series
             else:
-                Q = 10.0  # Default moderate Q
+                Q = 10.0  # Default
 
             # Clamp Q to reasonable range
             Q = max(0.5, min(Q, 100.0))
 
-            # Poles near resonance with damping
-            real_part = -omega_0 / (2 * Q)
-            imag_part = omega_0 * np.sqrt(1 - 1/(4*Q**2)) if Q > 0.5 else omega_0 * 0.5
-            poles = [complex(real_part, imag_part), complex(real_part, -imag_part)]
-
-            # Gain: The transfer function in pole-zero form is:
-            # H(s) = K(s² + ω₀²) / ((s-p1)(s-p2))
-            # At DC or HF, away from resonance, the gain depends on voltage division
-            # H(s→0) or H(s→∞) should approach the passband level
+            # Poles: damped oscillation
+            # For a second-order system: poles at -ω₀/(2Q) ± jω₀√(1 - 1/(4Q²))
+            zeta = 1.0 / (2 * Q)  # Damping ratio
+            if zeta < 1:  # Underdamped
+                real_part = -omega_0 * zeta
+                imag_part = omega_0 * np.sqrt(1 - zeta**2)
+                poles = [complex(real_part, imag_part), complex(real_part, -imag_part)]
+            else:  # Overdamped
+                poles = [
+                    -omega_0 * (zeta + np.sqrt(zeta**2 - 1)),
+                    -omega_0 * (zeta - np.sqrt(zeta**2 - 1))
+                ]
 
             # Passband gain (away from notch): voltage divider from Vin to Vout
-            # When Z_LC is large, Z_parallel ≈ Z_right
+            R_right = (R_load + R_out) if R_load > 0 else R_out
             Z_parallel_passband = R_right
             V3_gain = Z_parallel_passband / (R_series + Z_parallel_passband) if (R_series + Z_parallel_passband) > 0 else 0.5
             Vout_gain = R_out / R_right if R_right > 0 else 1.0

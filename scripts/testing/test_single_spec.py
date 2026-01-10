@@ -113,8 +113,9 @@ def analyze_circuit_structure(circuit):
     component_names = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
     edges_list = []
 
-    for i in range(5):
-        for j in range(i+1, 5):
+    num_nodes = edge_exist.shape[0]  # Use actual number of nodes
+    for i in range(num_nodes):
+        for j in range(i+1, num_nodes):
             if edge_exist[i, j] > 0.5:
                 # Get component values (normalized)
                 log_C_norm = edge_values[i, j, 0].item()
@@ -290,7 +291,8 @@ def main():
     try:
         # Convert node types to one-hot
         node_types_indices = circuit['node_types'][0]
-        node_types_onehot = torch.zeros(5, 5)
+        num_nodes = len(node_types_indices)
+        node_types_onehot = torch.zeros(num_nodes, 5)
         for i, node_type_idx in enumerate(node_types_indices):
             node_types_onehot[i, int(node_type_idx.item())] = 1.0
 
@@ -341,9 +343,8 @@ def main():
         else:
             print(f"\n✗ POOR: Cutoff error > 50%")
 
-        print(f"\nFilter type: {specs['filter_type']}")
-        print(f"Peak gain: {specs['peak_gain_db']:.1f} dB")
-        print(f"DC gain: {specs['dc_gain_db']:.1f} dB")
+        print(f"\nPeak frequency: {specs['peak_freq']:.1f} Hz")
+        print(f"Peak gain: {specs['peak_gain']:.1f} dB")
 
     except Exception as e:
         print(f"\n✗ SPICE simulation failed: {e}")
