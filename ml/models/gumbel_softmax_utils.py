@@ -1,5 +1,5 @@
 """
-Gumbel-Softmax utilities for component selection.
+Component type utilities for circuit generation.
 
 Component types (8 discrete choices):
 - 0: None (no component on this edge)
@@ -13,7 +13,6 @@ Component types (8 discrete choices):
 """
 
 import torch
-import torch.nn.functional as F
 
 
 # Component type to mask mapping
@@ -92,87 +91,9 @@ def component_type_to_masks(component_type: torch.Tensor, device=None) -> torch.
     return mask_table[component_type]
 
 
-def gumbel_softmax_sample(logits: torch.Tensor, temperature: float = 1.0, hard: bool = False) -> torch.Tensor:
-    """
-    Sample from Gumbel-Softmax distribution.
-
-    During training (hard=False):
-        Returns soft probabilities (differentiable)
-    During inference (hard=True):
-        Returns one-hot vectors (discrete choice)
-
-    Args:
-        logits: [..., num_classes] unnormalized log probabilities
-        temperature: Temperature parameter (lower = more discrete)
-        hard: If True, return one-hot; if False, return soft probabilities
-
-    Returns:
-        sample: [..., num_classes] Gumbel-Softmax sample
-    """
-    # Use PyTorch's built-in Gumbel-Softmax
-    sample = F.gumbel_softmax(logits, tau=temperature, hard=hard, dim=-1)
-    return sample
-
-
-def gumbel_softmax_to_component_type(gumbel_sample: torch.Tensor) -> torch.Tensor:
-    """
-    Convert Gumbel-Softmax sample to component type index.
-
-    Args:
-        gumbel_sample: [..., 8] Gumbel-Softmax sample (soft or hard)
-
-    Returns:
-        component_type: [...] integer indices (0-7)
-    """
-    return torch.argmax(gumbel_sample, dim=-1)
-
-
-def gumbel_softmax_to_masks(gumbel_sample: torch.Tensor, device=None) -> torch.Tensor:
-    """
-    Convert Gumbel-Softmax sample to binary masks.
-
-    For soft samples (training), this gives weighted mask probabilities.
-    For hard samples (inference), this gives binary masks.
-
-    Args:
-        gumbel_sample: [..., 8] Gumbel-Softmax sample
-        device: Device to create tensor on
-
-    Returns:
-        masks: [..., 3] masks [mask_C, mask_G, mask_L]
-    """
-    if device is None:
-        device = gumbel_sample.device
-
-    mask_table = COMPONENT_TYPE_TO_MASKS.to(device)
-
-    # Matrix multiply: [..., 8] @ [8, 3] = [..., 3]
-    masks = torch.matmul(gumbel_sample, mask_table)
-
-    return masks
-
-
-# Component type names for debugging
-COMPONENT_TYPE_NAMES = [
-    "None",
-    "R",
-    "C",
-    "L",
-    "RC",
-    "RL",
-    "CL",
-    "RCL"
-]
-
-
-def get_component_name(component_type: int) -> str:
-    """Get human-readable name for component type."""
-    return COMPONENT_TYPE_NAMES[component_type]
-
-
 if __name__ == '__main__':
-    """Test Gumbel-Softmax utilities."""
-    print("Testing Gumbel-Softmax Component Selection Utilities\n")
+    """Test component type utilities."""
+    print("Testing Component Type Utilities\n")
 
     # Test 1: Masks to component type
     print("Test 1: Masks → Component Type")
@@ -190,38 +111,14 @@ if __name__ == '__main__':
     component_types = masks_to_component_type(test_masks)
     print(f"Masks:\n{test_masks}")
     print(f"Component types: {component_types}")
-    print(f"Names: {[get_component_name(t.item()) for t in component_types]}\n")
+    expected = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7])
+    print(f"Expected: {expected}")
+    print(f"Match: {torch.equal(component_types, expected)}\n")
 
     # Test 2: Component type to masks
     print("Test 2: Component Type → Masks")
     recovered_masks = component_type_to_masks(component_types)
     print(f"Recovered masks:\n{recovered_masks}")
-    print(f"Match: {torch.allclose(test_masks, recovered_masks)}\n")
-
-    # Test 3: Gumbel-Softmax sampling
-    print("Test 3: Gumbel-Softmax Sampling")
-    logits = torch.randn(5, 8)  # 5 edges, 8 component types
-
-    # Soft sample (training)
-    soft_sample = gumbel_softmax_sample(logits, temperature=0.5, hard=False)
-    print(f"Soft sample (differentiable):")
-    print(f"  Shape: {soft_sample.shape}")
-    print(f"  Sum per edge: {soft_sample.sum(dim=-1)}")  # Should be ~1.0
-
-    # Hard sample (inference)
-    hard_sample = gumbel_softmax_sample(logits, temperature=0.5, hard=True)
-    print(f"\nHard sample (one-hot):")
-    print(f"  Shape: {hard_sample.shape}")
-    print(f"  Sum per edge: {hard_sample.sum(dim=-1)}")  # Should be exactly 1.0
-    print(f"  Sample:\n{hard_sample}")
-
-    # Convert to component types
-    component_types = gumbel_softmax_to_component_type(hard_sample)
-    print(f"\nComponent types: {component_types}")
-    print(f"Names: {[get_component_name(t.item()) for t in component_types]}")
-
-    # Convert to masks
-    masks = gumbel_softmax_to_masks(hard_sample)
-    print(f"\nMasks:\n{masks}")
+    print(f"Match: {torch.allclose(test_masks, recovered_masks)}")
 
     print("\n✅ All tests passed!")

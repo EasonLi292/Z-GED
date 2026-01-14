@@ -15,12 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, Tuple, Optional
 
-from ml.models.gumbel_softmax_utils import (
-    gumbel_softmax_sample,
-    gumbel_softmax_to_masks,
-    component_type_to_masks,
-    get_component_name
-)
+from ml.models.gumbel_softmax_utils import component_type_to_masks
 
 
 class LatentDecomposer(nn.Module):
@@ -376,206 +371,13 @@ class LatentGuidedEdgeDecoder(nn.Module):
         )
 
 
-class IterativeLatentGuidedGenerator(nn.Module):
-    """
-    Iterative generation with latent guidance and connectivity enforcement.
-
-    Generation algorithm:
-    1. Generate nodes (standard)
-    2. For num_iterations:
-       a. Generate edges with latent guidance
-       b. Check TF consistency
-       c. Boost edges that improve consistency
-       d. Enforce VIN connectivity
-    3. Refine component values
-    """
-
-    def __init__(
-        self,
-        latent_guided_edge_decoder: LatentGuidedEdgeDecoder,
-        latent_decomposer: LatentDecomposer,
-        max_nodes: int = 5,
-        num_iterations: int = 3,
-        consistency_boost: float = 1.5,
-        consistency_penalty: float = 0.5
-    ):
-        super().__init__()
-
-        self.edge_decoder = latent_guided_edge_decoder
-        self.latent_decomposer = latent_decomposer
-        self.max_nodes = max_nodes
-        self.num_iterations = num_iterations
-        self.consistency_boost = consistency_boost
-        self.consistency_penalty = consistency_penalty
-
-    def generate_edges_iterative(
-        self,
-        node_embeddings: list,
-        node_types: torch.Tensor,
-        latent: torch.Tensor,
-        edge_threshold: float = 0.5,
-        verbose: bool = False
-    ) -> Tuple[torch.Tensor, torch.Tensor, Dict]:
-        """
-        Generate edges iteratively with latent guidance.
-
-        Args:
-            node_embeddings: List of node embeddings [batch, hidden_dim]
-            node_types: Node types [batch, max_nodes]
-            latent: Full latent code [batch, latent_dim]
-            edge_threshold: Threshold for edge existence
-            verbose: Print debug info
-
-        Returns:
-            edge_existence: [batch, max_nodes, max_nodes]
-            edge_values: [batch, max_nodes, max_nodes, edge_feature_dim]
-            debug_info: Dictionary with generation statistics
-        """
-        batch_size = node_types.shape[0]
-        device = node_types.device
-
-        # Decompose latent
-        latent_topo, latent_values, latent_tf = self.latent_decomposer(latent)
-
-        # Initialize edge matrices
-        edge_existence = torch.zeros(batch_size, self.max_nodes, self.max_nodes, device=device)
-        edge_values = torch.zeros(batch_size, self.max_nodes, self.max_nodes, 7, device=device)
-
-        # Tracking
-        consistency_scores = []
-        edges_modified = []
-
-        # ==================================================================
-        # ITERATIVE EDGE GENERATION
-        # ==================================================================
-
-        for iteration in range(self.num_iterations):
-            if verbose:
-                print(f"\n--- Iteration {iteration + 1}/{self.num_iterations} ---")
-
-            iteration_edges_added = 0
-            iteration_edges_boosted = 0
-
-            # For each potential edge
-            for i in range(self.max_nodes):
-                for j in range(i):  # Lower triangle only (undirected graph)
-                    # Skip if nodes are MASK
-                    if node_types[0, i] >= 4 or node_types[0, j] >= 4:
-                        continue
-
-                    # Predict edge with latent guidance
-                    edge_logit, edge_value, consistency_score, _ = self.edge_decoder(
-                        node_embeddings[i],
-                        node_embeddings[j],
-                        latent_topo,
-                        latent_values,
-                        latent_tf
-                    )
-
-                    # Convert logit to probability
-                    base_prob = torch.sigmoid(edge_logit)
-
-                    # CONSISTENCY-BASED BOOSTING
-                    # If consistency_score is high, this edge helps achieve target TF
-                    if consistency_score[0] > 0.7:
-                        adjusted_prob = base_prob * self.consistency_boost
-                        iteration_edges_boosted += 1
-                    elif consistency_score[0] < 0.3:
-                        adjusted_prob = base_prob * self.consistency_penalty
-                    else:
-                        adjusted_prob = base_prob
-
-                    # Sample edge
-                    if adjusted_prob[0] > edge_threshold:
-                        edge_existence[0, i, j] = 1.0
-                        edge_existence[0, j, i] = 1.0
-                        edge_values[0, i, j] = edge_value[0]
-                        edge_values[0, j, i] = edge_value[0]
-                        iteration_edges_added += 1
-
-                        consistency_scores.append(consistency_score[0].item())
-
-            if verbose:
-                print(f"  Edges added: {iteration_edges_added}")
-                print(f"  Edges boosted by consistency: {iteration_edges_boosted}")
-
-            # ==================================================================
-            # ENFORCE VIN CONNECTIVITY
-            # ==================================================================
-
-            # Find VIN node
-            vin_mask = (node_types[0] == 1)
-            if vin_mask.sum() > 0:
-                vin_id = vin_mask.nonzero()[0].item()
-
-                # Check VIN connectivity
-                vin_degree = edge_existence[0, vin_id, :].sum()
-
-                if vin_degree < 0.5:  # VIN disconnected
-                    if verbose:
-                        print(f"  ⚠️  VIN disconnected! Finding best target...")
-
-                    # Find best target using consistency scoring
-                    best_target = None
-                    best_consistency = -1.0
-
-                    # Try VOUT, GND, INTERNAL nodes
-                    for target_id in range(self.max_nodes):
-                        if node_types[0, target_id] < 4 and target_id != vin_id:
-                            # Score this potential edge
-                            _, _, consistency, _ = self.edge_decoder(
-                                node_embeddings[vin_id],
-                                node_embeddings[target_id],
-                                latent_topo,
-                                latent_values,
-                                latent_tf
-                            )
-
-                            if consistency[0] > best_consistency:
-                                best_consistency = consistency[0].item()
-                                best_target = target_id
-
-                    # Force VIN → best_target edge
-                    if best_target is not None:
-                        _, edge_val, _, _ = self.edge_decoder(
-                            node_embeddings[vin_id],
-                            node_embeddings[best_target],
-                            latent_topo,
-                            latent_values,
-                            latent_tf
-                        )
-
-                        edge_existence[0, vin_id, best_target] = 1.0
-                        edge_existence[0, best_target, vin_id] = 1.0
-                        edge_values[0, vin_id, best_target] = edge_val[0]
-                        edge_values[0, best_target, vin_id] = edge_val[0]
-
-                        if verbose:
-                            target_name = ['GND', 'VIN', 'VOUT', 'INT'][node_types[0, best_target].item()]
-                            print(f"  ✓ Forced VIN → {target_name} (consistency: {best_consistency:.3f})")
-
-            edges_modified.append(iteration_edges_added)
-
-        # ==================================================================
-        # Debug Info
-        # ==================================================================
-
-        debug_info = {
-            'consistency_scores': consistency_scores,
-            'edges_per_iteration': edges_modified,
-            'avg_consistency': sum(consistency_scores) / len(consistency_scores) if consistency_scores else 0.0
-        }
-
-        return edge_existence, edge_values, debug_info
-
-
 if __name__ == '__main__':
     """Test latent-guided components."""
     print("Testing Latent-Guided Decoder Components...")
 
     batch_size = 2
     hidden_dim = 256
-    max_nodes = 5
+    conditions = torch.randn(batch_size, 2)
 
     # Test 1: Latent Decomposer
     print("\n1. Testing LatentDecomposer...")
@@ -594,47 +396,24 @@ if __name__ == '__main__':
         hidden_dim=hidden_dim,
         topo_latent_dim=2,
         values_latent_dim=2,
-        tf_latent_dim=4
+        tf_latent_dim=4,
+        conditions_dim=2
     )
 
     node_i = torch.randn(batch_size, hidden_dim)
     node_j = torch.randn(batch_size, hidden_dim)
 
-    edge_logit, edge_vals, consistency, attn_weights = edge_decoder(
-        node_i, node_j, topo, values, tf
+    edge_comp_logits, comp_values, is_parallel, consistency, attn_weights = edge_decoder(
+        node_i, node_j, topo, values, tf, conditions
     )
 
-    assert edge_logit.shape == (batch_size,), "Edge logit shape wrong"
-    assert edge_vals.shape == (batch_size, 7), "Edge values shape wrong"
+    assert edge_comp_logits.shape == (batch_size, 8), "Edge component logits shape wrong"
+    assert comp_values.shape == (batch_size, 3), "Component values shape wrong"
     assert consistency.shape == (batch_size,), "Consistency score shape wrong"
     assert 'topology' in attn_weights, "Missing topology attention weights"
 
-    print(f"  ✓ Edge logit: {edge_logit[0].item():.3f}")
+    print(f"  ✓ Edge component logits shape: {edge_comp_logits.shape}")
     print(f"  ✓ Consistency score: {consistency[0].item():.3f}")
     print(f"  ✓ Attention weights computed")
 
-    # Test 3: Consistency scoring interpretation
-    print("\n3. Testing Consistency Scoring...")
-    print(f"  Consistency scores range: [{consistency.min():.3f}, {consistency.max():.3f}]")
-    print(f"  Interpretation:")
-    print(f"    > 0.7: Edge strongly helps achieve target TF → BOOST")
-    print(f"    0.3-0.7: Edge neutral → KEEP AS IS")
-    print(f"    < 0.3: Edge hurts target TF → PENALIZE")
-
-    # Test 4: Iterative Generator
-    print("\n4. Testing IterativeLatentGuidedGenerator...")
-    print("  (Skipping full test to avoid batch dimension issues)")
-    print("  The generator would:")
-    print("    - Generate edges iteratively (3 iterations)")
-    print("    - Boost edges with high TF consistency (>0.7)")
-    print("    - Penalize edges with low TF consistency (<0.3)")
-    print("    - Enforce VIN connectivity by finding best target")
-    print("    - Choose VIN target that maximizes TF consistency")
-
     print("\n✅ All tests passed!")
-    print("\nKey Features Demonstrated:")
-    print("  1. Latent decomposition into interpretable components")
-    print("  2. Cross-attention to latent for guided edge prediction")
-    print("  3. TF consistency scoring for each edge")
-    print("  4. Iterative refinement with VIN connectivity enforcement")
-    print("  5. Smart VIN connections (chosen to maximize TF consistency)")
