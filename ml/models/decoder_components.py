@@ -1,82 +1,33 @@
 """
-Latent-Guided GraphGPT Decoder with Gumbel-Softmax Component Selection.
+Simplified Edge Decoder for Topology-Only Generation.
 
-Key innovations:
-1. Use latent space to actively guide each generation decision
-2. Gumbel-Softmax for discrete component selection (R, C, L, RC, RL, CL, RCL)
-
-This addresses the user's insights:
-- "give it more context on the objective it's trying to generate"
-- "sometimes multiple components is good, it's just difficult to say '0 of this component'"
+Predicts only edge existence and component type (topology).
+Component values are NOT predicted - only topology matters.
 """
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Dict, Tuple, Optional
-
-from ml.models.gumbel_softmax_utils import component_type_to_masks
-
-
-class LatentDecomposer(nn.Module):
-    """
-    Decompose hierarchical latent into interpretable components.
-
-    The encoder produces latent = [topo(2D) | values(2D) | TF(4D)].
-    This module provides semantic access to each component.
-    """
-
-    def __init__(self, latent_dim: int = 8):
-        super().__init__()
-        self.latent_dim = latent_dim
-
-        # Indices for each component
-        self.topo_slice = slice(0, 2)
-        self.values_slice = slice(2, 4)
-        self.tf_slice = slice(4, 8)
-
-    def forward(self, latent: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Split latent into components.
-
-        Args:
-            latent: [batch, 8]
-
-        Returns:
-            topo_latent: [batch, 2] - Topology encoding
-            values_latent: [batch, 2] - Component values encoding
-            tf_latent: [batch, 4] - Transfer function encoding (poles/zeros)
-        """
-        topo = latent[:, self.topo_slice]
-        values = latent[:, self.values_slice]
-        tf = latent[:, self.tf_slice]
-
-        return topo, values, tf
+from typing import Tuple
 
 
 class LatentGuidedEdgeDecoder(nn.Module):
     """
-    Edge decoder with cross-attention to latent components.
+    Minimal edge decoder for topology prediction.
 
-    Instead of:
-        edge_prob = f(node_i, node_j)
+    Predicts:
+    - edge_component_logits: 8-way classification (0=no edge, 1-7=component type)
 
-    We use:
-        edge_prob = f(node_i, node_j, latent_topo, latent_tf)
-
-    This allows the decoder to ask:
-    - "Does this edge fit the target topology?" (via latent_topo)
-    - "Does this edge help achieve target TF?" (via latent_tf)
+    Derived (not predicted):
+    - is_parallel: True if component type >= 4
+    - masks: deterministic from component type
+    - values: NOT needed for topology-only generation
     """
 
     def __init__(
         self,
         hidden_dim: int = 256,
-        topo_latent_dim: int = 2,
-        values_latent_dim: int = 2,
-        tf_latent_dim: int = 4,
+        latent_dim: int = 8,
         conditions_dim: int = 2,
-        edge_feature_dim: int = 7,
         num_attention_heads: int = 4,
         dropout: float = 0.1
     ):
@@ -84,336 +35,104 @@ class LatentGuidedEdgeDecoder(nn.Module):
 
         self.hidden_dim = hidden_dim
 
-        # ==================================================================
-        # 1. Base Edge Encoder (from node pair)
-        # ==================================================================
-
-        self.edge_base_encoder = nn.Sequential(
+        # Edge encoder from node pair
+        self.edge_encoder = nn.Sequential(
             nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout)
         )
 
-        # ==================================================================
-        # 2. Latent Projections
-        # ==================================================================
+        # Context projection
+        self.context_proj = nn.Linear(latent_dim + conditions_dim, hidden_dim)
 
-        # Project latent components to hidden_dim for attention
-        self.topo_proj = nn.Linear(topo_latent_dim, hidden_dim)
-        self.values_proj = nn.Linear(values_latent_dim, hidden_dim)
-        self.tf_proj = nn.Linear(tf_latent_dim, hidden_dim)
-
-        # NEW: Project conditions (target specifications) to hidden_dim
-        self.conditions_proj = nn.Linear(conditions_dim, hidden_dim)
-
-        # ==================================================================
-        # 3. Cross-Attention Modules
-        # ==================================================================
-
-        # Topology attention: "Does this edge fit target topology?"
-        self.topo_attention = nn.MultiheadAttention(
+        # Cross-attention
+        self.cross_attention = nn.MultiheadAttention(
             embed_dim=hidden_dim,
             num_heads=num_attention_heads,
             dropout=dropout,
             batch_first=True
         )
+        self.norm = nn.LayerNorm(hidden_dim)
 
-        # Transfer function attention: "Does this edge help achieve target TF?"
-        self.tf_attention = nn.MultiheadAttention(
-            embed_dim=hidden_dim,
-            num_heads=num_attention_heads,
-            dropout=dropout,
-            batch_first=True
-        )
-
-        # Values attention: "What component values should this edge have?"
-        self.values_attention = nn.MultiheadAttention(
-            embed_dim=hidden_dim,
-            num_heads=num_attention_heads,
-            dropout=dropout,
-            batch_first=True
-        )
-
-        # NEW: Conditions attention: "Adjust values based on target specifications"
-        self.conditions_attention = nn.MultiheadAttention(
-            embed_dim=hidden_dim,
-            num_heads=num_attention_heads,
-            dropout=dropout,
-            batch_first=True
-        )
-
-        # ==================================================================
-        # 3.5. Layer Normalization (CRITICAL FIX for numerical stability)
-        # ==================================================================
-
-        # Normalize after each attention module
-        self.norm_topo = nn.LayerNorm(hidden_dim)
-        self.norm_tf = nn.LayerNorm(hidden_dim)
-        self.norm_values = nn.LayerNorm(hidden_dim)
-        self.norm_conditions = nn.LayerNorm(hidden_dim)
-
-        # Normalize after base encoding
-        self.norm_base = nn.LayerNorm(hidden_dim)
-
-        # Normalize before fusion
-        self.norm_before_fusion = nn.LayerNorm(hidden_dim * 5)
-
-        # Normalize after fusion (before output heads)
-        self.norm_after_fusion = nn.LayerNorm(hidden_dim)
-
-        # ==================================================================
-        # 4. Feature Fusion
-        # ==================================================================
-
-        # Combine base + topology-guided + TF-guided + values-guided + conditions-guided features
+        # Fusion
         self.fusion = nn.Sequential(
-            nn.Linear(hidden_dim * 5, hidden_dim * 2),  # Changed from 4 to 5
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim * 2, hidden_dim)
+            nn.Dropout(dropout)
         )
 
-        # ==================================================================
-        # 5. Output Heads (JOINT EDGE-COMPONENT PREDICTION)
-        # ==================================================================
-
-        # JOINT edge-component head (Phase 3 fix)
-        # Predicts edge existence AND component type in one unified prediction
-        # Output interpretation:
-        #   - Class 0 (None): No edge exists
-        #   - Class 1-7: Edge exists with that component type (R, C, L, RC, RL, CL, RCL)
-        # This couples the edge existence decision with component type selection
-        self.edge_component_head = nn.Sequential(
+        # Single output head: 8-way edge-component classification
+        self.output_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, 8)  # 8 classes: 0=None(no edge), 1-7=component types
-        )
-
-        # Component values head (continuous values only)
-        # Outputs: [log(C), G, log(L_inv)] - 3D instead of 7D
-        self.component_values_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, 3)  # Continuous values only
-        )
-
-        # is_parallel head (binary)
-        self.is_parallel_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1)  # Logit for is_parallel
-        )
-
-        # Consistency scoring head
-        # Predicts: "How much does this edge improve TF consistency?"
-        self.consistency_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim // 2, 1),
-            nn.Sigmoid()  # 0-1 score
+            nn.Linear(hidden_dim // 2, 8)
         )
 
     def forward(
         self,
         node_i: torch.Tensor,
         node_j: torch.Tensor,
-        latent_topo: torch.Tensor,
-        latent_values: torch.Tensor,
-        latent_tf: torch.Tensor,
+        latent: torch.Tensor,
         conditions: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict]:
+    ) -> torch.Tensor:
         """
-        Predict edge with latent guidance and JOINT edge-component prediction (Phase 3).
+        Predict edge topology.
 
         Args:
-            node_i: Source node embedding [batch, hidden_dim]
-            node_j: Target node embedding [batch, hidden_dim]
-            latent_topo: Topology latent [batch, topo_dim]
-            latent_values: Component values latent [batch, values_dim]
-            latent_tf: Transfer function latent [batch, tf_dim]
-            conditions: Target specifications [batch, conditions_dim] (e.g., [log_cutoff, log_q])
+            node_i: [batch, hidden_dim]
+            node_j: [batch, hidden_dim]
+            latent: [batch, latent_dim]
+            conditions: [batch, conditions_dim]
 
         Returns:
-            edge_component_logits: Joint edge+component logits [batch, 8]
-                - Class 0: No edge
-                - Classes 1-7: Edge exists with component type (R, C, L, RC, RL, CL, RCL)
-            component_values: Continuous values [batch, 3] - [log(C), G, log(L_inv)]
-            is_parallel_logit: Is parallel logit [batch]
-            consistency_score: Predicted TF consistency improvement [batch]
-            attention_weights: Dictionary with attention weights for analysis
+            edge_component_logits: [batch, 8] (0=no edge, 1-7=component type)
         """
-        batch_size = node_i.shape[0]
+        # Encode node pair
+        edge = self.edge_encoder(torch.cat([node_i, node_j], dim=-1))
 
-        # ==================================================================
-        # 1. Base Edge Features (Node Pair Compatibility)
-        # ==================================================================
+        # Project context
+        context = self.context_proj(torch.cat([latent, conditions], dim=-1)).unsqueeze(1)
 
-        edge_base = self.edge_base_encoder(
-            torch.cat([node_i, node_j], dim=-1)
-        )  # [batch, hidden_dim]
-
-        # APPLY LAYER NORM to base features (stabilizes attention inputs)
-        edge_base = self.norm_base(edge_base)
-
-        edge_base_expanded = edge_base.unsqueeze(1)  # [batch, 1, hidden_dim]
-
-        # ==================================================================
-        # 2. Cross-Attention to Latent Components (with Layer Normalization)
-        # ==================================================================
-
-        # Project latent components
-        latent_topo_proj = self.topo_proj(latent_topo).unsqueeze(1)  # [batch, 1, hidden_dim]
-        latent_values_proj = self.values_proj(latent_values).unsqueeze(1)
-        latent_tf_proj = self.tf_proj(latent_tf).unsqueeze(1)
-
-        # NEW: Project conditions (target specifications)
-        conditions_proj = self.conditions_proj(conditions).unsqueeze(1)  # [batch, 1, hidden_dim]
-
-        # Topology attention: "Does this edge fit target topology?"
-        edge_topo_guided, topo_attn_weights = self.topo_attention(
-            query=edge_base_expanded,
-            key=latent_topo_proj,
-            value=latent_topo_proj,
-            need_weights=True
+        # Cross-attention
+        attended, _ = self.cross_attention(
+            query=edge.unsqueeze(1),
+            key=context,
+            value=context
         )
-        edge_topo_guided = edge_topo_guided.squeeze(1)  # [batch, hidden_dim]
-        edge_topo_guided = self.norm_topo(edge_topo_guided)  # APPLY LAYER NORM
+        attended = self.norm(attended.squeeze(1))
 
-        # TF attention: "Does this edge help achieve target TF?"
-        edge_tf_guided, tf_attn_weights = self.tf_attention(
-            query=edge_base_expanded,
-            key=latent_tf_proj,
-            value=latent_tf_proj,
-            need_weights=True
-        )
-        edge_tf_guided = edge_tf_guided.squeeze(1)  # [batch, hidden_dim]
-        edge_tf_guided = self.norm_tf(edge_tf_guided)  # APPLY LAYER NORM
-
-        # Values attention: "What component values for this edge?"
-        edge_values_guided, values_attn_weights = self.values_attention(
-            query=edge_base_expanded,
-            key=latent_values_proj,
-            value=latent_values_proj,
-            need_weights=True
-        )
-        edge_values_guided = edge_values_guided.squeeze(1)  # [batch, hidden_dim]
-        edge_values_guided = self.norm_values(edge_values_guided)  # APPLY LAYER NORM
-
-        # NEW: Conditions attention: "Adjust values for target specifications"
-        edge_conditions_guided, conditions_attn_weights = self.conditions_attention(
-            query=edge_base_expanded,
-            key=conditions_proj,
-            value=conditions_proj,
-            need_weights=True
-        )
-        edge_conditions_guided = edge_conditions_guided.squeeze(1)  # [batch, hidden_dim]
-        edge_conditions_guided = self.norm_conditions(edge_conditions_guided)  # APPLY LAYER NORM
-
-        # ==================================================================
-        # 3. Feature Fusion (with Layer Normalization)
-        # ==================================================================
-
-        # Combine all features
-        edge_features = torch.cat([
-            edge_base,              # Base: node pair compatibility
-            edge_topo_guided,       # Guided: topology consistency
-            edge_tf_guided,         # Guided: TF consistency
-            edge_values_guided,     # Guided: value appropriateness
-            edge_conditions_guided  # NEW: Guided by target specifications
-        ], dim=-1)  # [batch, hidden_dim * 5]
-
-        # APPLY LAYER NORM before fusion (prevents large concatenated activations)
-        edge_features = self.norm_before_fusion(edge_features)
-
-        edge_features_fused = self.fusion(edge_features)  # [batch, hidden_dim]
-
-        # APPLY LAYER NORM after fusion (stabilizes output head inputs)
-        edge_features_fused = self.norm_after_fusion(edge_features_fused)
-
-        # ==================================================================
-        # 4. Output Predictions (JOINT EDGE-COMPONENT PREDICTION - Phase 3)
-        # ==================================================================
-
-        # JOINT edge-component prediction (8-way classification)
-        # Class 0 = No edge, Classes 1-7 = Edge with component type
-        edge_component_logits = self.edge_component_head(edge_features_fused)  # [batch, 8]
-
-        # Component values (continuous: log(C), G, log(L_inv))
-        # These are only used when edge exists (class != 0)
-        component_values = self.component_values_head(edge_features_fused)  # [batch, 3]
-
-        # Is parallel connection
-        # Only used when edge exists (class != 0)
-        is_parallel_logit = self.is_parallel_head(edge_features_fused).squeeze(-1)  # [batch]
-
-        # Consistency score: "How much does this edge improve TF match?"
-        consistency_score = self.consistency_head(edge_tf_guided).squeeze(-1)  # [batch]
-
-        # ==================================================================
-        # 5. Attention Weights (for analysis/debugging)
-        # ==================================================================
-
-        attention_weights = {
-            'topology': topo_attn_weights,
-            'transfer_function': tf_attn_weights,
-            'values': values_attn_weights,
-            'conditions': conditions_attn_weights  # NEW: Track how much conditions influence this edge
-        }
-
-        return (
-            edge_component_logits,  # Joint prediction: class 0=no edge, 1-7=component type
-            component_values,
-            is_parallel_logit,
-            consistency_score,
-            attention_weights
-        )
+        # Fuse and predict
+        fused = self.fusion(torch.cat([edge, attended], dim=-1))
+        return self.output_head(fused)
 
 
 if __name__ == '__main__':
-    """Test latent-guided components."""
-    print("Testing Latent-Guided Decoder Components...")
+    """Test edge decoder."""
+    print("Testing Edge Decoder...")
 
     batch_size = 2
     hidden_dim = 256
-    conditions = torch.randn(batch_size, 2)
 
-    # Test 1: Latent Decomposer
-    print("\n1. Testing LatentDecomposer...")
-    decomposer = LatentDecomposer(latent_dim=8)
-    latent = torch.randn(batch_size, 8)
-    topo, values, tf = decomposer(latent)
-
-    assert topo.shape == (batch_size, 2), "Topology latent shape wrong"
-    assert values.shape == (batch_size, 2), "Values latent shape wrong"
-    assert tf.shape == (batch_size, 4), "TF latent shape wrong"
-    print("  ✓ Latent decomposed correctly")
-
-    # Test 2: Latent-Guided Edge Decoder
-    print("\n2. Testing LatentGuidedEdgeDecoder...")
     edge_decoder = LatentGuidedEdgeDecoder(
         hidden_dim=hidden_dim,
-        topo_latent_dim=2,
-        values_latent_dim=2,
-        tf_latent_dim=4,
+        latent_dim=8,
         conditions_dim=2
     )
 
     node_i = torch.randn(batch_size, hidden_dim)
     node_j = torch.randn(batch_size, hidden_dim)
+    latent = torch.randn(batch_size, 8)
+    conditions = torch.randn(batch_size, 2)
 
-    edge_comp_logits, comp_values, is_parallel, consistency, attn_weights = edge_decoder(
-        node_i, node_j, topo, values, tf, conditions
-    )
+    logits = edge_decoder(node_i, node_j, latent, conditions)
 
-    assert edge_comp_logits.shape == (batch_size, 8), "Edge component logits shape wrong"
-    assert comp_values.shape == (batch_size, 3), "Component values shape wrong"
-    assert consistency.shape == (batch_size,), "Consistency score shape wrong"
-    assert 'topology' in attn_weights, "Missing topology attention weights"
+    assert logits.shape == (batch_size, 8)
+    print(f"  Output shape: {logits.shape}")
 
-    print(f"  ✓ Edge component logits shape: {edge_comp_logits.shape}")
-    print(f"  ✓ Consistency score: {consistency[0].item():.3f}")
-    print(f"  ✓ Attention weights computed")
+    num_params = sum(p.numel() for p in edge_decoder.parameters())
+    print(f"  Parameters: {num_params:,}")
 
-    print("\n✅ All tests passed!")
+    print("\n✅ Test passed!")

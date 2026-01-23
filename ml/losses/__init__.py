@@ -1,15 +1,9 @@
-"""Loss functions for circuit generation training.
-
-Current production loss:
-- GumbelSoftmaxCircuitLoss: Main training loss for joint edge-component prediction
-- ConnectivityLoss: Ensures VIN/VOUT connectivity (used internally by GumbelSoftmax)
-"""
+"""Loss functions for circuit generation training."""
 
 from .gumbel_softmax_loss import GumbelSoftmaxCircuitLoss
-from .connectivity_loss import ConnectivityLoss, SpectralConnectivityLoss
+from .connectivity_loss import ConnectivityLoss
 
 __all__ = [
     'GumbelSoftmaxCircuitLoss',
     'ConnectivityLoss',
-    'SpectralConnectivityLoss',
 ]

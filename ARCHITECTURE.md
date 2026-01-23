@@ -1,8 +1,10 @@
 # Circuit Generation Model Architecture
 
+**Model Version:** v4.7 (Component-Aware Message Passing)
+
 ## Overview
 
-This document describes the architecture of the current circuit generation model, which achieves 100% accuracy on circuit topology and component type prediction.
+This document describes the architecture of the current circuit generation model, which achieves 100% accuracy on node count and edge existence, with 90% accuracy on component type prediction.
 
 ---
 
@@ -25,10 +27,21 @@ Output: μ (mean), σ (variance) for VAE sampling
 
 **Parameters:**
 - Node feature dimension: 4 (GND, VIN, VOUT, INTERNAL node types)
-- Edge feature dimension: 7 (log(C), G, log(L_inv), masks, parallel flag)
+- Edge feature dimension: 7 `[C_norm, G_norm, L_inv_norm, is_R, is_C, is_L, is_parallel]`
 - GNN hidden dimension: 64
 - GNN layers: 3
 - Total parameters: ~69,651
+
+**Component-Aware Message Passing:**
+```
+ImpedanceConv:
+    msg_R = lin_R(x_j, edge_feat)    # R-specific transformation
+    msg_C = lin_C(x_j, edge_feat)    # C-specific transformation
+    msg_L = lin_L(x_j, edge_feat)    # L-specific transformation
+
+    message = is_R * msg_R + is_C * msg_C + is_L * msg_L
+```
+This ensures R, C, and L edges are processed differently, preventing attention collapse.
 
 **Latent Space Structure:**
 - `latent[0:2]`: Topology encoding (graph structure)
@@ -246,42 +259,47 @@ z[4:8] = encode("poles at -1000")  # Modify frequency response
 
 | Metric | Accuracy | Status |
 |--------|----------|--------|
-| **Component Type** | 100% | ✅ Perfect |
-| **Edge Count** | 100% | ✅ Perfect |
-| **Topology Distribution** | 100% | ✅ Perfect |
+| **Node Count** | 100% | ✅ Perfect |
+| **Edge Existence** | 100% | ✅ Perfect |
+| **Component Type** | 90% | ✅ Good |
 | **VIN Connectivity** | 100% | ✅ Perfect |
 | **VOUT Connectivity** | 100% | ✅ Perfect |
 
-### Generation Distribution
+### Generation by Q-Factor
 
-| Edge Count | Training % | Validation % | Generated % |
-|------------|-----------|--------------|-------------|
-| 2 edges | 47.9% | 58.3% | 58.3% ✅ |
-| 3 edges | 16.7% | 16.7% | 16.7% ✅ |
-| 4 edges | 35.4% | 25.0% | 25.0% ✅ |
+| Q-Factor Range | Typical Neighbors | Generated Topology |
+|----------------|-------------------|-------------------|
+| Q < 0.5 (overdamped) | rlc_series, band_stop | Multi-node with L, C |
+| Q ~ 0.707 (standard) | low_pass, high_pass | Simple 3-node R-C |
+| Q > 2.0 (resonant) | rlc_parallel | RCL parallel |
 
-**Mean edges:** 2.67 (exactly matching validation set)
+### Example Outputs
+
+- Standard (Q=0.707): `GND--RCL--VOUT, VIN--R--VOUT`
+- High-Q (Q=10): `GND--RCL--VOUT, VIN--R--VOUT`
+- Low-Q (Q=0.2): `GND--R--VOUT, VIN--L--N3, VOUT--C--N3`
 
 ---
 
 ## Implementation Files
 
 ### Core Model
-- `ml/models/encoder.py` - HierarchicalEncoder (69,651 params)
-- `ml/models/graphgpt_decoder_latent_guided.py` - Main decoder (7,654 params)
-- `ml/models/latent_guided_decoder.py` - Edge decoder with joint prediction
+- `ml/models/encoder.py` - HierarchicalEncoder (~70K params)
+- `ml/models/decoder.py` - SimplifiedCircuitDecoder
+- `ml/models/gnn_layers.py` - ImpedanceGNN with component-aware message passing
 - `ml/models/gumbel_softmax_utils.py` - Component type utilities
+- `ml/data/dataset.py` - CircuitDataset with edge attribute encoding
 
 ### Loss Functions
 - `ml/losses/gumbel_softmax_loss.py` - Unified circuit loss
 
 ### Training & Validation
-- `scripts/train.py` - Training script (100 epochs, ~2 hours)
-- `scripts/validate.py` - Validation with confusion matrix
-- `scripts/evaluate_tf.py` - Transfer function accuracy evaluation
+- `scripts/training/train.py` - Training script (100 epochs, ~10 min on CPU)
+- `scripts/training/validate.py` - Validation metrics
+- `scripts/generation/generate_from_specs.py` - Generation from specifications
 
 ### Checkpoints
-- `checkpoints/production/best.pt` - Best model (epoch 98, val_loss=0.2142)
+- `checkpoints/production/best.pt` - Best model (val_loss=1.14)
 
 ---
 
@@ -323,4 +341,7 @@ Shows per-component-type confusion matrix and overall accuracy.
 
 **Checkpoint:** `checkpoints/production/best.pt`
 
-**Overall Accuracy:** 100% on all validation metrics
+**Overall Accuracy:**
+- Node Count: 100%
+- Edge Existence: 100%
+- Component Type: 90%

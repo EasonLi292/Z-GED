@@ -15,19 +15,6 @@ Component types (8 discrete choices):
 import torch
 
 
-# Component type to mask mapping
-COMPONENT_TYPE_TO_MASKS = torch.tensor([
-    [0, 0, 0],  # 0: None
-    [0, 1, 0],  # 1: R only (mask_C=0, mask_G=1, mask_L=0)
-    [1, 0, 0],  # 2: C only
-    [0, 0, 1],  # 3: L only
-    [1, 1, 0],  # 4: RC
-    [0, 1, 1],  # 5: RL
-    [1, 0, 1],  # 6: CL
-    [1, 1, 1],  # 7: RCL
-], dtype=torch.float32)
-
-
 def masks_to_component_type(masks: torch.Tensor) -> torch.Tensor:
     """
     Convert binary masks [mask_C, mask_G, mask_L] to component type index.
@@ -71,54 +58,3 @@ def masks_to_component_type(masks: torch.Tensor) -> torch.Tensor:
     ], dtype=torch.long, device=masks.device)
 
     return encoding_to_type[encoding]
-
-
-def component_type_to_masks(component_type: torch.Tensor, device=None) -> torch.Tensor:
-    """
-    Convert component type index to binary masks.
-
-    Args:
-        component_type: [...] integer indices (0-7)
-        device: Device to create tensor on
-
-    Returns:
-        masks: [..., 3] binary masks [mask_C, mask_G, mask_L]
-    """
-    if device is None:
-        device = component_type.device
-
-    mask_table = COMPONENT_TYPE_TO_MASKS.to(device)
-    return mask_table[component_type]
-
-
-if __name__ == '__main__':
-    """Test component type utilities."""
-    print("Testing Component Type Utilities\n")
-
-    # Test 1: Masks to component type
-    print("Test 1: Masks → Component Type")
-    test_masks = torch.tensor([
-        [0, 0, 0],  # None
-        [0, 1, 0],  # R
-        [1, 0, 0],  # C
-        [0, 0, 1],  # L
-        [1, 1, 0],  # RC
-        [0, 1, 1],  # RL
-        [1, 0, 1],  # CL
-        [1, 1, 1],  # RCL
-    ], dtype=torch.float32)
-
-    component_types = masks_to_component_type(test_masks)
-    print(f"Masks:\n{test_masks}")
-    print(f"Component types: {component_types}")
-    expected = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7])
-    print(f"Expected: {expected}")
-    print(f"Match: {torch.equal(component_types, expected)}\n")
-
-    # Test 2: Component type to masks
-    print("Test 2: Component Type → Masks")
-    recovered_masks = component_type_to_masks(component_types)
-    print(f"Recovered masks:\n{recovered_masks}")
-    print(f"Match: {torch.allclose(test_masks, recovered_masks)}")
-
-    print("\n✅ All tests passed!")

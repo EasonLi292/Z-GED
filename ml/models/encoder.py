@@ -117,13 +117,36 @@ class HierarchicalEncoder(nn.Module):
         self.topo_logvar = nn.Linear(gnn_hidden_dim // 2, self.topo_latent_dim)
 
         # Branch 2: Component values encoding (from edge features)
-        # Aggregate edge features across the graph
-        self.values_encoder = nn.Sequential(
-            nn.Linear(edge_feature_dim, gnn_hidden_dim),
+        # Encode edges by POSITION (which node pair) to distinguish low_pass vs high_pass
+        # Key edges: GND-VOUT (node 0-2), VIN-VOUT (node 1-2), VIN-GND (node 0-1)
+        # Edge attr format: [C_norm, G_norm, L_inv_norm, is_R, is_C, is_L, is_parallel]
+
+        # Edge feature dim = 7, encode each key edge position separately
+        # Input: 7D edge features, Output: encoding for that edge position
+        edge_encoding_dim = gnn_hidden_dim // 4
+
+        self.edge_encoder_gnd_vout = nn.Sequential(
+            nn.Linear(edge_feature_dim, gnn_hidden_dim // 2),
             nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(gnn_hidden_dim, gnn_hidden_dim // 2),
-            nn.ReLU()
+            nn.Linear(gnn_hidden_dim // 2, edge_encoding_dim)
+        )
+        self.edge_encoder_vin_vout = nn.Sequential(
+            nn.Linear(edge_feature_dim, gnn_hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(gnn_hidden_dim // 2, edge_encoding_dim)
+        )
+        self.edge_encoder_other = nn.Sequential(
+            nn.Linear(edge_feature_dim, gnn_hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(gnn_hidden_dim // 2, edge_encoding_dim)
+        )
+
+        # Combine position-specific edge encodings
+        values_combined_dim = 3 * edge_encoding_dim
+        self.values_combine = nn.Sequential(
+            nn.Linear(values_combined_dim, gnn_hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout)
         )
 
         self.values_mu = nn.Linear(gnn_hidden_dim // 2, self.values_latent_dim)
@@ -187,28 +210,62 @@ class HierarchicalEncoder(nn.Module):
         h_topo = self.pooling(h_nodes, batch)  # [B, gnn_hidden_dim * 2]
         h_topo = self.topo_encoder(h_topo)     # [B, gnn_hidden_dim // 2]
 
-        mu_topo = self.topo_mu(h_topo)         # [B, 8]
-        logvar_topo = self.topo_logvar(h_topo) # [B, 8]
+        mu_topo = self.topo_mu(h_topo)         # [B, topo_latent_dim]
+        logvar_topo = self.topo_logvar(h_topo) # [B, topo_latent_dim]
 
-        # Branch 2: Component values encoding (from edge features)
-        # Aggregate edge features per graph
+        # Branch 2: Component values encoding (POSITION-SPECIFIC for each node pair)
+        # This distinguishes low_pass (R on VIN-VOUT, C on GND-VOUT) from
+        # high_pass (C on VIN-VOUT, R on GND-VOUT)
+        # Node types: GND=0, VIN=1, VOUT=2
         h_values_list = []
-        edge_batch = batch[edge_index[0]]  # Compute once for all graphs
+        edge_batch = batch[edge_index[0]]
+        edge_encoding_dim = self.gnn_hidden_dim // 4
+
         for i in range(batch_size):
-            # Find edges where source node belongs to this graph
             edge_mask = edge_batch == i
-            edges_in_graph = edge_attr[edge_mask]  # [E_i, edge_feature_dim]
+            graph_edge_index = edge_index[:, edge_mask]
+            graph_edge_attr = edge_attr[edge_mask]
 
-            # Aggregate (mean pooling over edges)
-            if edges_in_graph.size(0) > 0:
-                h_values_graph = edges_in_graph.mean(dim=0)  # [edge_feature_dim]
-            else:
-                h_values_graph = torch.zeros(self.edge_feature_dim, device=edge_attr.device)
+            # Get node types for this graph
+            node_mask = batch == i
+            node_offset = node_mask.nonzero()[0].item() if node_mask.any() else 0
+            local_edge_index = graph_edge_index - node_offset
 
+            # Find node types (from one-hot: GND=[1,0,0,0], VIN=[0,1,0,0], VOUT=[0,0,1,0])
+            graph_x = x[node_mask]
+            node_types = graph_x.argmax(dim=-1)  # [num_nodes]
+
+            # Initialize edge encodings
+            h_gnd_vout = torch.zeros(edge_encoding_dim, device=edge_attr.device)
+            h_vin_vout = torch.zeros(edge_encoding_dim, device=edge_attr.device)
+            h_other = torch.zeros(edge_encoding_dim, device=edge_attr.device)
+
+            # Encode each edge based on which node pair it connects
+            if graph_edge_attr.size(0) > 0:
+                for e_idx in range(graph_edge_attr.size(0)):
+                    src, dst = local_edge_index[0, e_idx].item(), local_edge_index[1, e_idx].item()
+                    if src >= len(node_types) or dst >= len(node_types):
+                        continue
+
+                    src_type = node_types[src].item()
+                    dst_type = node_types[dst].item()
+                    edge_feat = graph_edge_attr[e_idx]  # [7]
+
+                    # Check which node pair (order-independent)
+                    pair = tuple(sorted([src_type, dst_type]))
+
+                    if pair == (0, 2):  # GND-VOUT
+                        h_gnd_vout = self.edge_encoder_gnd_vout(edge_feat)
+                    elif pair == (1, 2):  # VIN-VOUT
+                        h_vin_vout = self.edge_encoder_vin_vout(edge_feat)
+                    else:  # Other edges (VIN-GND, internal, etc.)
+                        h_other = h_other + self.edge_encoder_other(edge_feat)
+
+            h_values_graph = torch.cat([h_gnd_vout, h_vin_vout, h_other], dim=-1)
             h_values_list.append(h_values_graph)
 
-        h_values = torch.stack(h_values_list)   # [B, edge_feature_dim]
-        h_values = self.values_encoder(h_values) # [B, gnn_hidden_dim // 2]
+        h_values = torch.stack(h_values_list)
+        h_values = self.values_combine(h_values)
 
         mu_values = self.values_mu(h_values)         # [B, 8]
         logvar_values = self.values_logvar(h_values) # [B, 8]

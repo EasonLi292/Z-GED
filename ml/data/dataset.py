@@ -375,8 +375,9 @@ class CircuitDataset(Dataset):
                     imp_den = (imp_den - self.impedance_mean) / self.impedance_std
 
                 # Concatenate continuous features + binary masks
-                # Result: [log(C), log(G), log(L_inv), has_C, has_R, has_L, is_parallel]
-                binary_masks = torch.tensor([has_C, has_R, has_L, is_parallel], dtype=torch.float32)
+                # Result: [log(C), log(G), log(L_inv), is_R, is_C, is_L, is_parallel]
+                # Note: Order must match GNN expectation: is_R at idx 3, is_C at idx 4, is_L at idx 5
+                binary_masks = torch.tensor([has_R, has_C, has_L, is_parallel], dtype=torch.float32)
                 edge_features = torch.cat([imp_den, binary_masks], dim=0)
 
                 edge_attr.append(edge_features)

@@ -15,16 +15,19 @@ from typing import Optional
 
 class ImpedanceConv(MessagePassing):
     """
-    Impedance-aware graph convolution layer.
+    Component-aware graph convolution layer.
 
-    Similar to GCN but incorporates edge features (impedance) into
-    message passing. The edge features are transformed and used to
-    weight the messages.
+    Uses separate message transformations for each component type (R, C, L)
+    to ensure the network distinguishes between different components.
+
+    Edge attr format: [C_norm, G_norm, L_inv_norm, is_R, is_C, is_L, is_parallel]
+    The component type one-hot (is_R, is_C, is_L at indices 3, 4, 5) is used
+    to select which transformation to apply.
 
     Args:
         in_channels: Input node feature dimension
         out_channels: Output node feature dimension
-        edge_dim: Edge feature dimension (default: 3 for [log(C), log(G), log(L_inv)])
+        edge_dim: Edge feature dimension (default: 7)
         aggr: Aggregation method (default: 'add')
         bias: Whether to add bias (default: True)
         dropout: Dropout probability (default: 0.1)
@@ -34,7 +37,7 @@ class ImpedanceConv(MessagePassing):
         self,
         in_channels: int,
         out_channels: int,
-        edge_dim: int = 3,
+        edge_dim: int = 7,
         aggr: str = 'add',
         bias: bool = True,
         dropout: float = 0.1,
@@ -50,18 +53,19 @@ class ImpedanceConv(MessagePassing):
         # Node feature transformation
         self.lin_node = nn.Linear(in_channels, out_channels, bias=False)
 
-        # Edge feature transformation (for impedance weighting)
-        self.lin_edge = nn.Sequential(
-            nn.Linear(edge_dim, out_channels),
-            nn.ReLU(),
-            nn.Linear(out_channels, out_channels)
-        )
+        # Component-type-specific message transformations
+        # Each component type has its own transformation
+        # This ensures the network MUST distinguish between R, C, L
+        self.lin_R = nn.Linear(out_channels + 3, out_channels)  # 3 = continuous edge features
+        self.lin_C = nn.Linear(out_channels + 3, out_channels)
+        self.lin_L = nn.Linear(out_channels + 3, out_channels)
+        self.lin_parallel = nn.Linear(out_channels + 3, out_channels)  # For parallel combinations
 
-        # Attention mechanism for edge importance
+        # Attention for edge importance (based on node features only)
         self.att = nn.Sequential(
-            nn.Linear(2 * out_channels + edge_dim, out_channels),
+            nn.Linear(2 * out_channels, out_channels // 2),
             nn.ReLU(),
-            nn.Linear(out_channels, 1),
+            nn.Linear(out_channels // 2, 1),
             nn.Sigmoid()
         )
 
@@ -75,11 +79,10 @@ class ImpedanceConv(MessagePassing):
     def reset_parameters(self):
         """Initialize parameters."""
         self.lin_node.reset_parameters()
-
-        # Initialize edge MLP
-        for layer in self.lin_edge:
-            if isinstance(layer, nn.Linear):
-                layer.reset_parameters()
+        self.lin_R.reset_parameters()
+        self.lin_C.reset_parameters()
+        self.lin_L.reset_parameters()
+        self.lin_parallel.reset_parameters()
 
         # Initialize attention MLP
         for layer in self.att:
@@ -130,7 +133,7 @@ class ImpedanceConv(MessagePassing):
         if return_attention_weights:
             # Compute attention weights for visualization
             row, col = edge_index
-            att_weights = self._compute_attention(x[row], x[col], edge_attr)
+            att_weights = self._compute_attention(x[row], x[col])
             return out, (edge_index, att_weights)
 
         return out
@@ -142,36 +145,58 @@ class ImpedanceConv(MessagePassing):
         edge_attr: torch.Tensor
     ) -> torch.Tensor:
         """
-        Construct messages from neighbors.
+        Construct messages from neighbors using component-specific transformations.
 
         Args:
             x_i: Target node features [E, out_channels]
             x_j: Source node features [E, out_channels]
             edge_attr: Edge features [E, edge_dim]
+                Format: [C_norm, G_norm, L_inv_norm, is_R, is_C, is_L, is_parallel]
 
         Returns:
             messages: Weighted messages [E, out_channels]
         """
-        # Transform edge features
-        edge_features = self.lin_edge(edge_attr)
+        # Extract component type masks and continuous features
+        continuous_features = edge_attr[:, :3]  # [C_norm, G_norm, L_inv_norm]
+        is_R = edge_attr[:, 3:4]  # [E, 1]
+        is_C = edge_attr[:, 4:5]  # [E, 1]
+        is_L = edge_attr[:, 5:6]  # [E, 1]
+        is_parallel = edge_attr[:, 6:7]  # [E, 1]
 
-        # Compute attention weights
-        att_input = torch.cat([x_i, x_j, edge_attr], dim=-1)
+        # Concatenate neighbor features with continuous edge features
+        node_edge_input = torch.cat([x_j, continuous_features], dim=-1)  # [E, out_channels + 3]
+
+        # Apply component-specific transformations
+        msg_R = self.lin_R(node_edge_input)  # [E, out_channels]
+        msg_C = self.lin_C(node_edge_input)  # [E, out_channels]
+        msg_L = self.lin_L(node_edge_input)  # [E, out_channels]
+        msg_parallel = self.lin_parallel(node_edge_input)  # [E, out_channels]
+
+        # Use component type to select/weight the appropriate message
+        # For single components: use the corresponding transformation
+        # For parallel: blend with parallel transformation
+        message = is_R * msg_R + is_C * msg_C + is_L * msg_L
+
+        # For parallel combinations (is_parallel=1), add parallel transformation
+        # This handles RCL, RC, RL, CL parallel combinations
+        message = message + is_parallel * msg_parallel
+
+        # Compute attention weights (based on node features, not edge type)
+        att_input = torch.cat([x_i, x_j], dim=-1)
         att_weight = self.att(att_input)
 
-        # Combine: neighbor features + edge features, weighted by attention
-        message = att_weight * (x_j + edge_features)
+        # Apply attention weighting
+        message = att_weight * message
 
         return message
 
     def _compute_attention(
         self,
         x_i: torch.Tensor,
-        x_j: torch.Tensor,
-        edge_attr: torch.Tensor
+        x_j: torch.Tensor
     ) -> torch.Tensor:
         """Compute attention weights for visualization."""
-        att_input = torch.cat([x_i, x_j, edge_attr], dim=-1)
+        att_input = torch.cat([x_i, x_j], dim=-1)
         att_weight = self.att(att_input)
         return att_weight.squeeze(-1)
 
@@ -202,7 +227,7 @@ class ImpedanceGNN(nn.Module):
         hidden_channels: int,
         out_channels: int,
         num_layers: int = 3,
-        edge_dim: int = 3,
+        edge_dim: int = 7,
         dropout: float = 0.1,
         use_residual: bool = True
     ):

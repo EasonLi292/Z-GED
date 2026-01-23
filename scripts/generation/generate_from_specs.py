@@ -17,7 +17,7 @@ import torch
 import numpy as np
 from ml.data.dataset import CircuitDataset
 from ml.models.encoder import HierarchicalEncoder
-from ml.models.decoder import LatentGuidedGraphGPTDecoder
+from ml.models.decoder import SimplifiedCircuitDecoder
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
@@ -264,13 +264,13 @@ def main():
         dropout=0.1
     ).to(device)
 
-    decoder = LatentGuidedGraphGPTDecoder(
+    decoder = SimplifiedCircuitDecoder(
         latent_dim=8,
         conditions_dim=2,
         hidden_dim=256,
         num_heads=8,
         num_node_layers=4,
-        max_nodes=50  # Must match training config
+        max_nodes=10  # Must match training config
     ).to(device)
 
     checkpoint = torch.load(args.checkpoint, map_location=device)
