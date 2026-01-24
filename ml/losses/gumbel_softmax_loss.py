@@ -1,7 +1,5 @@
 """
-Simplified Loss Function for Topology-Only Circuit Generation.
-
-Only topology losses - no component value prediction.
+Loss Function for Circuit Generation with Auxiliary Spec Prediction.
 
 Losses:
 1. Node type loss (cross-entropy)
@@ -9,6 +7,10 @@ Losses:
 3. Edge-component loss (joint 8-way classification)
 4. Connectivity loss (optional)
 5. KL loss (VAE regularization)
+6. Spec prediction loss (MSE on cutoff/Q from z[4:8]) - NEW
+
+The spec prediction loss forces z[4:8] to encode meaningful transfer
+function information, preventing posterior collapse.
 """
 
 import torch
@@ -27,7 +29,7 @@ except ImportError:
 
 class GumbelSoftmaxCircuitLoss(nn.Module):
     """
-    Topology-only loss function.
+    Circuit generation loss with auxiliary spec prediction.
 
     Losses:
     1. Node type (cross-entropy)
@@ -35,6 +37,7 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
     3. Edge-component (8-way cross-entropy)
     4. Connectivity (optional)
     5. KL (VAE regularization)
+    6. Spec prediction (MSE on cutoff/Q) - forces z[4:8] to encode transfer function
     """
 
     def __init__(
@@ -44,7 +47,11 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
         edge_component_weight: float = 2.0,
         connectivity_weight: float = 5.0,
         kl_weight: float = 0.01,  # Low KL for topology separation in latent space
-        use_connectivity_loss: bool = True
+        spec_weight: float = 1.0,  # Weight for spec prediction loss
+        use_connectivity_loss: bool = True,
+        use_spec_loss: bool = True,
+        pz_latent_start: int = 4,  # Start index of transfer function latent
+        pz_latent_dim: int = 4     # Dimension of transfer function latent
     ):
         super().__init__()
 
@@ -53,8 +60,13 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
         self.edge_component_weight = edge_component_weight
         self.connectivity_weight = connectivity_weight
         self.kl_weight = kl_weight
+        self.spec_weight = spec_weight
 
         self.use_connectivity_loss = use_connectivity_loss
+        self.use_spec_loss = use_spec_loss
+        self.pz_latent_start = pz_latent_start
+        self.pz_latent_dim = pz_latent_dim
+
         if use_connectivity_loss:
             self.connectivity_loss = ConnectivityLoss(
                 vin_weight=10.0,
@@ -63,16 +75,26 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
                 isolated_weight=2.0
             )
 
+        # Spec predictor: z[4:8] -> [log10(cutoff), Q]
+        if use_spec_loss:
+            from ml.models.spec_predictor import SpecPredictor
+            self.spec_predictor = SpecPredictor(
+                pz_latent_dim=pz_latent_dim,
+                hidden_dim=32,
+                num_layers=2
+            )
+
     def forward(
         self,
         predictions: Dict[str, torch.Tensor],
         targets: Dict[str, torch.Tensor],
         mu: Optional[torch.Tensor] = None,
         logvar: Optional[torch.Tensor] = None,
-        latent: Optional[torch.Tensor] = None
+        latent: Optional[torch.Tensor] = None,
+        target_specs: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
-        Compute topology-only loss.
+        Compute circuit generation loss with optional spec prediction.
 
         Args:
             predictions:
@@ -83,6 +105,10 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
                 - 'node_types': [batch, num_nodes]
                 - 'edge_existence': [batch, num_nodes, num_nodes]
                 - 'component_types': [batch, num_nodes, num_nodes]
+            mu: Latent mean [batch, latent_dim]
+            logvar: Latent log-variance [batch, latent_dim]
+            latent: Sampled latent [batch, latent_dim] (used for spec prediction)
+            target_specs: Target specifications [batch, 2] = [log10(cutoff), Q]
         """
         device = predictions['node_types'].device
 
@@ -174,13 +200,43 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
         else:
             kl_loss = torch.tensor(0.0, device=device)
 
+        # 6. Spec Prediction Loss (forces z[4:8] to encode transfer function)
+        if self.use_spec_loss and latent is not None and target_specs is not None:
+            # Extract transfer function latent z[4:8]
+            z_pz = latent[:, self.pz_latent_start:self.pz_latent_start + self.pz_latent_dim]
+
+            # Predict specs from z[4:8]
+            pred_specs = self.spec_predictor(z_pz)  # [batch, 2]
+
+            # Normalize target specs for loss computation
+            # target_specs[:, 0] = cutoff (Hz), convert to log10
+            # target_specs[:, 1] = Q (already linear)
+            target_log_cutoff = torch.log10(target_specs[:, 0].clamp(min=1.0))
+            target_q = target_specs[:, 1]
+            target_specs_normalized = torch.stack([target_log_cutoff, target_q], dim=1)
+
+            # MSE loss
+            loss_spec = F.mse_loss(pred_specs, target_specs_normalized)
+
+            # Compute accuracy metrics
+            with torch.no_grad():
+                # Cutoff error (in decades)
+                cutoff_error = (pred_specs[:, 0] - target_specs_normalized[:, 0]).abs().mean().item()
+                # Q error (absolute)
+                q_error = (pred_specs[:, 1] - target_specs_normalized[:, 1]).abs().mean().item()
+        else:
+            loss_spec = torch.tensor(0.0, device=device)
+            cutoff_error = 0.0
+            q_error = 0.0
+
         # Total
         total_loss = (
             self.node_type_weight * loss_node_type +
             self.node_count_weight * loss_node_count +
             self.edge_component_weight * loss_edge_component +
             self.connectivity_weight * loss_connectivity +
-            self.kl_weight * kl_loss
+            self.kl_weight * kl_loss +
+            self.spec_weight * loss_spec
         )
 
         metrics = {
@@ -189,10 +245,13 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
             'loss_edge_component': loss_edge_component.item(),
             'loss_connectivity': loss_connectivity.item() if self.use_connectivity_loss else 0.0,
             'loss_kl': kl_loss.item(),
+            'loss_spec': loss_spec.item() if self.use_spec_loss else 0.0,
             'node_type_acc': node_type_acc,
             'node_count_acc': node_count_acc,
             'edge_exist_acc': edge_acc,
             'component_type_acc': comp_type_acc,
+            'cutoff_error_decades': cutoff_error,
+            'q_error': q_error,
         }
 
         if self.use_connectivity_loss:
@@ -202,10 +261,11 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
 
 
 if __name__ == '__main__':
-    print("Testing Topology Loss...")
+    print("Testing Circuit Loss with Spec Prediction...")
 
     batch_size = 2
     max_nodes = 5
+    latent_dim = 8
 
     predictions = {
         'node_types': torch.randn(batch_size, max_nodes, 5),
@@ -219,11 +279,40 @@ if __name__ == '__main__':
         'component_types': torch.randint(0, 8, (batch_size, max_nodes, max_nodes)),
     }
 
-    loss_fn = GumbelSoftmaxCircuitLoss(use_connectivity_loss=False)
+    # Test without spec loss
+    print("\n1. Without spec loss:")
+    loss_fn = GumbelSoftmaxCircuitLoss(use_connectivity_loss=False, use_spec_loss=False)
     total_loss, metrics = loss_fn(predictions, targets)
 
     print(f"Total loss: {total_loss.item():.4f}")
     for key, value in metrics.items():
         print(f"  {key}: {value:.4f}")
 
-    print("\n✅ Test passed!")
+    # Test with spec loss
+    print("\n2. With spec loss:")
+    loss_fn_spec = GumbelSoftmaxCircuitLoss(
+        use_connectivity_loss=False,
+        use_spec_loss=True,
+        spec_weight=1.0
+    )
+
+    latent = torch.randn(batch_size, latent_dim)
+    mu = torch.randn(batch_size, latent_dim)
+    logvar = torch.randn(batch_size, latent_dim)
+    target_specs = torch.tensor([
+        [10000.0, 0.707],  # 10kHz, Q=0.707
+        [1000.0, 2.0],    # 1kHz, Q=2.0
+    ])
+
+    total_loss, metrics = loss_fn_spec(
+        predictions, targets,
+        mu=mu, logvar=logvar,
+        latent=latent,
+        target_specs=target_specs
+    )
+
+    print(f"Total loss: {total_loss.item():.4f}")
+    for key, value in metrics.items():
+        print(f"  {key}: {value:.4f}")
+
+    print("\n✓ All tests passed!")
