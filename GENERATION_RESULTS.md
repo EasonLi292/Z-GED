@@ -109,30 +109,6 @@ The 8D latent space clusters by filter type. Generating from cluster centroids:
 
 ---
 
-## Latent Space Exploration
-
-### z[0] Axis (topology complexity)
-
-| z[0] | Generated | Interpretation |
-|------|-----------|----------------|
-| -3.0 | `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT2, INT1--L--INT2` | Band-stop (5-node) |
-| -1.5 | `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT2, INT1--L--INT2` | Band-stop (5-node) |
-| 0.0 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | Band-pass (4-node) |
-| +1.5 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | Band-pass (4-node) |
-| +3.0 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | Band-pass (4-node) |
-
-### z[1] Axis (node count)
-
-| z[1] | Generated | Interpretation |
-|------|-----------|----------------|
-| -4.0 | `GND--R--VOUT, VIN--C--VOUT` | Simple 3-node (high-pass) |
-| -2.0 | `GND--R--VOUT, VIN--C--VOUT` | Simple 3-node (high-pass) |
-| 0.0 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | 4-node (band-pass) |
-| +2.0 | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT2, INT1--L--INT2` | 4-node (RLC series) |
-| +4.0 | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT2, INT1--L--INT2` | 4-node (RLC series) |
-
----
-
 ## Interpolation
 
 ### Low-pass → High-pass
