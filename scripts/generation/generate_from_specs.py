@@ -230,7 +230,7 @@ def main():
                         help='Generation method')
     parser.add_argument('--ged-weight', type=float, default=0.5,
                         help='Weight for GED vs spec distance (0=only specs, 1=only GED, default=0.5)')
-    parser.add_argument('--ged-matrix', default='analysis_results/ged_matrix_120.npy',
+    parser.add_argument('--ged-matrix', default='analysis_results/ged_matrix_360.npy',
                         help='Path to GED matrix')
     parser.add_argument('--checkpoint', default='checkpoints/production/best.pt',
                         help='Path to model checkpoint')

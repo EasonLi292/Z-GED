@@ -94,7 +94,7 @@ def main():
     parser = argparse.ArgumentParser(description='Compute GED matrix for circuit dataset')
     parser.add_argument('--dataset', default='rlc_dataset/filter_dataset.pkl',
                         help='Path to dataset pickle file')
-    parser.add_argument('--output', default='analysis_results/ged_matrix_120.npy',
+    parser.add_argument('--output', default='analysis_results/ged_matrix_360.npy',
                         help='Path to output numpy file')
     parser.add_argument('--timeout', type=float, default=10,
                         help='Timeout per GED computation in seconds (default: 10)')
