@@ -40,12 +40,10 @@ encoder = HierarchicalEncoder(
 
 decoder = LatentGuidedGraphGPTDecoder(
     latent_dim=8,
-    conditions_dim=2,
     hidden_dim=256,
     num_heads=8,
     num_node_layers=4,
-    max_nodes=50,
-    enforce_vin_connectivity=True
+    max_nodes=50
 ).to(device)
 
 # Load production checkpoint
@@ -105,13 +103,10 @@ for i, batch in enumerate(val_loader):
             zeros_list
         )
 
-        # Use specifications from the circuit being validated
-        # For validation, we're reconstructing, so we don't use specifications
-        # but we could pass them if we wanted to test spec-driven generation
-        conditions = torch.randn(1, 2, device=device)  # Keep random for reconstruction test
-        circuit = decoder.generate(mu, conditions, verbose=False)
+        # Generate from latent (no conditions needed)
+        circuit = decoder.generate(mu, verbose=False)
 
-        edge_vals = circuit['edge_values'][0]
+        component_types = circuit['component_types'][0]
         edge_exist = circuit['edge_existence'][0]
 
         # Check all edges in this circuit
@@ -125,8 +120,7 @@ for i, batch in enumerate(val_loader):
 
             # Check if edge exists in generated circuit
             if edge_exist[max(src, dst), min(src, dst)] > 0.5:
-                pred_masks = edge_vals[max(src, dst), min(src, dst), 3:6]
-                pred_type = masks_to_component_type(pred_masks.unsqueeze(0))[0].item()
+                pred_type = component_types[max(src, dst), min(src, dst)].item()
             else:
                 # Edge doesn't exist → predicted as "None"
                 pred_type = 0

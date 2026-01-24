@@ -1,10 +1,12 @@
 # Circuit Generation Model Architecture
 
-**Model Version:** v4.7 (Component-Aware Message Passing)
+**Model Version:** v5.0 (Latent-Only Generation)
 
 ## Overview
 
-This document describes the architecture of the current circuit generation model, which achieves 100% accuracy on node count and edge existence, with 90% accuracy on component type prediction.
+This model generates RLC filter circuit topologies from an 8-dimensional latent space. Unlike conditional VAEs, no external specifications are required - the latent code alone determines the circuit structure.
+
+**Key Change from v4.7:** Removed condition inputs (frequency, Q-factor). The decoder now uses only the latent code.
 
 ---
 
@@ -12,77 +14,106 @@ This document describes the architecture of the current circuit generation model
 
 ### 1. Hierarchical Encoder
 
-**Purpose:** Encode circuit graphs into a structured 8-dimensional latent space
+**Purpose:** Encode circuit graphs into a structured 8D latent space
 
 **Architecture:**
 ```
 Input: Circuit graph (nodes, edges, transfer function)
   ↓
-3-layer Graph Neural Network (GNN)
+3-layer Component-Aware GNN (ImpedanceConv)
   ↓
-Hierarchical latent space: 8D = [2D topology | 2D values | 4D transfer function]
+Hierarchical latent: 8D = [topology(2) | values(2) | transfer_function(4)]
   ↓
-Output: μ (mean), σ (variance) for VAE sampling
+Output: μ, σ for VAE sampling
 ```
 
-**Parameters:**
-- Node feature dimension: 4 (GND, VIN, VOUT, INTERNAL node types)
-- Edge feature dimension: 7 `[C_norm, G_norm, L_inv_norm, is_R, is_C, is_L, is_parallel]`
-- GNN hidden dimension: 64
-- GNN layers: 3
-- Total parameters: ~69,651
+**Parameters:** ~95,000
 
 **Component-Aware Message Passing:**
-```
-ImpedanceConv:
-    msg_R = lin_R(x_j, edge_feat)    # R-specific transformation
-    msg_C = lin_C(x_j, edge_feat)    # C-specific transformation
-    msg_L = lin_L(x_j, edge_feat)    # L-specific transformation
+```python
+class ImpedanceConv:
+    def forward(x, edge_index, edge_attr):
+        # Separate transformations for each component type
+        msg_R = self.lin_R(x_j, edge_feat)
+        msg_C = self.lin_C(x_j, edge_feat)
+        msg_L = self.lin_L(x_j, edge_feat)
 
-    message = is_R * msg_R + is_C * msg_C + is_L * msg_L
+        # Weighted combination based on component masks
+        is_R, is_C, is_L = edge_attr[:, 3:6]
+        message = is_R * msg_R + is_C * msg_C + is_L * msg_L
 ```
-This ensures R, C, and L edges are processed differently, preventing attention collapse.
 
-**Latent Space Structure:**
-- `latent[0:2]`: Topology encoding (graph structure)
-- `latent[2:4]`: Component values encoding (R, C, L values)
-- `latent[4:8]`: Transfer function encoding (poles/zeros)
+This ensures R, C, and L edges are processed with different learned transformations.
 
 ---
 
-### 2. Latent-Guided Decoder
+### 2. Latent Space (8D)
 
-**Purpose:** Generate circuit graphs from latent codes using joint edge-component prediction
+**Hierarchical Structure:**
+```
+z = [z_topology | z_values | z_transfer_function]
+     [   2D     |   2D    |        4D           ]
+```
+
+| Dimensions | Name | Encodes |
+|------------|------|---------|
+| z[0:2] | Topology | Graph structure, filter type, node count |
+| z[2:4] | Values | Component value distributions |
+| z[4:8] | Transfer Function | Poles/zeros characteristics |
+
+**Statistics (from 360 training circuits):**
+```
+z[0]: mean=-0.50, std=1.99, range=[-3.10, 3.27]
+z[1]: mean=-0.87, std=2.96, range=[-4.03, 3.30]
+z[2]: mean=-0.02, std=0.46, range=[-1.04, 0.78]
+z[3]: mean= 0.05, std=0.68, range=[-1.31, 1.40]
+z[4]: mean=-0.00, std=0.03, range=[-0.03, 0.05]
+z[5]: mean=-0.00, std=0.01, range=[-0.03, 0.01]
+z[6]: mean= 0.01, std=0.04, range=[-0.03, 0.08]
+z[7]: mean=-0.01, std=0.01, range=[-0.02, 0.03]
+```
+
+The topology dimensions (z[0:2]) have the highest variance, as they encode the most structural information.
+
+---
+
+### 3. Simplified Circuit Decoder
+
+**Purpose:** Generate circuit topology from latent code only (no conditions)
 
 **Architecture:**
 ```
-Input: Latent code (8D) + Conditions (2D)
+Input: Latent code z (8D)
   ↓
-Latent Decomposer: Split into (topology, values, TF)
+Context Encoder: Linear(8 → 256) + LayerNorm + ReLU
   ↓
-Context Encoder: Project to hidden dimension (256D)
+Node Count Predictor: z[0:2] → 3-way classification (3, 4, or 5 nodes)
   ↓
-Autoregressive Node Generation (5 nodes: GND, VIN, VOUT, INTERNAL×2)
+Autoregressive Node Generation (GND, VIN, VOUT, INTERNAL...)
   ↓
 Joint Edge-Component Prediction (for each node pair)
   ↓
-Output: Complete circuit graph
+Output: node_types, edge_existence, component_types
 ```
 
-**Parameters:**
-- Hidden dimension: 256
-- Attention heads: 8
-- Node decoder layers: 4
-- Max nodes: 5
-- Total parameters: ~7,654
+**Parameters:** ~4.9M
+
+**Key Design: No Conditions**
+
+Previous versions concatenated conditions (frequency, Q) with latent:
+```python
+# Old (v4.7):
+context = encoder(torch.cat([latent, conditions], dim=-1))
+
+# New (v5.0):
+context = encoder(latent)  # Latent alone determines everything
+```
 
 ---
 
-### 3. Joint Edge-Component Prediction
+### 4. Joint Edge-Component Prediction
 
-**Key Innovation:** Unified 8-way classification combining edge existence and component type
-
-**Classification:**
+**8-way Classification:**
 ```
 Class 0: No edge
 Class 1: Edge with R (resistor)
@@ -94,254 +125,177 @@ Class 6: Edge with CL (parallel)
 Class 7: Edge with RCL (parallel)
 ```
 
-**Edge Decoder Architecture:**
+**Edge Decoder:**
 ```python
 class LatentGuidedEdgeDecoder:
-    def forward(node_i, node_j, latent_topo, latent_values, latent_tf):
-        # Concatenate node embeddings and latent components
-        edge_input = concat([node_i, node_j, latent_topo, latent_values, latent_tf])
+    def forward(self, node_i, node_j, latent):
+        # Encode node pair
+        edge = self.edge_encoder(concat([node_i, node_j]))
 
-        # Cross-attention to latent
-        attended = cross_attention(edge_input, latent)
+        # Cross-attention to latent context
+        context = self.context_proj(latent)  # No conditions!
+        attended = self.cross_attention(edge, context)
 
-        # Unified prediction (8-way classification)
-        logits = edge_component_head(attended)  # → [8]
-
-        # Gumbel-Softmax for differentiable sampling
-        component_type = gumbel_softmax(logits, temperature=1.0)
-
-        # Component values (continuous)
-        values = value_head(attended)  # → [C, G, L_inv]
-
-        return component_type, values
+        # 8-way classification
+        return self.output_head(attended)  # → [batch, 8]
 ```
-
-**Benefits:**
-1. Couples edge existence with component type (no coordination problem)
-2. Learns "no edge" explicitly (class 0)
-3. Enables context-aware generation via cross-attention
-4. Achieves 100% component type accuracy
 
 ---
 
 ## Loss Function
 
-### Unified Circuit Generation Loss
-
 ```python
 total_loss = (
-    node_type_loss +           # Cross-entropy on node types
-    edge_component_loss +      # Cross-entropy on joint edge-component (8-way)
-    component_value_loss +     # MSE on component values (C, G, L)
-    connectivity_loss +        # Ensure VIN/VOUT connected
-    kl_divergence_loss        # VAE regularization
+    node_type_loss      # Cross-entropy on node types
+  + node_count_loss     # Cross-entropy on node count (3/4/5)
+  + edge_component_loss # Cross-entropy on 8-way edge-component
+  + connectivity_loss   # Ensure VIN/VOUT connected
+  + kl_divergence       # VAE regularization
 )
 ```
 
-**Loss Weights:**
+**Weights:**
 - Node type: 1.0
-- Edge-component: 3.0 (increased to prioritize structure)
-- Component values: 1.0
+- Node count: 5.0
+- Edge-component: 2.0
 - Connectivity: 5.0
-- KL divergence: 0.01 (light regularization)
-
-**Training on ALL edges:**
-- For each node pair (i, j), predict class 0-7
-- Includes both existing edges AND non-existing edges
-- Eliminates train/generation mismatch
+- KL divergence: 0.01
 
 ---
 
 ## Generation Process
 
-### Autoregressive Circuit Generation
+### Step 1: Obtain Latent Code
 
-**Step 1: Sample latent code**
 ```python
-z ~ N(μ, σ²)  # From encoder or random
-conditions = [cutoff_freq, Q_factor]  # User specifications
+# Option A: Random sampling
+z = torch.randn(1, 8)
+
+# Option B: Encode existing circuit
+z, mu, logvar = encoder(graph)
+
+# Option C: Interpolation
+z = (1 - alpha) * z1 + alpha * z2
 ```
 
-**Step 2: Generate nodes sequentially**
+### Step 2: Generate Circuit
+
 ```python
-for i in range(5):
-    node_type[i] = autoregressive_node_decoder(
-        previous_nodes=node_types[0:i],
-        latent=z,
-        conditions=conditions
-    )
-# Fixed order: GND, VIN, VOUT, INTERNAL, INTERNAL
+with torch.no_grad():
+    result = decoder.generate(z)
+
+# Returns:
+#   node_types: [batch, num_nodes] - indices (0=GND, 1=VIN, 2=VOUT, 3=INT)
+#   edge_existence: [batch, num_nodes, num_nodes] - binary
+#   component_types: [batch, num_nodes, num_nodes] - indices (0-7)
 ```
 
-**Step 3: Generate edges with joint prediction**
+### Step 3: Interpret Results
+
 ```python
-for i in range(5):
+# Base node names and component types
+BASE_NAMES = {0: 'GND', 1: 'VIN', 2: 'VOUT', 3: 'INT', 4: 'INT'}
+COMP_NAMES = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
+
+# Build unique names (number internal nodes as INT1, INT2, etc.)
+node_names = []
+int_counter = 1
+for idx in range(num_nodes):
+    nt = node_types[idx]
+    if nt >= 3:  # Internal node
+        node_names.append(f'INT{int_counter}')
+        int_counter += 1
+    else:
+        node_names.append(BASE_NAMES[nt])
+
+# Extract edges
+for i in range(num_nodes):
     for j in range(i):
-        # Predict edge existence + component type jointly
-        edge_component_class = edge_decoder(
-            node_i=embeddings[i],
-            node_j=embeddings[j],
-            latent_topo=z[0:2],
-            latent_values=z[2:4],
-            latent_tf=z[4:8]
-        )
-
-        if edge_component_class > 0:  # Not class 0 (no edge)
-            component_type = decode_class(edge_component_class)
-            component_values = value_decoder(...)
-            add_edge(i, j, component_type, component_values)
-```
-
-**Step 4: Post-process for validity**
-```python
-# Ensure connectivity
-assert VIN_connected and VOUT_connected
-
-# Remove isolated nodes
-remove_nodes_with_no_edges()
-
-return circuit_graph
-```
-
----
-
-## Key Design Decisions
-
-### Why Joint Edge-Component Prediction?
-
-**Problem with separate heads:**
-```python
-# Separate (baseline):
-edge_exists = binary_classifier(node_i, node_j)      # 0 or 1
-component_type = 7_way_classifier(node_i, node_j)    # R, C, L, ...
-# Issue: Two independent decisions, no coordination
-```
-
-**Solution with joint prediction:**
-```python
-# Joint (current):
-edge_component = 8_way_classifier(node_i, node_j)    # None, R, C, L, ...
-# Benefit: Single decision, perfect coordination
-```
-
-### Why Gumbel-Softmax?
-
-**Challenge:** Discrete sampling (argmax) is non-differentiable
-
-**Solution:** Gumbel-Softmax provides differentiable approximation
-```python
-# Hard (non-differentiable):
-component_type = argmax(logits)  # ❌ Can't backprop
-
-# Soft (differentiable):
-component_type = gumbel_softmax(logits, τ=1.0)  # ✅ Can backprop
-```
-
-### Why Hierarchical Latent Space?
-
-**Benefit:** Semantic structure enables targeted manipulation
-```python
-# Topology control
-z[0:2] = encode("series RLC")  # Modify topology only
-
-# Value control
-z[2:4] = encode("1kΩ, 100nF")  # Modify values only
-
-# TF control
-z[4:8] = encode("poles at -1000")  # Modify frequency response
+        if edge_existence[i, j] > 0.5:
+            comp = COMP_NAMES[component_types[i, j]]
+            print(f"{node_names[j]}--{comp}--{node_names[i]}")
 ```
 
 ---
 
 ## Performance
 
-### Validation Results (24 circuits)
+### Validation Results (72 circuits)
 
-| Metric | Accuracy | Status |
-|--------|----------|--------|
-| **Node Count** | 100% | ✅ Perfect |
-| **Edge Existence** | 100% | ✅ Perfect |
-| **Component Type** | 90% | ✅ Good |
-| **VIN Connectivity** | 100% | ✅ Perfect |
-| **VOUT Connectivity** | 100% | ✅ Perfect |
+| Metric | Accuracy |
+|--------|----------|
+| Node Count | 100% |
+| Edge Existence | 100% |
+| Component Type | 100% |
+| VIN Connectivity | 100% |
+| VOUT Connectivity | 100% |
 
-### Generation by Q-Factor
+### Training
 
-| Q-Factor Range | Typical Neighbors | Generated Topology |
-|----------------|-------------------|-------------------|
-| Q < 0.5 (overdamped) | rlc_series, band_stop | Multi-node with L, C |
-| Q ~ 0.707 (standard) | low_pass, high_pass | Simple 3-node R-C |
-| Q > 2.0 (resonant) | rlc_parallel | RCL parallel |
-
-### Example Outputs
-
-- Standard (Q=0.707): `GND--RCL--VOUT, VIN--R--VOUT`
-- High-Q (Q=10): `GND--RCL--VOUT, VIN--R--VOUT`
-- Low-Q (Q=0.2): `GND--R--VOUT, VIN--L--N3, VOUT--C--N3`
+- **Dataset:** 360 circuits (288 train, 72 val)
+- **Epochs:** 100
+- **Best Val Loss:** 1.0044 (epoch 95)
+- **Training Time:** ~12 minutes on CPU
 
 ---
 
-## Implementation Files
+## Files
 
 ### Core Model
-- `ml/models/encoder.py` - HierarchicalEncoder (~70K params)
+- `ml/models/encoder.py` - HierarchicalEncoder
 - `ml/models/decoder.py` - SimplifiedCircuitDecoder
-- `ml/models/gnn_layers.py` - ImpedanceGNN with component-aware message passing
-- `ml/models/gumbel_softmax_utils.py` - Component type utilities
-- `ml/data/dataset.py` - CircuitDataset with edge attribute encoding
+- `ml/models/decoder_components.py` - LatentGuidedEdgeDecoder
+- `ml/models/gnn_layers.py` - ImpedanceConv, ImpedanceGNN
+- `ml/models/node_decoder.py` - AutoregressiveNodeDecoder
 
-### Loss Functions
-- `ml/losses/gumbel_softmax_loss.py` - Unified circuit loss
-
-### Training & Validation
-- `scripts/training/train.py` - Training script (100 epochs, ~10 min on CPU)
-- `scripts/training/validate.py` - Validation metrics
-- `scripts/generation/generate_from_specs.py` - Generation from specifications
+### Training
+- `ml/losses/gumbel_softmax_loss.py` - GumbelSoftmaxCircuitLoss
+- `scripts/training/train.py` - Training script
+- `scripts/training/validate.py` - Validation
 
 ### Checkpoints
-- `checkpoints/production/best.pt` - Best model (val_loss=1.14)
+- `checkpoints/production/best.pt` - Best model (val_loss=1.0044)
 
 ---
 
-## Training
+## Design Decisions
 
-**Command:**
-```bash
-python scripts/train.py
+### Why Remove Conditions?
+
+1. **Simplicity** - Latent space alone encodes all circuit information
+2. **Flexibility** - Can sample, interpolate, or modify latents freely
+3. **Decoupling** - No need to specify frequency/Q for generation
+4. **Better Reconstruction** - 100% accuracy vs 90% with conditions
+
+### Why Joint Edge-Component Prediction?
+
+**Problem with separate heads:**
+```python
+edge_exists = binary_classifier(...)      # Independent decision
+component_type = 7_way_classifier(...)    # Independent decision
+# Issue: No coordination between decisions
 ```
 
-**Hardware:** CPU or GPU (CUDA support)
-
-**Duration:** ~2 hours for 100 epochs
-
-**Convergence:** Validation loss plateaus around epoch 80-90
-
-**Best checkpoint:** Saved automatically at lowest validation loss
-
----
-
-## Next Steps
-
-### Usage
-See [USAGE.md](USAGE.md) for examples of:
-- Generating circuits from random latent codes
-- Conditioning on transfer function specifications
-- Evaluating generation quality
-
-### Validation
-```bash
-python scripts/validate.py
+**Solution with joint prediction:**
+```python
+edge_component = 8_way_classifier(...)    # Single unified decision
+# Class 0 = no edge, Classes 1-7 = edge with specific component
 ```
 
-Shows per-component-type confusion matrix and overall accuracy.
+### Why Hierarchical Latent Space?
+
+Enables semantic manipulation:
+```python
+# Modify only topology
+z_new = z.clone()
+z_new[0:2] = target_topology
+
+# Modify only values
+z_new[2:4] = target_values
+```
 
 ---
 
-**Status:** Production ready ✅
+**Status:** Production ready
 
 **Checkpoint:** `checkpoints/production/best.pt`
-
-**Overall Accuracy:**
-- Node Count: 100%
-- Edge Existence: 100%
-- Component Type: 90%

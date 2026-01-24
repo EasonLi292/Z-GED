@@ -28,20 +28,10 @@ def collate_circuit_batch(batch_list):
     zeros = [item['zeros'] for item in batch_list]
     batched_graph = Batch.from_data_list(graphs)
 
-    batch_size = len(batch_list)
-    specifications = torch.zeros(batch_size, 2, dtype=torch.float32)
-
-    for b, item in enumerate(batch_list):
-        cutoff_freq = item['specifications'][0].item()
-        q_factor = item['specifications'][1].item()
-        specifications[b, 0] = np.log10(max(cutoff_freq, 1.0)) / 4.0
-        specifications[b, 1] = np.log10(max(q_factor, 0.01)) / 2.0
-
     return {
         'graph': batched_graph,
         'poles': poles,
         'zeros': zeros,
-        'specifications': specifications
     }
 
 
@@ -116,13 +106,11 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
         std = torch.exp(0.5 * logvar)
         latent = mu + torch.randn_like(std) * std
 
-        conditions = batch['specifications'].to(device)
         targets = graph_to_dense_format(graph)
 
-        # Forward
+        # Forward (latent only, no conditions)
         predictions = decoder(
             latent_code=latent,
-            conditions=conditions,
             target_node_types=targets['node_types']
         )
 
@@ -175,12 +163,10 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
             )
 
             latent = mu  # Use mean for validation
-            conditions = batch['specifications'].to(device)
             targets = graph_to_dense_format(graph)
 
             predictions = decoder(
                 latent_code=latent,
-                conditions=conditions,
                 target_node_types=targets['node_types']
             )
 
@@ -276,7 +262,6 @@ def main():
 
     decoder = SimplifiedCircuitDecoder(
         latent_dim=8,
-        conditions_dim=2,
         hidden_dim=256,
         num_heads=8,
         num_node_layers=4,

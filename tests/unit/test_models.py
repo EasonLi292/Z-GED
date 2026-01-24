@@ -179,11 +179,9 @@ def test_decoder():
     # Generate uses batch_size=1
     batch_size = 1
     latent_dim = 8
-    conditions_dim = 2
 
     decoder = SimplifiedCircuitDecoder(
         latent_dim=latent_dim,
-        conditions_dim=conditions_dim,
         hidden_dim=128,
         num_heads=4,
         num_node_layers=2,
@@ -191,14 +189,12 @@ def test_decoder():
     )
 
     z = torch.randn(batch_size, latent_dim)
-    conditions = torch.randn(batch_size, conditions_dim)
 
     print(f"\nInput z shape: {z.shape}")
-    print(f"Conditions shape: {conditions.shape}")
 
     decoder.eval()
     with torch.no_grad():
-        output = decoder.generate(z, conditions, verbose=False)
+        output = decoder.generate(z, verbose=False)
 
     num_nodes = output['node_types'].shape[1]
     print(f"\nOutput:")
@@ -259,7 +255,6 @@ def test_with_real_data():
 
     decoder = SimplifiedCircuitDecoder(
         latent_dim=8,
-        conditions_dim=2,
         hidden_dim=128,
         num_heads=4,
         num_node_layers=2,
@@ -269,9 +264,8 @@ def test_with_real_data():
     decoder.eval()
     # Generate uses batch_size=1, so take first sample
     z_single = z[:1]
-    conditions = torch.randn(1, 2)
     with torch.no_grad():
-        output = decoder.generate(z_single, conditions, verbose=False)
+        output = decoder.generate(z_single, verbose=False)
 
     print(f"\nGenerated:")
     print(f"  node_types:     {output['node_types'].shape}")

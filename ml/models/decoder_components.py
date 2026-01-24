@@ -27,7 +27,6 @@ class LatentGuidedEdgeDecoder(nn.Module):
         self,
         hidden_dim: int = 256,
         latent_dim: int = 8,
-        conditions_dim: int = 2,
         num_attention_heads: int = 4,
         dropout: float = 0.1
     ):
@@ -43,8 +42,8 @@ class LatentGuidedEdgeDecoder(nn.Module):
             nn.Dropout(dropout)
         )
 
-        # Context projection
-        self.context_proj = nn.Linear(latent_dim + conditions_dim, hidden_dim)
+        # Context projection (latent only, no conditions)
+        self.context_proj = nn.Linear(latent_dim, hidden_dim)
 
         # Cross-attention
         self.cross_attention = nn.MultiheadAttention(
@@ -75,8 +74,7 @@ class LatentGuidedEdgeDecoder(nn.Module):
         self,
         node_i: torch.Tensor,
         node_j: torch.Tensor,
-        latent: torch.Tensor,
-        conditions: torch.Tensor
+        latent: torch.Tensor
     ) -> torch.Tensor:
         """
         Predict edge topology.
@@ -85,7 +83,6 @@ class LatentGuidedEdgeDecoder(nn.Module):
             node_i: [batch, hidden_dim]
             node_j: [batch, hidden_dim]
             latent: [batch, latent_dim]
-            conditions: [batch, conditions_dim]
 
         Returns:
             edge_component_logits: [batch, 8] (0=no edge, 1-7=component type)
@@ -93,8 +90,8 @@ class LatentGuidedEdgeDecoder(nn.Module):
         # Encode node pair
         edge = self.edge_encoder(torch.cat([node_i, node_j], dim=-1))
 
-        # Project context
-        context = self.context_proj(torch.cat([latent, conditions], dim=-1)).unsqueeze(1)
+        # Project context (latent only)
+        context = self.context_proj(latent).unsqueeze(1)
 
         # Cross-attention
         attended, _ = self.cross_attention(
@@ -118,16 +115,14 @@ if __name__ == '__main__':
 
     edge_decoder = LatentGuidedEdgeDecoder(
         hidden_dim=hidden_dim,
-        latent_dim=8,
-        conditions_dim=2
+        latent_dim=8
     )
 
     node_i = torch.randn(batch_size, hidden_dim)
     node_j = torch.randn(batch_size, hidden_dim)
     latent = torch.randn(batch_size, 8)
-    conditions = torch.randn(batch_size, 2)
 
-    logits = edge_decoder(node_i, node_j, latent, conditions)
+    logits = edge_decoder(node_i, node_j, latent)
 
     assert logits.shape == (batch_size, 8)
     print(f"  Output shape: {logits.shape}")

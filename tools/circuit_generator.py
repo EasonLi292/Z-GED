@@ -19,7 +19,7 @@ warnings.filterwarnings('ignore')
 
 # Configuration
 DATASET_DIR = "rlc_dataset"
-NUM_SAMPLES_PER_FILTER = 20  # Generate 20 variations of each filter type
+NUM_SAMPLES_PER_FILTER = 60  # Generate 60 variations of each filter type (3x original)
 FILTER_TYPES = ['low_pass', 'high_pass', 'band_pass', 'band_stop', 'rlc_series', 'rlc_parallel']
 
 class FilterGenerator:
@@ -1037,32 +1037,22 @@ def main():
             elif filter_type == 'rlc_parallel':
                 char_freq = gen.generate_rlc_parallel_resonant()
 
-            # Convert to PySpice
-            circuit = gen.to_pyspice()
-
-            # Simulate (AC Analysis)
-            simulator = circuit.simulator(temperature=25, nominal_temperature=25)
-            try:
-                # Sweep from 10Hz to 100MHz
-                analysis = simulator.ac(start_frequency=10@u_Hz, stop_frequency=100@u_MHz,
-                                      number_of_points=100, variation='dec')
-            except Exception as e:
-                print(f"  Sim fail for {filter_type} #{i+1}: {e}")
-                continue
-
-            # Extract Transfer Function H(s) = Vout / Vin
-            freqs = analysis.frequency.as_ndarray()
-            vin = analysis['1'].as_ndarray()
-            vout = analysis['2'].as_ndarray()
-
-            # Calculate complex transfer function
-            H = vout / vin
-
-            # Extract Poles, Zeros, Gain using analytical method
+            # Extract Poles, Zeros, Gain using analytical method (no SPICE needed)
             poles, zeros, gain = extract_poles_zeros_gain_analytical(filter_type, gen.components)
 
             # Create ML-ready Graph Representation
             ml_graph = create_compact_graph_representation(gen.graph, filter_type)
+
+            # Generate synthetic frequency response from poles/zeros (for compatibility)
+            freqs = np.logspace(1, 8, 100)  # 10 Hz to 100 MHz
+            s = 1j * 2 * np.pi * freqs
+
+            # Compute H(s) from poles/zeros/gain
+            H = np.ones_like(s, dtype=complex) * gain
+            for z in zeros:
+                H *= (s - z)
+            for p in poles:
+                H /= (s - p)
 
             # Pack data
             data_point = {
@@ -1087,7 +1077,8 @@ def main():
             dataset.append(data_point)
             success_count += 1
 
-            print(f"  ✓ {filter_type} #{i+1}/{NUM_SAMPLES_PER_FILTER} | fc={char_freq:.2f} Hz | Poles: {len(poles)}")
+            if (i + 1) % 10 == 0 or i == 0:
+                print(f"  ✓ {filter_type} #{i+1}/{NUM_SAMPLES_PER_FILTER} | fc={char_freq:.2f} Hz | Poles: {len(poles)}")
 
     # Save dataset
     output_file = os.path.join(DATASET_DIR, "filter_dataset.pkl")

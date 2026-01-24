@@ -16,7 +16,6 @@ from ml.models.encoder import HierarchicalEncoder
 from ml.models.decoder import LatentGuidedGraphGPTDecoder
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-from ml.utils.spice_simulator import CircuitSimulator, extract_cutoff_and_q
 
 
 def collate_circuit_batch(batch_list):
@@ -97,17 +96,24 @@ def interpolate_latents(target_cutoff, target_q, specs_db, latents_db, k=5):
 def analyze_circuit_structure(circuit):
     """Analyze the generated circuit structure."""
     edge_exist = circuit['edge_existence'][0]
-    edge_values = circuit['edge_values'][0]
+    component_types = circuit['component_types'][0]
     node_types = circuit['node_types'][0]
 
     # Count edges
     num_edges = (edge_exist > 0.5).sum().item() // 2
 
-    # Analyze node types
-    node_type_names = ['GND', 'VIN', 'VOUT', 'Internal', 'Internal']
+    # Analyze node types with sequential internal node numbering
+    BASE_NAMES = {0: 'GND', 1: 'VIN', 2: 'VOUT', 3: 'INT', 4: 'INT'}
     node_list = []
+    int_counter = 1
     for i, nt_idx in enumerate(node_types):
-        node_list.append(f"Node {i}: {node_type_names[int(nt_idx.item())]}")
+        nt = int(nt_idx.item())
+        if nt >= 3:  # Internal node
+            name = f'INT{int_counter}'
+            int_counter += 1
+        else:
+            name = BASE_NAMES[nt]
+        node_list.append(f"Node {i}: {name}")
 
     # Analyze edges and components
     component_names = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
@@ -117,16 +123,10 @@ def analyze_circuit_structure(circuit):
     for i in range(num_nodes):
         for j in range(i+1, num_nodes):
             if edge_exist[i, j] > 0.5:
-                # Get component values (normalized)
-                log_C_norm = edge_values[i, j, 0].item()
-                log_G_norm = edge_values[i, j, 1].item()
-                log_L_inv_norm = edge_values[i, j, 2].item()
-
+                comp_type = component_types[i, j].item()
                 edges_list.append({
                     'nodes': (i, j),
-                    'log_C_norm': log_C_norm,
-                    'log_G_norm': log_G_norm,
-                    'log_L_inv_norm': log_L_inv_norm
+                    'component_type': component_names[comp_type]
                 })
 
     return {
@@ -170,7 +170,6 @@ def main():
 
     decoder = LatentGuidedGraphGPTDecoder(
         latent_dim=8,
-        conditions_dim=2,
         hidden_dim=256,
         num_heads=8,
         num_node_layers=4,
@@ -228,15 +227,11 @@ def main():
     print("="*80)
 
     latent = latent.unsqueeze(0).to(device).float()
-    conditions = torch.tensor([[
-        np.log10(max(target_cutoff, 1.0)) / 4.0,
-        np.log10(max(target_q, 0.01)) / 2.0
-    ]], dtype=torch.float32, device=device)
 
-    print(f"\nConditions (normalized): {conditions[0].numpy()}")
+    print(f"\nLatent code: {latent[0].numpy()}")
 
     with torch.no_grad():
-        circuit = decoder.generate(latent, conditions, verbose=True)
+        circuit = decoder.generate(latent, verbose=True)
 
     # Analyze structure
     print("\n" + "="*80)
@@ -253,8 +248,7 @@ def main():
     print(f"\nEdges ({len(structure['edges_list'])} total):")
     for edge in structure['edges_list']:
         i, j = edge['nodes']
-        print(f"  Edge ({i},{j}): log_C_norm={edge['log_C_norm']:>6.3f}, "
-              f"log_G_norm={edge['log_G_norm']:>6.3f}, log_L_inv_norm={edge['log_L_inv_norm']:>6.3f}")
+        print(f"  Edge ({i},{j}): {edge['component_type']}")
 
     # Check validity
     edge_exist = circuit['edge_existence'][0]
@@ -267,89 +261,15 @@ def main():
     print(f"  VOUT connected: {'✓' if vout_connected else '✗'}")
     print(f"  Overall: {'✓ VALID' if valid else '✗ INVALID'}")
 
-    # SPICE simulation
+    # Note: SPICE simulation requires component values which are not predicted
+    # in topology-only mode. The generated circuit shows the structure only.
     print("\n" + "="*80)
-    print("SPICE Simulation")
+    print("Summary")
     print("="*80)
-
-    if not valid:
-        print("\n✗ Cannot simulate: circuit is invalid")
-        return
-
-    impedance_mean = dataset.impedance_mean.numpy()
-    impedance_std = dataset.impedance_std.numpy()
-
-    simulator = CircuitSimulator(
-        simulator='ngspice',
-        freq_points=200,
-        freq_start=1.0,
-        freq_stop=1e6,
-        impedance_mean=impedance_mean,
-        impedance_std=impedance_std
-    )
-
-    try:
-        # Convert node types to one-hot
-        node_types_indices = circuit['node_types'][0]
-        num_nodes = len(node_types_indices)
-        node_types_onehot = torch.zeros(num_nodes, 5)
-        for i, node_type_idx in enumerate(node_types_indices):
-            node_types_onehot[i, int(node_type_idx.item())] = 1.0
-
-        print("\nGenerating SPICE netlist...")
-        netlist = simulator.circuit_to_netlist(
-            node_types=node_types_onehot,
-            edge_existence=circuit['edge_existence'][0],
-            edge_values=circuit['edge_values'][0]
-        )
-
-        print("\nSPICE Netlist:")
-        print("-" * 80)
-        print(netlist)
-        print("-" * 80)
-
-        print("\nRunning AC analysis...")
-        frequencies, response = simulator.run_ac_analysis(netlist)
-
-        print("Extracting specifications...")
-        specs = extract_cutoff_and_q(frequencies, response)
-
-        print("\n" + "="*80)
-        print("Results")
-        print("="*80)
-
-        actual_cutoff = specs['cutoff_freq']
-        actual_q = specs['q_factor']
-
-        cutoff_error = abs(target_cutoff - actual_cutoff) / target_cutoff * 100
-        q_error = abs(target_q - actual_q) / target_q * 100
-
-        print(f"\nTarget specifications:")
-        print(f"  Cutoff: {target_cutoff:.1f} Hz")
-        print(f"  Q-factor: {target_q:.3f}")
-
-        print(f"\nGenerated specifications:")
-        print(f"  Cutoff: {actual_cutoff:.1f} Hz")
-        print(f"  Q-factor: {actual_q:.3f}")
-
-        print(f"\nAccuracy:")
-        print(f"  Cutoff error: {cutoff_error:.1f}%")
-        print(f"  Q-factor error: {q_error:.1f}%")
-
-        if cutoff_error < 20:
-            print(f"\n✓ GOOD: Cutoff error < 20%")
-        elif cutoff_error < 50:
-            print(f"\n⚠️  MODERATE: Cutoff error 20-50%")
-        else:
-            print(f"\n✗ POOR: Cutoff error > 50%")
-
-        print(f"\nPeak frequency: {specs['peak_freq']:.1f} Hz")
-        print(f"Peak gain: {specs['peak_gain']:.1f} dB")
-
-    except Exception as e:
-        print(f"\n✗ SPICE simulation failed: {e}")
-        import traceback
-        traceback.print_exc()
+    print("\nNote: This is topology-only generation (no component values).")
+    print("SPICE simulation would require component value prediction.")
+    print(f"\nGenerated topology has {structure['num_edges']} edges.")
+    print(f"Circuit valid: {'✓' if valid else '✗'}")
 
 
 if __name__ == '__main__':

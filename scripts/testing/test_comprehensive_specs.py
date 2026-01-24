@@ -16,7 +16,6 @@ from ml.models.encoder import HierarchicalEncoder
 from ml.models.decoder import LatentGuidedGraphGPTDecoder
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-from ml.utils.spice_simulator import CircuitSimulator, extract_cutoff_and_q
 
 
 def collate_circuit_batch(batch_list):
@@ -96,10 +95,13 @@ def interpolate_latents(target_cutoff, target_q, specs_db, latents_db, k=5):
 def analyze_topology(circuit):
     """Analyze generated circuit topology."""
     edge_exist = circuit['edge_existence'][0]
-    edge_values = circuit['edge_values'][0]
+    component_types = circuit['component_types'][0]
     node_types = circuit['node_types'][0]
 
     num_edges = (edge_exist > 0.5).sum().item() // 2
+
+    # Component type names: 0=None, 1=R, 2=C, 3=L, 4=RC, 5=RL, 6=CL, 7=RCL
+    component_names = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
 
     # Analyze components
     has_R = False
@@ -110,15 +112,12 @@ def analyze_topology(circuit):
     for i in range(num_nodes):
         for j in range(i+1, num_nodes):
             if edge_exist[i, j] > 0.5:
-                log_C = abs(edge_values[i, j, 0].item())
-                log_G = abs(edge_values[i, j, 1].item())
-                log_L_inv = abs(edge_values[i, j, 2].item())
-
-                if log_C > 0.1:
-                    has_C = True
-                if log_G > 0.1:
+                comp_type = component_types[i, j].item()
+                if comp_type in [1, 4, 5, 7]:  # R, RC, RL, RCL
                     has_R = True
-                if log_L_inv > 0.1:
+                if comp_type in [2, 4, 6, 7]:  # C, RC, CL, RCL
+                    has_C = True
+                if comp_type in [3, 5, 6, 7]:  # L, RL, CL, RCL
                     has_L = True
 
     components = []
@@ -154,7 +153,6 @@ def main():
 
     decoder = LatentGuidedGraphGPTDecoder(
         latent_dim=8,
-        conditions_dim=2,
         hidden_dim=256,
         num_heads=8,
         num_node_layers=4,
@@ -171,18 +169,6 @@ def main():
     # Load dataset
     dataset = CircuitDataset('rlc_dataset/filter_dataset.pkl')
     specs_db, latents_db = build_specification_database(encoder, dataset, device)
-
-    impedance_mean = dataset.impedance_mean.numpy()
-    impedance_std = dataset.impedance_std.numpy()
-
-    simulator = CircuitSimulator(
-        simulator='ngspice',
-        freq_points=200,
-        freq_start=1.0,
-        freq_stop=1e6,
-        impedance_mean=impedance_mean,
-        impedance_std=impedance_std
-    )
 
     # Test specifications
     test_cases = [
@@ -228,18 +214,14 @@ def main():
         print(f"[{idx+1}/{len(test_cases)}] {description}", flush=True)
         print(f"  Target: {target_cutoff:.1f} Hz, Q={target_q:.3f}", flush=True)
 
-        # K-NN interpolation
+        # K-NN interpolation to find latent code
         latent, info = interpolate_latents(target_cutoff, target_q, specs_db, latents_db, k=5)
 
-        # Generate circuit
+        # Generate circuit from latent (no conditions)
         latent = latent.unsqueeze(0).to(device).float()
-        conditions = torch.tensor([[
-            np.log10(max(target_cutoff, 1.0)) / 4.0,
-            np.log10(max(target_q, 0.01)) / 2.0
-        ]], dtype=torch.float32, device=device)
 
         with torch.no_grad():
-            circuit = decoder.generate(latent, conditions, verbose=False)
+            circuit = decoder.generate(latent, verbose=False)
 
         # Analyze topology
         topo = analyze_topology(circuit)
@@ -251,41 +233,7 @@ def main():
         valid = vin_connected and vout_connected
 
         print(f"  Generated: {topo['num_edges']} edges, {topo['components']}, valid={valid}", flush=True)
-
-        # SPICE simulation
-        actual_cutoff = None
-        actual_q = None
-        sim_success = False
-
-        if valid:
-            try:
-                node_types_indices = circuit['node_types'][0]
-                num_nodes = len(node_types_indices)
-                node_types_onehot = torch.zeros(num_nodes, 5)
-                for i, node_type_idx in enumerate(node_types_indices):
-                    node_types_onehot[i, int(node_type_idx.item())] = 1.0
-
-                netlist = simulator.circuit_to_netlist(
-                    node_types=node_types_onehot,
-                    edge_existence=circuit['edge_existence'][0],
-                    edge_values=circuit['edge_values'][0]
-                )
-
-                frequencies, response = simulator.run_ac_analysis(netlist)
-                specs = extract_cutoff_and_q(frequencies, response)
-
-                actual_cutoff = specs['cutoff_freq']
-                actual_q = specs['q_factor']
-                sim_success = True
-
-                cutoff_error = abs(target_cutoff - actual_cutoff) / target_cutoff * 100
-                q_error = abs(target_q - actual_q) / target_q * 100
-
-                print(f"  Actual: {actual_cutoff:.1f} Hz, Q={actual_q:.3f}", flush=True)
-                print(f"  Error: {cutoff_error:.1f}% (cutoff), {q_error:.1f}% (Q)\n", flush=True)
-
-            except Exception as e:
-                print(f"  Simulation failed: {str(e)}\n", flush=True)
+        print(f"  Nearest neighbor: {info['neighbor_specs'][0][0]:.1f} Hz, Q={info['neighbor_specs'][0][1]:.3f}\n", flush=True)
 
         results.append({
             'description': description,
@@ -293,22 +241,17 @@ def main():
             'target_q': target_q,
             'topology': topo,
             'valid': valid,
-            'actual_cutoff': actual_cutoff,
-            'actual_q': actual_q,
-            'sim_success': sim_success,
             'nearest_neighbor': info['neighbor_specs'][0]
         })
 
     # Generate summary report
     print("\n" + "="*80)
-    print("RESULTS SUMMARY")
+    print("RESULTS SUMMARY (Topology-Only)")
     print("="*80)
 
     print("\n📊 Overall Statistics:")
     valid_count = sum(1 for r in results if r['valid'])
-    sim_count = sum(1 for r in results if r['sim_success'])
     print(f"  Valid circuits: {valid_count}/{len(results)} ({100*valid_count/len(results):.1f}%)")
-    print(f"  Successful simulations: {sim_count}/{len(results)} ({100*sim_count/len(results):.1f}%)")
 
     # Topology distribution
     print("\n🔧 Topology Distribution:")
@@ -320,7 +263,7 @@ def main():
     for topo, count in sorted(topo_counts.items()):
         print(f"  {topo}: {count} circuits")
 
-    # Accuracy by category
+    # Validity by category
     categories = {
         'Low-pass (Q≈0.707)': [r for r in results if 0.5 < r['target_q'] < 1.0 and r['target_cutoff'] < 150000],
         'Band-pass (1<Q<5)': [r for r in results if 1.0 < r['target_q'] < 5.0],
@@ -328,47 +271,30 @@ def main():
         'Overdamped (Q<0.5)': [r for r in results if r['target_q'] < 0.5],
     }
 
-    print("\n📈 Accuracy by Category:")
+    print("\n📈 Validity by Category:")
     for cat_name, cat_results in categories.items():
-        sim_results = [r for r in cat_results if r['sim_success']]
-        if sim_results:
-            avg_cutoff_err = np.mean([
-                abs(r['target_cutoff'] - r['actual_cutoff']) / r['target_cutoff'] * 100
-                for r in sim_results
-            ])
-            avg_q_err = np.mean([
-                abs(r['target_q'] - r['actual_q']) / r['target_q'] * 100
-                for r in sim_results
-            ])
-            print(f"  {cat_name}:")
-            print(f"    Cutoff error: {avg_cutoff_err:.1f}%")
-            print(f"    Q error: {avg_q_err:.1f}%")
+        valid_in_cat = sum(1 for r in cat_results if r['valid'])
+        if cat_results:
+            print(f"  {cat_name}: {valid_in_cat}/{len(cat_results)} valid ({100*valid_in_cat/len(cat_results):.1f}%)")
 
     # Save detailed results
     print("\n💾 Saving detailed results...")
+    os.makedirs('docs', exist_ok=True)
     with open('docs/GENERATION_TEST_RESULTS.txt', 'w') as f:
         f.write("="*80 + "\n")
-        f.write("Comprehensive Generation Test Results\n")
+        f.write("Comprehensive Topology Generation Test Results\n")
         f.write("="*80 + "\n\n")
+        f.write("Note: This is topology-only generation (no component values).\n\n")
 
         for r in results:
             f.write(f"\n{r['description']}\n")
             f.write("-" * 80 + "\n")
             f.write(f"Target: {r['target_cutoff']:.1f} Hz, Q={r['target_q']:.3f}\n")
             f.write(f"Topology: {r['topology']['num_edges']} edges, {r['topology']['components']}\n")
-            f.write(f"Valid: {'✅' if r['valid'] else '❌'}\n")
-
-            if r['sim_success']:
-                cutoff_err = abs(r['target_cutoff'] - r['actual_cutoff']) / r['target_cutoff'] * 100
-                q_err = abs(r['target_q'] - r['actual_q']) / r['target_q'] * 100
-                f.write(f"Actual: {r['actual_cutoff']:.1f} Hz, Q={r['actual_q']:.3f}\n")
-                f.write(f"Error: {cutoff_err:.1f}% (cutoff), {q_err:.1f}% (Q)\n")
-            else:
-                f.write("Simulation: Failed\n")
-
+            f.write(f"Valid: {'Yes' if r['valid'] else 'No'}\n")
             f.write(f"Nearest neighbor: {r['nearest_neighbor'][0]:.1f} Hz, Q={r['nearest_neighbor'][1]:.3f}\n")
 
-    print("✅ Results saved to docs/GENERATION_TEST_RESULTS.txt")
+    print("Results saved to docs/GENERATION_TEST_RESULTS.txt")
 
 
 if __name__ == '__main__':

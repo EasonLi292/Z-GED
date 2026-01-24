@@ -1,37 +1,70 @@
 # Z-GED: Specification-Driven Circuit Generation
 
-Automated RLC filter circuit synthesis from user specifications using a conditional VAE with component-aware GNN encoder.
+Automated RLC filter circuit synthesis using a VAE with component-aware GNN encoder. Generate circuit topologies by specifying **cutoff frequency** and **Q-factor**, or by sampling/interpolating in an 8-dimensional latent space.
 
 ## What It Does
 
-Z-GED generates RLC filter circuits that match target frequency response characteristics. You provide a cutoff frequency and Q-factor, and it outputs a valid circuit topology.
+Z-GED generates RLC filter circuits that match target specifications:
 
-**Supported filter types:** Low-pass, High-pass, Band-pass, Band-stop, RLC parallel, RLC series
+```bash
+python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
+# Output: GND--RCL--VOUT, VIN--R--VOUT
+```
 
-**Model Version:** v4.7 (Component-Aware Message Passing)
+**Supported filter types:** Low-pass, High-pass, Band-pass, Band-stop, RLC series, RLC parallel
 
-### Current Performance
+## Performance
 
 | Metric | Validation |
 |--------|------------|
 | Node Count | 100% |
 | Edge Existence | 100% |
-| Component Type | 90% |
+| Component Type | 100% |
 
-**Example outputs:**
-- High-Q resonant (Q=10): `GND--RCL--VOUT, VIN--R--VOUT`
-- Overdamped (Q=0.2): `GND--R--VOUT, VIN--L--N3, VOUT--C--N3`
-- Standard filter (Q=0.707): `GND--RCL--VOUT, VIN--R--VOUT`
+**Dataset:** 360 circuits (60 per filter type)
 
 ## Quick Start
 
-### Generate a Circuit
+### Generate from Specifications
 
 ```bash
+# Standard Butterworth filter at 10kHz
 python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
+
+# High-Q resonant at 5kHz
+python scripts/generation/generate_from_specs.py --cutoff 5000 --q-factor 5.0
+
+# Band-pass at 20kHz
+python scripts/generation/generate_from_specs.py --cutoff 20000 --q-factor 2.0
 ```
 
-This generates a filter with ~10 kHz cutoff and Butterworth response (Q=0.707).
+### Example Results
+
+| Cutoff | Q | Generated Circuit |
+|--------|---|-------------------|
+| 1 kHz | 0.707 | `GND--R--VOUT, VIN--C--VOUT` (high-pass) |
+| 10 kHz | 0.707 | `GND--RCL--VOUT, VIN--R--VOUT` (RLC parallel) |
+| 10 kHz | 5.0 | `GND--RCL--VOUT, VIN--R--VOUT` (high-Q resonant) |
+| 100 kHz | 0.707 | `GND--C--VOUT, VIN--R--VOUT` (low-pass) |
+
+### Python API
+
+```python
+import torch
+from ml.models.decoder import SimplifiedCircuitDecoder
+
+decoder = SimplifiedCircuitDecoder(latent_dim=8, hidden_dim=256)
+checkpoint = torch.load('checkpoints/production/best.pt')
+decoder.load_state_dict(checkpoint['decoder_state_dict'])
+decoder.eval()
+
+# Generate from latent code
+z = torch.randn(1, 8)
+circuit = decoder.generate(z)
+
+print(f"Nodes: {circuit['node_types'].shape[1]}")
+print(f"Edges: {int(circuit['edge_existence'].sum().item() // 2)}")
+```
 
 ### Train the Model
 
@@ -39,79 +72,10 @@ This generates a filter with ~10 kHz cutoff and Butterworth response (Q=0.707).
 python scripts/training/train.py
 ```
 
-Training takes ~10 minutes on CPU for 100 epochs.
-
-### Validate
-
-```bash
-python scripts/training/validate.py
-```
-
 ## Installation
 
 ```bash
-pip install torch torch-geometric numpy scipy
-
-# ngspice required for SPICE simulation
-# macOS: brew install ngspice
-# Ubuntu: apt install ngspice
-```
-
-## Usage
-
-### Command Line
-
-```bash
-# Generate with specific specs
-python scripts/generation/generate_from_specs.py --cutoff 5000 --q-factor 1.0
-
-# Test on multiple specifications
-python scripts/testing/test_comprehensive_specs.py
-```
-
-### Python API
-
-```python
-import torch
-from ml.data.dataset import CircuitDataset
-from ml.models.encoder import HierarchicalEncoder
-from ml.models.decoder import SimplifiedCircuitDecoder
-
-# Load trained model
-device = 'cpu'
-encoder = HierarchicalEncoder(
-    node_feature_dim=4, edge_feature_dim=7, gnn_hidden_dim=64,
-    gnn_num_layers=3, latent_dim=8, topo_latent_dim=2,
-    values_latent_dim=2, pz_latent_dim=4, dropout=0.1
-).to(device)
-
-decoder = SimplifiedCircuitDecoder(
-    latent_dim=8, conditions_dim=2, hidden_dim=256,
-    num_heads=8, num_node_layers=4, max_nodes=10, dropout=0.1
-).to(device)
-
-checkpoint = torch.load('checkpoints/production/best.pt', map_location=device)
-encoder.load_state_dict(checkpoint['encoder_state_dict'])
-decoder.load_state_dict(checkpoint['decoder_state_dict'])
-encoder.eval()
-decoder.eval()
-
-# Build specification database from training data
-dataset = CircuitDataset('rlc_dataset/filter_dataset.pkl')
-# ... encode all circuits to build specs_db and latents_db ...
-
-# Generate circuit using K-NN interpolation
-target_cutoff = 10000  # Hz
-target_q = 0.707
-
-circuit = decoder.generate_from_specification(
-    frequency=target_cutoff,
-    q_factor=target_q,
-    specs_db=specs_db,
-    latents_db=latents_db,
-    k=5,  # Use 5 nearest neighbors
-    edge_threshold=0.5
-)
+pip install torch torch-geometric numpy scipy networkx pyyaml tqdm
 ```
 
 ## Project Structure
@@ -122,46 +86,58 @@ Z-GED/
 │   ├── models/          # Encoder and decoder architectures
 │   ├── losses/          # Training loss functions
 │   ├── data/            # Dataset loading
-│   └── utils/           # SPICE simulator interface
+│   └── utils/           # Utilities
 ├── scripts/
 │   ├── generation/      # Circuit generation scripts
 │   ├── training/        # Training and validation
 │   └── testing/         # Test scripts
 ├── tools/               # Dataset generation utilities
 ├── checkpoints/         # Trained models
-└── rlc_dataset/         # Training data
+└── rlc_dataset/         # Training data (360 circuits)
 ```
 
 ## How It Works
 
-1. **Encode specifications** - Target cutoff and Q-factor are normalized and used as conditioning
-2. **Find similar circuits** - K-nearest neighbor search in latent space finds circuits with similar specs
-3. **Interpolate latents** - Weighted average of nearest latent codes
-4. **Decode circuit** - Transformer decoder generates nodes and edges with component types
-5. **Validate with SPICE** - ngspice simulation verifies the circuit meets specifications
+1. **Encoder** - Component-aware GNN encodes circuits into 8D latent space
+2. **Latent Space** - Hierarchical structure: `[topology(2D) | values(2D) | transfer_function(4D)]`
+3. **Decoder** - Autoregressive transformer generates nodes and edges with component types
 
-### One-to-Many Mapping
+### Latent Space Structure
 
-The specification-to-circuit mapping is **one-to-many**: multiple topologies can achieve the same transfer function. For overlapping frequency ranges, both simple RC filters and RLC resonant circuits can meet the same specifications. The model generates a valid topology from the possible set.
+The 8D latent space is hierarchically organized:
+- `z[0:2]` - Topology encoding (graph structure, filter type)
+- `z[2:4]` - Component values encoding
+- `z[4:8]` - Transfer function encoding (poles/zeros)
 
-## Specifications Range
+## Example Outputs
 
-Based on training data (120 circuits):
+### By Filter Type
 
-| Filter Type | Frequency Range | Q-Factor Range |
-|-------------|-----------------|----------------|
-| low_pass | 1.7 Hz - 65 kHz | 0.707 (fixed) |
-| high_pass | 5 Hz - 480 kHz | 0.707 (fixed) |
-| band_pass | 2.6 - 284 kHz | 0.01 - 5.5 |
-| band_stop | 2.3 - 278 kHz | ~0.01 |
-| rlc_parallel | 3.3 - 239 kHz | 0.12 - 10.8 |
-| rlc_series | 2.1 - 265 kHz | 0.01 - 1.4 |
+| Filter Type | Example Circuit |
+|-------------|-----------------|
+| low_pass | `GND--C--VOUT, VIN--R--VOUT` |
+| high_pass | `GND--R--VOUT, VIN--C--VOUT` |
+| band_pass | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` |
+| band_stop | `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT1, INT1--L--INT2` |
+| rlc_series | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1, INT1--L--INT1` |
+| rlc_parallel | `GND--RCL--VOUT, VIN--R--VOUT` |
+
+### Interpolation Example
+
+Low-pass to High-pass transition:
+```
+alpha=0.00: GND--C--VOUT, VIN--R--VOUT  (low-pass)
+alpha=0.25: GND--C--VOUT, VIN--R--VOUT
+alpha=0.50: GND--R--VOUT, VIN--C--VOUT  (transition)
+alpha=0.75: GND--R--VOUT, VIN--C--VOUT
+alpha=1.00: GND--R--VOUT, VIN--C--VOUT  (high-pass)
+```
 
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Model architecture details
 - [USAGE.md](USAGE.md) - Detailed API reference
-- [GENERATION_RESULTS.md](GENERATION_RESULTS.md) - Test results
+- [GENERATION_RESULTS.md](GENERATION_RESULTS.md) - Examples and results
 
 ## License
 

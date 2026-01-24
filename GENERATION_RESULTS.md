@@ -1,9 +1,8 @@
 # Circuit Generation Results
 
-**Model:** v4.7 (Component-Aware Message Passing)
-**Dataset:** 120 circuits (96 train, 24 validation)
+**Model:** v5.0 (Latent-Only Decoder)
+**Dataset:** 360 circuits (288 train, 72 validation)
 **Checkpoint:** `checkpoints/production/best.pt`
-**GED Matrix:** `analysis_results/ged_matrix_120.npy`
 
 ---
 
@@ -11,229 +10,327 @@
 
 | Metric | Training | Validation |
 |--------|----------|------------|
-| Total Loss | 1.21 | 1.14 |
+| Total Loss | 0.92 | 1.00 |
 | Node Count Accuracy | 100% | 100% |
-| Edge Existence Accuracy | 99.4% | 99.8% |
-| Component Type Accuracy | 86% | 91% |
-
-*Note: Val loss < Train loss is expected because: (1) checkpoint saved at best val_loss epoch, (2) dropout active during training, (3) small 24-sample validation set has high variance.*
+| Edge Existence Accuracy | 100% | 100% |
+| Component Type Accuracy | 99% | 100% |
 
 ---
 
-## Generation Examples
+## Specification-Based Generation
 
-*Using k=5 neighbors with GED weighting (ged_weight=0.5)*
-
-### Standard Filters (Q = 0.707)
-
-| # | Input Specification | K-NN Neighbors (k=5) | Generated Circuit |
-|---|---------------------|----------------------|-------------------|
-| 1 | **100 Hz**, Q=0.707 | low, high, low, low, low | `GND--R--VOUT, VIN--R--VOUT` |
-| 2 | **1 kHz**, Q=0.707 | high, high, low, high, high | `GND--RCL--VOUT, VIN--R--VOUT` |
-| 3 | **10 kHz**, Q=0.707 | low, low, ser, low, band | `GND--RCL--VOUT, VIN--R--VOUT` |
-| 4 | **100 kHz**, Q=0.707 | high, high, high, high, low | `GND--RCL--VOUT, VIN--R--VOUT` |
-
-### Band-Pass Filters (Moderate Q)
-
-| # | Input Specification | K-NN Neighbors (k=5) | Generated Circuit |
-|---|---------------------|----------------------|-------------------|
-| 5 | **10 kHz**, Q=2.0 | par, band, band, par, ser | `GND--R--VOUT, VIN--L--N3, VOUT--C--N3` |
-| 6 | **10 kHz**, Q=3.0 | par, band, par, par, band | `GND--R--VOUT` |
-
-### High-Q Resonant Circuits
-
-| # | Input Specification | K-NN Neighbors (k=5) | Generated Circuit |
-|---|---------------------|----------------------|-------------------|
-| 7 | **10 kHz**, Q=5.0 | par, par, par, par, band | `GND--RCL--VOUT, VIN--R--VOUT` |
-| 8 | **10 kHz**, Q=10.0 | par, par, par, par, band | `GND--RCL--VOUT, VIN--R--VOUT` |
-
-### Overdamped / Low-Q Circuits
-
-| # | Input Specification | K-NN Neighbors (k=5) | Generated Circuit |
-|---|---------------------|----------------------|-------------------|
-| 9 | **10 kHz**, Q=0.3 | band, band, ser, par, band | `GND--R--VOUT, VIN--L--N3, VOUT--C--N3` |
-| 10 | **10 kHz**, Q=0.1 | ser, band, band, band, ser | `GND--R--VOUT, VIN--L--N3, VOUT--C--N3` |
-
----
-
-## GED-Weighted K-NN Interpolation
-
-The generation pipeline now supports Graph Edit Distance (GED) weighted interpolation for improved latent space sampling.
-
-### GED Matrix Statistics
-
-| Metric | Value |
-|--------|-------|
-| Matrix Size | 120 × 120 |
-| GED Range | 0.00 - 6.00 |
-| Mean GED | 3.23 |
-| Std GED | 1.67 |
-
-### GED-Weighted Generation Examples
-
-**Moderate Q (Q=2.0, 10 kHz) - GED Improves Output:**
-
-| GED Weight | Generated Circuit |
-|------------|-------------------|
-| 0.0 (spec only) | `GND--R--VOUT` (incomplete) |
-| 0.5 (balanced) | `GND--R--VOUT, VIN--L--N3, VOUT--C--N3` |
-| 1.0 (GED only) | `GND--R--VOUT, VIN--L--N3, VOUT--C--N3` |
-
-GED weighting recovers a proper 3-edge topology for moderate Q.
-
-**Band-Stop Territory (Q=0.02, 50 kHz) - GED Cleans Output:**
-
-Neighbors have mixed filter types (band_pass, band_stop):
-
-| GED Weight | Generated Circuit | Edges |
-|------------|-------------------|-------|
-| 0.0 (spec only) | `GND--R--VOUT, VIN--R--N3, VOUT--C--N3, VOUT--C--N4, N3--L--N4` | 5 |
-| 0.5 (balanced) | `GND--R--VOUT, VIN--R--N3, VOUT--C--N4, N3--L--N4` | 4 |
-| 1.0 (GED only) | `GND--R--VOUT, VIN--R--N3, VOUT--C--N4, N3--L--N4` | 4 |
-
-GED weighting produces a cleaner 4-edge topology by down-weighting structurally dissimilar neighbors
-
-### Usage
+Generate circuits by specifying **cutoff frequency** and **Q-factor**:
 
 ```bash
-# GED-weighted interpolation (default)
-python scripts/generation/generate_from_specs.py \
-    --cutoff 10000 --q-factor 5.0 \
-    --method interpolate --ged-weight 0.5
-
-# Specification-only (no GED)
-python scripts/generation/generate_from_specs.py \
-    --cutoff 10000 --q-factor 0.707 \
-    --method interpolate --ged-weight 0
-
-# Nearest neighbor (single circuit)
-python scripts/generation/generate_from_specs.py \
-    --cutoff 10000 --q-factor 0.707 \
-    --method nearest
+python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
 ```
 
-**GED Weight Parameter:**
-- `0.0` = Specification distance only
-- `0.5` = Balanced (recommended)
-- `1.0` = GED only
+### Standard Examples
 
-### When GED Weighting Matters
+| Cutoff | Q | Nearest Match | Generated Circuit | Analysis |
+|--------|---|---------------|-------------------|----------|
+| 1 kHz | 0.707 | high_pass | `GND--R--VOUT, VIN--C--VOUT` | Simple RC high-pass |
+| 10 kHz | 0.707 | rlc_parallel | `GND--RCL--VOUT, VIN--R--VOUT` | Parallel tank circuit |
+| 100 kHz | 0.707 | low_pass | `GND--C--VOUT, VIN--R--VOUT` | Simple RC low-pass |
+| 10 kHz | 5.0 | rlc_parallel | `GND--RCL--VOUT, VIN--R--VOUT` | High-Q resonant |
 
-GED weighting has the most impact when neighbors have **diverse topologies**:
+### Edge Cases and Outliers
 
-| Case | Neighbors | GED Impact |
-|------|-----------|------------|
-| Q > 5 (high resonant) | All rlc_parallel | Minimal - same topology |
-| Q ~ 0.707 (standard) | Mostly low_pass/high_pass | Low - similar topologies |
-| Q ~ 2-3 (moderate) | Mixed par/band/ser | **Significant** - recovers proper topology |
-| Q < 0.1 (band_stop) | Mixed band_pass/band_stop | **Significant** - cleaner output |
+#### Extreme Frequencies
 
-In diverse neighborhoods, GED weighting:
-1. Down-weights structurally dissimilar circuits
-2. Produces cleaner, more consistent outputs
-3. Reduces spurious edges from interpolation artifacts
-4. Recovers proper topologies in transition regions (moderate Q)
+| Cutoff | Q | Generated | Analysis |
+|--------|---|-----------|----------|
+| **1 Hz** | 0.707 | `GND--R--VOUT, VIN--C--VOUT` | Extrapolates to RC high-pass (nearest training: 9 Hz) |
+| **10 Hz** | 0.707 | `GND--R--VOUT, VIN--C--VOUT` | Low-frequency region dominated by high-pass |
+| **1 MHz** | 0.707 | `GND--R--VOUT, VIN--C--VOUT` | Beyond training max (540 kHz), defaults to high-pass |
+
+#### Extreme Q Values
+
+| Cutoff | Q | Generated | Analysis |
+|--------|---|-----------|----------|
+| 10 kHz | **0.01** | `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT1, INT1--L--INT2` | Matches band_stop (Q≈0.01), complex 5-node notch |
+| 10 kHz | **0.1** | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | Series LC with load resistor |
+| 10 kHz | **10.0** | `GND--RCL--VOUT, VIN--R--VOUT` | High-Q parallel tank |
+| 10 kHz | **20.0** | `GND--RCL--VOUT, VIN--R--VOUT` | Beyond training max (Q=6.5), still produces valid RLC parallel |
+
+#### Hybrid/Boundary Regions
+
+| Cutoff | Q | Nearest Types | Generated | Analysis |
+|--------|---|---------------|-----------|----------|
+| 10 kHz | **1.0** | band_pass, rlc_parallel | `GND--R--VOUT, VIN--C--VOUT` | Critical damping boundary - simple RC |
+| 10 kHz | **1.5** | rlc_parallel, rlc_series | `GND--R--VOUT` | Transition region - minimal output |
+| 5 kHz | **0.5** | high_pass, rlc_parallel, low_pass | `GND--C--VOUT, VIN--R--VOUT` | Mixed neighbors → RC low-pass |
+
+#### Unusual Combinations
+
+| Cutoff | Q | Generated | Analysis |
+|--------|---|-----------|----------|
+| **50 Hz** + 5.0 | `GND--RCL--VOUT, VIN--R--VOUT` | Low freq but high Q → RLC parallel (Q dominates) |
+| **500 kHz** + 0.1 | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1, INT1--L--INT1` | High freq + low Q → series RLC |
+| **200 kHz** + 3.0 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | High freq + moderate Q → band-pass |
+
+### Training Data Coverage
+
+| Parameter | Range | Notes |
+|-----------|-------|-------|
+| Cutoff frequency | 9 Hz - 540 kHz | Log-uniform distribution |
+| Q-factor | 0.01 - 6.5 | Varies by filter type |
+
+**Q-Factor by Filter Type:**
+
+| Filter Type | Q Range | Typical Use |
+|-------------|---------|-------------|
+| low_pass | 0.707 (fixed) | Butterworth response |
+| high_pass | 0.707 (fixed) | Butterworth response |
+| band_pass | 0.01 - 6.2 | Narrowband selection |
+| band_stop | 0.01 (fixed) | Notch filter |
+| rlc_series | 0.01 - 6.0 | Series resonance |
+| rlc_parallel | 0.13 - 6.5 | Parallel tank circuits |
 
 ---
 
-## Key Observations
+## Latent Space Geometry
 
-### 1. Q-Factor Determines Topology
+The 8D latent space has interpretable structure. The first two dimensions encode topology:
 
-The Q-factor is the primary driver of topology selection:
+### Filter Type Centroids
 
-- **Q < 0.5** (overdamped): Generates multi-node circuits with separate L, C components on internal nodes
-- **Q ~ 0.707** (standard): Generates 3-node circuits (hybrid R/RCL topology)
-- **Q > 2.0** (resonant): Generates RCL parallel on GND-VOUT with R on VIN-VOUT
+| Filter Type | z[0] | z[1] | Generated from Centroid |
+|-------------|------|------|-------------------------|
+| low_pass | -0.64 | -3.96 | `GND--C--VOUT, VIN--R--VOUT` |
+| high_pass | +0.50 | -3.75 | `GND--R--VOUT, VIN--C--VOUT` |
+| band_pass | +3.23 | +0.85 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` |
+| band_stop | -3.03 | +1.91 | `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT1, INT1--L--INT2` |
+| rlc_series | -1.28 | +3.23 | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1, INT1--L--INT1` |
+| rlc_parallel | -1.80 | -3.52 | `GND--RCL--VOUT, VIN--R--VOUT` |
 
-### 2. High-Q Correctly Maps to RLC Parallel
+**Observation:** z[1] roughly separates simple 3-node circuits (negative) from complex 4-5 node circuits (positive).
 
-When Q > 2, K-NN consistently finds `rlc_parallel` neighbors, and the model generates:
-- **GND--RCL--VOUT**: Parallel RLC tank circuit
-- **VIN--R--VOUT**: Series resistance for Q control
+### Principal Axis Exploration
 
-This matches the expected rlc_parallel topology from training data.
+**z[0] axis (topology complexity):**
 
-### 3. Low-Q Generates Complex Topologies
+| z[0] | Generated | Interpretation |
+|------|-----------|----------------|
+| -3.0 | `GND--R--VOUT, GND--C--INT1, INT1--L--INT1` | Complex with LC trap |
+| -1.5 | `GND--R--VOUT, VIN--R--VOUT` | Simple resistive |
+| 0.0 | `GND--R--VOUT` | Minimal |
+| +1.5 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | Band-pass-like |
+| +3.0 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | Band-pass dominant |
 
-For Q < 0.5, the model generates 4+ node circuits with:
-- Internal nodes (N3, N4)
-- Separate L and C components
-- This matches band_pass and rlc_series training examples
+**z[1] axis (node count):**
 
-### 4. One-to-Many Mapping at Standard Q
+| z[1] | Generated | Interpretation |
+|------|-----------|----------------|
+| -4.0 | `GND--C--VOUT, VIN--R--VOUT` | Simple 3-node RC |
+| -2.0 | `GND--R--VOUT, VIN--R--VOUT` | 3-node resistive |
+| 0.0 | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1, ...` | 5-node with internals |
+| +2.0 | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1, INT1--L--INT1` | 4-node series RLC |
+| +3.0 | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1, INT1--L--INT1` | 4-node series RLC |
 
-At Q=0.707, both low_pass and high_pass filters exist with overlapping frequency ranges. The model generates a valid topology that works for both cases.
+### Inter-Cluster Interpolation
+
+**Low-pass ↔ High-pass:** R and C swap positions at α=0.5
+```
+α=0.0: GND--C--VOUT, VIN--R--VOUT  (low-pass)
+α=0.5: GND--R--VOUT, VIN--C--VOUT  (transition)
+α=1.0: GND--R--VOUT, VIN--C--VOUT  (high-pass)
+```
+
+**Band-pass ↔ RLC-parallel:** Distributed → lumped transition
+```
+α=0.0: GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1  (distributed LC)
+α=0.5: GND--R--VOUT                               (simplified)
+α=1.0: GND--RCL--VOUT, VIN--R--VOUT               (lumped RCL)
+```
+
+### Extrapolation Behavior
+
+Moving 2× beyond cluster centroids still produces valid circuits:
+
+| Direction | Generated | Stability |
+|-----------|-----------|-----------|
+| 2× low_pass | `GND--C--VOUT, VIN--R--VOUT` | Stable |
+| 2× high_pass | `GND--R--VOUT, VIN--C--VOUT` | Stable |
+| 2× rlc_parallel | `GND--RCL--VOUT, VIN--R--VOUT` | Stable |
+
+### Hybrid Regions
+
+**Midpoint of 3 filter types:**
+
+| Midpoint | Generated | Analysis |
+|----------|-----------|----------|
+| (low_pass + high_pass + band_pass) / 3 | `GND--R--VOUT, VIN--C--VOUT` | Defaults to simple RC |
+| (band_stop + rlc_series + rlc_parallel) / 3 | `GND--R--VOUT, VIN--R--INT1, ...` | Maintains complex topology |
+
+### Corner Cases
+
+| Latent | Generated | Analysis |
+|--------|-----------|----------|
+| All z = +2.0 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | Band-pass-like |
+| All z = -2.0 | `GND--R--VOUT, VIN--R--VOUT` | Simple resistive |
+| z = [5, -5, 0...] | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | Extreme topology dims |
+| z = [0, 0, 0...] | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` | Zero latent → band-pass |
 
 ---
 
-## Dataset Distribution
+## Reconstruction by Filter Type
 
-### Filter Types (20 each)
+### Low-Pass (60 circuits)
 
-| Filter Type | Frequency Range | Q-Factor Range | VIN-VOUT Component |
-|-------------|-----------------|----------------|-------------------|
-| low_pass | 1.7 Hz - 65 kHz | 0.707 (fixed) | R |
-| high_pass | 5 Hz - 480 kHz | 0.707 (fixed) | C |
-| band_pass | 2.6 - 284 kHz | 0.01 - 5.5 | (none) |
-| band_stop | 2.3 - 278 kHz | ~0.01 | (none) |
-| rlc_parallel | 3.3 - 239 kHz | 0.12 - 10.8 | R |
-| rlc_series | 2.1 - 265 kHz | 0.01 - 1.4 | (none) |
+All correctly generate: `GND--C--VOUT, VIN--R--VOUT`
 
-### Component Distribution by Edge Position
+| Index | Frequency | Reconstruction |
+|-------|-----------|----------------|
+| 0 | 3,049 Hz | `GND--C--VOUT, VIN--R--VOUT` ✓ |
+| 1 | 275 Hz | `GND--C--VOUT, VIN--R--VOUT` ✓ |
+| 2 | 5,708 Hz | `GND--C--VOUT, VIN--R--VOUT` ✓ |
 
-| Edge | R only | C only | L only | RCL |
-|------|--------|--------|--------|-----|
-| GND-VOUT | 33% | 33% | 0% | 33% |
-| VIN-VOUT | 67% | 33% | 0% | 0% |
+### High-Pass (60 circuits)
+
+All correctly generate: `GND--R--VOUT, VIN--C--VOUT`
+
+| Index | Frequency | Reconstruction |
+|-------|-----------|----------------|
+| 60 | 18,256 Hz | `GND--R--VOUT, VIN--C--VOUT` ✓ |
+| 61 | 3,271 Hz | `GND--R--VOUT, VIN--C--VOUT` ✓ |
+
+### Band-Pass (60 circuits)
+
+All correctly generate: `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1`
+
+| Index | Frequency | Reconstruction |
+|-------|-----------|----------------|
+| 120 | 157,646 Hz | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` ✓ |
+
+### Band-Stop (60 circuits)
+
+All correctly generate 5-node notch: `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT1, INT1--L--INT2`
+
+### RLC-Series (60 circuits)
+
+All correctly generate: `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1, INT1--L--INT1`
+
+### RLC-Parallel (60 circuits)
+
+All correctly generate: `GND--RCL--VOUT, VIN--R--VOUT`
 
 ---
 
-## Model Architecture
+## Key Insights
 
-### Encoder (Component-Aware GNN)
+### 1. Q-Factor Drives Topology Selection
 
+| Q Range | Typical Topology | Explanation |
+|---------|------------------|-------------|
+| Q < 0.1 | 5-node band-stop | Very overdamped → notch filter |
+| Q ≈ 0.5 | Series RLC (4-node) | Moderately damped |
+| Q ≈ 0.707 | Simple RC (3-node) | Butterworth standard |
+| Q > 2.0 | RLC parallel (3-node) | High selectivity tank |
+
+### 2. Frequency Has Less Structural Impact
+
+Within training range, frequency mainly affects K-NN neighbor selection but not topology. A 100 Hz and 100 kHz circuit with same Q produce similar structures.
+
+### 3. Graceful Extrapolation
+
+Specs beyond training distribution still produce valid circuits by finding nearest neighbors. However, extreme values may produce simplified outputs.
+
+### 4. Latent Space is Well-Organized
+
+- z[0:2] encodes topology (interpretable)
+- Filter types form distinct clusters
+- Interpolation produces smooth transitions
+- Extrapolation remains stable
+
+---
+
+## Novel Topology Generation
+
+The model can generate **novel topologies not seen in training** through latent space interpolation and sampling.
+
+### Exploration Results (500 samples)
+
+| Category | Unique Topologies | Samples |
+|----------|-------------------|---------|
+| Known (in training) | 6 | 277 (55%) |
+| **Valid novel** | **14** | **125 (25%)** |
+| Invalid (disconnected) | 3 | 98 (20%) |
+
+### Valid Novel Topologies Discovered
+
+**Most common novel topology (53x):**
 ```
-Edge attributes: [C_norm, G_norm, L_inv_norm, is_R, is_C, is_L, is_parallel]
-
-ImpedanceConv:
-    msg_R = lin_R(x_j, edge_feat)    # R-specific transformation
-    msg_C = lin_C(x_j, edge_feat)    # C-specific transformation
-    msg_L = lin_L(x_j, edge_feat)    # L-specific transformation
-
-    message = is_R * msg_R + is_C * msg_C + is_L * msg_L
+GND--R--VOUT, VIN--R--INT1, INT1--L--INT2, VOUT--C--INT2
 ```
+A 4-node series R-L-C filter with different arrangement than training data.
 
-### Latent Space (8D)
+**All valid novel topologies:**
 
+| Topology | Count | Nodes | Edges | Components |
+|----------|-------|-------|-------|------------|
+| `GND--R--VOUT, VIN--R--INT1, INT1--L--INT2, VOUT--C--INT2` | 53 | 5 | 4 | RLC |
+| `GND--R--VOUT, VIN--R--VOUT` | 18 | 3 | 2 | R |
+| `GND--R--VOUT, GND--C--INT2, VIN--R--INT1, VOUT--C--INT1, VOUT--C--INT2, INT1--L--INT2` | 10 | 5 | 6 | RLC |
+| `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1, VOUT--C--INT2, INT1--L--INT2` | 9 | 5 | 5 | RLC |
+| `GND--R--VOUT, VIN--R--INT1` | 8 | 5 | 2 | R |
+| `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1, VOUT--C--INT2, INT1--L--INT2` | 4 | 5 | 5 | RLC |
+| `GND--R--VOUT, VIN--L--INT1` | 4 | 4 | 2 | RL |
+| `GND--R--VOUT, GND--C--INT2, VIN--R--INT1, VOUT--R--INT1, VOUT--C--INT2, INT1--L--INT2` | 4 | 5 | 6 | RLC |
+| `GND--R--VOUT, GND--C--INT2, VIN--L--INT1, VOUT--C--INT1, VOUT--C--INT2, INT1--L--INT2` | 3 | 5 | 6 | RLC |
+| `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT2, INT1--L--INT2` | 3 | 5 | 4 | RLC |
+| `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1` | 3 | 5 | 3 | R |
+| `GND--R--VOUT, GND--C--INT2, VIN--R--INT1, VIN--C--INT2, VOUT--C--INT1, VOUT--C--INT2, INT1--L--INT2` | 2 | 5 | 7 | RLC |
+| `GND--R--VOUT, GND--C--INT2, VIN--R--INT1, VOUT--C--INT2, INT1--L--INT2` | 2 | 5 | 5 | RLC |
+| `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1` | 2 | 5 | 3 | RC |
+
+### How Novel Topologies Emerge
+
+1. **Interpolation regions**: Midpoints between filter type clusters produce hybrid structures
+2. **Component recombination**: Model combines learned R, L, C patterns in new arrangements
+3. **Edge variations**: Same nodes connected with different component types
+
+### Invalid Novel Topologies
+
+Some samples produce degenerate circuits:
+
+| Topology | Count | Issue |
+|----------|-------|-------|
+| `GND--R--VOUT` | 89 | VIN disconnected |
+| `GND--RCL--VOUT` | 6 | VIN disconnected |
+| `GND--R--VOUT, GND--C--INT2, INT1--L--INT2` | 3 | VIN disconnected |
+
+### Generalization Capability
+
+**Strengths:**
+- Compositional generalization (recombines learned components)
+- 14 valid novel topologies discovered
+- Maintains graph connectivity in 80% of samples
+
+**Limitations:**
+- Most samples (55%) reproduce training topologies
+- Novel circuits are variations, not fundamentally new architectures
+- No guarantee of electrical validity (only structural validity)
+
+---
+
+## Usage
+
+```python
+# Spec-based generation
+python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
+
+# With GED weighting
+python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 5.0 --ged-weight 0.5
+
+# Multiple samples
+python scripts/generation/generate_from_specs.py --cutoff 5000 --q-factor 2.0 --num-samples 5
 ```
-z = [z_topo (2D) | z_values (2D) | z_pz (4D)]
-```
-
-- `z_topo`: Graph topology encoding
-- `z_values`: Position-specific edge component encoding
-- `z_pz`: Poles/zeros (transfer function) encoding
-
-### Decoder (Transformer)
-
-- 4-layer transformer with 8 attention heads
-- Predicts: node types, edge existence, component types (8-way: none, R, C, L, RC, RL, CL, RCL)
 
 ---
 
 ## Files
 
-### Core Model
-- **GNN Layers:** `ml/models/gnn_layers.py`
-- **Encoder:** `ml/models/encoder.py`
-- **Decoder:** `ml/models/decoder.py`
-- **Dataset:** `ml/data/dataset.py`
-- **Loss:** `ml/losses/gumbel_softmax_loss.py`
-- **Checkpoint:** `checkpoints/production/best.pt`
-
-### GED & Generation
-- **GED Calculator:** `tools/graph_edit_distance.py`
-- **GED Matrix Computation:** `tools/compute_ged_matrix.py`
-- **GED Examples:** `tools/ged_examples.py`
-- **Spec-Driven Generation:** `scripts/generation/generate_from_specs.py`
-- **GED Matrix:** `analysis_results/ged_matrix_120.npy`
+- **Model:** `checkpoints/production/best.pt`
+- **Dataset:** `rlc_dataset/filter_dataset.pkl` (360 circuits)
+- **Generation script:** `scripts/generation/generate_from_specs.py`

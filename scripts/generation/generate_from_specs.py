@@ -266,7 +266,6 @@ def main():
 
     decoder = SimplifiedCircuitDecoder(
         latent_dim=8,
-        conditions_dim=2,
         hidden_dim=256,
         num_heads=8,
         num_node_layers=4,
@@ -326,31 +325,55 @@ def main():
         if i > 0:
             latent = latent + torch.randn_like(latent) * 0.1
 
-        # Generate circuit
+        # Generate circuit from latent (no conditions needed)
         latent = latent.unsqueeze(0).to(device).float()  # Ensure float32
 
-        # Use TARGET specifications as conditions (not random!)
-        conditions = torch.tensor([[
-            np.log10(max(args.cutoff, 1.0)) / 4.0,    # Normalize cutoff
-            np.log10(max(args.q_factor, 0.01)) / 2.0  # Normalize Q
-        ]], dtype=torch.float32, device=device)
-
         with torch.no_grad():
-            circuit = decoder.generate(latent, conditions, verbose=False)
+            circuit = decoder.generate(latent, verbose=False)
 
         # Analyze generated circuit
         edge_exist = circuit['edge_existence'][0]
+        comp_types = circuit['component_types'][0]
+        node_types = circuit['node_types'][0]
+        num_nodes = node_types.shape[0]
         num_edges = (edge_exist > 0.5).sum().item() // 2
 
-        print(f"  Reference circuit: cutoff={actual_specs[0]:.1f} Hz, Q={actual_specs[1]:.3f}")
-        print(f"  Generated: {num_edges} edges")
+        # Build circuit description
+        # Map node types to base names, then number internal nodes
+        BASE_NAMES = {0: 'GND', 1: 'VIN', 2: 'VOUT', 3: 'INT', 4: 'INT'}
+        COMP_NAMES = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
+
+        # Build unique names for each node (numbering internal nodes)
+        node_names = []
+        int_counter = 1
+        for idx in range(num_nodes):
+            nt = node_types[idx].item()
+            if nt >= 3:  # Internal node
+                node_names.append(f'INT{int_counter}')
+                int_counter += 1
+            else:
+                node_names.append(BASE_NAMES[nt])
+
+        edges = []
+        for ni in range(num_nodes):
+            for nj in range(ni):
+                if edge_exist[ni, nj] > 0.5:
+                    n1 = node_names[nj]
+                    n2 = node_names[ni]
+                    comp = COMP_NAMES[comp_types[ni, nj].item()]
+                    edges.append(f"{n1}--{comp}--{n2}")
+
+        circuit_str = ', '.join(edges) if edges else '(no edges)'
+
+        print(f"  Nearest match: cutoff={actual_specs[0]:.1f} Hz, Q={actual_specs[1]:.3f}")
+        print(f"  Generated: {circuit_str}")
 
         # Check VIN/VOUT connectivity
         vin_connected = (edge_exist[1, :] > 0.5).any() or (edge_exist[:, 1] > 0.5).any()
         vout_connected = (edge_exist[2, :] > 0.5).any() or (edge_exist[:, 2] > 0.5).any()
 
-        status = "✅" if (vin_connected and vout_connected) else "❌"
-        print(f"  Valid circuit: {status}")
+        status = "Valid" if (vin_connected and vout_connected) else "Invalid"
+        print(f"  Status: {status} ({num_nodes} nodes, {num_edges} edges)")
 
     print("\n" + "="*70)
     print("Generation complete!")
