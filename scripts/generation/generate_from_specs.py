@@ -224,7 +224,7 @@ def main():
                         help='Target cutoff frequency (Hz)')
     parser.add_argument('--q-factor', type=float, default=0.707,
                         help='Target Q-factor (default: 0.707 for Butterworth)')
-    parser.add_argument('--num-samples', type=int, default=5,
+    parser.add_argument('--num-samples', type=int, default=1,
                         help='Number of circuits to generate')
     parser.add_argument('--method', choices=['nearest', 'interpolate'], default='interpolate',
                         help='Generation method')
@@ -327,10 +327,6 @@ def main():
                 print(f"  Neighbor weights (GED-adjusted): {info['weights']}")
                 print(f"  Top neighbor: cutoff={info['neighbor_specs'][0][0]:.1f} Hz, "
                       f"Q={info['neighbor_specs'][0][1]:.3f}, weight={info['weights'][0]:.3f}")
-
-        # Add small random variation for diversity
-        if i > 0:
-            latent = latent + torch.randn_like(latent) * 0.1
 
         # Generate circuit from latent (no conditions needed)
         latent = latent.unsqueeze(0).to(device).float()  # Ensure float32
