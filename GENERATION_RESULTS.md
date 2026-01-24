@@ -1,6 +1,6 @@
 # Circuit Generation Results
 
-**Model:** v5.1 (Latent-Only Decoder with Spec Predictor)
+**Model:** v5.0 (Latent-Only Decoder)
 **Dataset:** 360 circuits (288 train, 72 validation)
 **Checkpoint:** `checkpoints/production/best.pt`
 
@@ -10,12 +10,10 @@
 
 | Metric | Training | Validation |
 |--------|----------|------------|
-| Total Loss | 2.16 | 1.67 |
+| Total Loss | 0.92 | 1.00 |
 | Node Count Accuracy | 100% | 100% |
 | Edge Existence Accuracy | 100% | 100% |
-| Component Type Accuracy | 99% | 100% |
-| Cutoff Error | 0.67 decades | 0.50 decades |
-| Q Error | 0.75 | 0.47 |
+| Component Type Accuracy | 100% | 100% |
 
 ---
 
@@ -81,12 +79,12 @@ The 8D latent space clusters by filter type. Generating from cluster centroids:
 
 | Filter Type | z[0] | z[1] | Generated from Centroid |
 |-------------|------|------|-------------------------|
-| low_pass | -1.36 | -4.25 | `GND--C--VOUT, VIN--R--VOUT` |
-| high_pass | +0.25 | -4.32 | `GND--R--VOUT, VIN--C--VOUT` |
-| band_pass | +3.47 | +0.77 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` |
-| band_stop | -3.10 | +2.11 | `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT2, INT1--L--INT2` |
-| rlc_series | -1.28 | +3.33 | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT2, INT1--L--INT2` |
-| rlc_parallel | -1.11 | -3.37 | `GND--RCL--VOUT, VIN--R--VOUT` |
+| low_pass | -0.64 | -3.96 | `GND--C--VOUT, VIN--R--VOUT` |
+| high_pass | +0.50 | -3.75 | `GND--R--VOUT, VIN--C--VOUT` |
+| band_pass | +3.23 | +0.85 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` |
+| band_stop | -3.03 | +1.91 | `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT2, INT1--L--INT2` |
+| rlc_series | -1.28 | +3.23 | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT2, INT1--L--INT2` |
+| rlc_parallel | -1.80 | -3.52 | `GND--RCL--VOUT, VIN--R--VOUT` |
 
 **Observation:** z[1] separates simple 3-node circuits (negative) from complex 4-5 node circuits (positive).
 
@@ -113,13 +111,13 @@ The 8D latent space clusters by filter type. Generating from cluster centroids:
 
 ### Low-pass → High-pass
 
-R and C swap positions at α ≈ 0.75:
+R and C swap positions at α ≈ 0.5:
 
 | α | Generated |
 |---|-----------|
 | 0.00 | `GND--C--VOUT, VIN--R--VOUT` (low-pass) |
 | 0.25 | `GND--C--VOUT, VIN--R--VOUT` |
-| 0.50 | `GND--C--VOUT, VIN--R--VOUT` (transition) |
+| 0.50 | `GND--R--VOUT, VIN--C--VOUT` (transition) |
 | 0.75 | `GND--R--VOUT, VIN--C--VOUT` |
 | 1.00 | `GND--R--VOUT, VIN--C--VOUT` (high-pass) |
 
@@ -196,22 +194,8 @@ Specs beyond training distribution still produce valid circuits by finding neare
 ### 4. Latent Space is Well-Organized
 
 - z[0:2] encodes topology (interpretable)
-- z[4:8] now encodes transfer function (after spec predictor fix)
 - Filter types form distinct clusters
 - Interpolation produces smooth transitions
-
----
-
-## v5.1 Improvements
-
-The spec predictor auxiliary loss fixed the z[4:8] collapse:
-
-| Metric | v5.0 (before) | v5.1 (after) |
-|--------|---------------|--------------|
-| z[4] variance | ~0.01 | ~2.0 |
-| z[5] variance | ~0.01 | ~0.8 |
-| Cutoff error | N/A | 0.5 decades |
-| Q error | N/A | 0.47 |
 
 ---
 
