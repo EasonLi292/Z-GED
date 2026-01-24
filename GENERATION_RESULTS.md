@@ -48,10 +48,28 @@ python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
 
 ### Training Data Coverage
 
-| Parameter | Range |
-|-----------|-------|
-| Cutoff frequency | 9 Hz - 540 kHz |
-| Q-factor | 0.01 - 6.5 |
+**Overall Range:**
+
+| Parameter | Min | Max |
+|-----------|-----|-----|
+| Cutoff frequency | 8.77 Hz | 539,651 Hz |
+| Q-factor | 0.01 | 6.50 |
+
+**By Filter Type:**
+
+| Filter Type | Cutoff Range (Hz) | Q-factor Range |
+|-------------|-------------------|----------------|
+| low_pass | 15.0 - 194,302 | 0.707 (fixed) |
+| high_pass | 8.8 - 539,651 | 0.707 (fixed) |
+| band_pass | 1,959 - 429,727 | 0.01 - 6.22 |
+| band_stop | 4,447 - 402,533 | 0.01 (fixed) |
+| rlc_series | 2,090 - 358,219 | 0.01 - 6.01 |
+| rlc_parallel | 2,060 - 263,391 | 0.13 - 6.50 |
+
+**Notes:**
+- Simple RC filters (low_pass, high_pass) have fixed Q=0.707 (Butterworth response)
+- Band-stop filters have fixed Q=0.01 (wide notch)
+- RLC circuits have variable Q depending on component ratios
 
 ---
 
