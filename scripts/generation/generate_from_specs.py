@@ -289,10 +289,17 @@ def main():
     if args.method == 'interpolate' and args.ged_weight > 0:
         try:
             ged_matrix = np.load(args.ged_matrix)
-            print(f"\nLoaded GED matrix: {ged_matrix.shape}")
-            print(f"  GED range: {ged_matrix[ged_matrix > 0].min():.2f} - {ged_matrix.max():.2f}")
+            # Check if GED matrix dimensions match dataset size
+            if ged_matrix.shape[0] != len(dataset):
+                print(f"\nGED matrix size ({ged_matrix.shape[0]}) doesn't match dataset ({len(dataset)})")
+                print("  Falling back to spec-only weighting")
+                ged_matrix = None
+                args.ged_weight = 0
+            else:
+                print(f"\nLoaded GED matrix: {ged_matrix.shape}")
+                print(f"  GED range: {ged_matrix[ged_matrix > 0].min():.2f} - {ged_matrix.max():.2f}")
         except FileNotFoundError:
-            print(f"\n⚠️  GED matrix not found at {args.ged_matrix}")
+            print(f"\nGED matrix not found at {args.ged_matrix}")
             print("  Falling back to spec-only weighting")
             args.ged_weight = 0
 
