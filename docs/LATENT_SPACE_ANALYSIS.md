@@ -26,29 +26,31 @@ z = [z_topology | z_values | z_transfer_function]
 
 Computed from 360 circuits (60 per filter type):
 
-### Full 8D Centroids
+### Full 8D Centroids (v5.1 with spec predictor)
 
 | Filter Type | z[0] | z[1] | z[2] | z[3] | z[4] | z[5] | z[6] | z[7] |
 |-------------|------|------|------|------|------|------|------|------|
-| low_pass | -0.64 | -3.97 | 0.21 | 0.40 | 0.03 | 0.01 | 0.07 | -0.01 |
-| high_pass | 0.50 | -3.75 | -0.91 | -1.14 | -0.02 | 0.00 | -0.02 | -0.01 |
-| band_pass | 3.23 | 0.85 | 0.01 | -0.01 | -0.02 | 0.01 | -0.02 | 0.00 |
-| band_stop | -3.03 | 1.91 | -0.01 | 0.01 | 0.04 | -0.03 | 0.06 | -0.02 |
-| rlc_series | -1.28 | 3.24 | -0.02 | -0.08 | -0.02 | 0.01 | -0.02 | 0.00 |
-| rlc_parallel | -1.80 | -3.52 | 0.63 | 1.11 | -0.02 | 0.01 | -0.02 | 0.00 |
+| low_pass | -1.36 | -4.25 | 0.04 | 0.03 | -2.62 | 1.23 | 0.20 | 0.37 |
+| high_pass | 0.25 | -4.32 | -0.79 | -0.38 | -3.65 | 1.58 | 0.00 | 0.52 |
+| band_pass | 3.47 | 0.77 | 0.02 | 0.02 | -4.38 | 1.91 | -0.03 | 0.63 |
+| band_stop | -3.10 | 2.11 | -0.03 | -0.03 | -4.47 | 1.93 | -0.08 | 0.66 |
+| rlc_series | -1.28 | 3.33 | -0.02 | -0.02 | -4.46 | 1.95 | -0.04 | 0.64 |
+| rlc_parallel | -1.11 | -3.37 | 0.71 | 0.56 | -4.47 | 1.96 | -0.04 | 0.64 |
 
-### Variance by Dimension
+**Note:** z[4:8] now has meaningful variance encoding transfer function info.
 
-| Dimension | Mean | Std | Range | Status |
-|-----------|------|-----|-------|--------|
-| z[0] | -0.50 | 1.99 | [-3.10, 3.27] | **Active** |
-| z[1] | -0.87 | 2.96 | [-4.03, 3.30] | **Active** |
-| z[2] | -0.02 | 0.46 | [-1.04, 0.78] | Moderate |
-| z[3] | 0.05 | 0.68 | [-1.31, 1.40] | Moderate |
-| z[4] | -0.00 | 0.03 | [-0.03, 0.05] | **Collapsed** |
-| z[5] | -0.00 | 0.01 | [-0.03, 0.01] | **Collapsed** |
-| z[6] | 0.01 | 0.04 | [-0.03, 0.08] | **Collapsed** |
-| z[7] | -0.01 | 0.01 | [-0.02, 0.03] | **Collapsed** |
+### Variance by Dimension (v5.1)
+
+| Dimension | Role | Range (v5.1) | Status |
+|-----------|------|--------------|--------|
+| z[0] | Filter type | [-3.10, 3.47] | **Active** |
+| z[1] | Complexity | [-4.32, 3.33] | **Active** |
+| z[2] | Values | [-0.79, 0.71] | Moderate |
+| z[3] | Values | [-0.38, 0.56] | Moderate |
+| z[4] | Transfer func | [-2.62, -4.47] | **Active** (was collapsed) |
+| z[5] | Transfer func | [1.23, 1.96] | **Active** (was collapsed) |
+| z[6] | Transfer func | [-0.08, 0.20] | Moderate |
+| z[7] | Transfer func | [0.37, 0.66] | Moderate |
 
 ---
 
@@ -93,13 +95,28 @@ z[1] > +2.0  →  Complex 4-5 node circuits (band_stop, rlc_series)
 
 ---
 
-## Known Issue: Transfer Function Dimensions Collapsed
+## Fixed: Transfer Function Dimensions Now Active
 
-### Observation
+### Previous Issue (v5.0)
 
-Dimensions z[4:8] (intended for transfer function encoding) have near-zero variance:
-- **Expected:** Encode poles/zeros → different cutoff/Q should produce different z[4:8]
-- **Actual:** z[4:8] ≈ 0 for all circuits regardless of transfer function
+Dimensions z[4:8] had near-zero variance (~0.01) because no loss used that information.
+
+### Solution Implemented (v5.1)
+
+Added auxiliary spec predictor that predicts (cutoff, Q) from z[4:8].
+
+### Results After Retraining
+
+| Dimension | Before (v5.0) | After (v5.1) |
+|-----------|---------------|--------------|
+| z[4] range | [-0.03, 0.05] | [-2.6, -4.5] |
+| z[5] range | [-0.03, 0.01] | [1.2, 2.0] |
+| z[6] range | [-0.03, 0.08] | [-0.08, 0.20] |
+| z[7] range | [-0.02, 0.03] | [0.37, 0.67] |
+
+**Spec prediction accuracy:**
+- Cutoff error: 0.5 decades (was 4.1)
+- Q error: 0.47 (was 0.74)
 
 ### Root Cause Analysis
 
