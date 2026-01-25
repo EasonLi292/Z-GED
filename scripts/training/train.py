@@ -1,7 +1,5 @@
 """
-Training script for circuit generation with auxiliary spec prediction.
-
-Includes spec prediction loss to prevent z[4:8] posterior collapse.
+Training script for circuit generation.
 """
 
 import sys
@@ -28,14 +26,12 @@ def collate_circuit_batch(batch_list):
     graphs = [item['graph'] for item in batch_list]
     poles = [item['poles'] for item in batch_list]
     zeros = [item['zeros'] for item in batch_list]
-    specifications = torch.stack([item['specifications'] for item in batch_list])
     batched_graph = Batch.from_data_list(graphs)
 
     return {
         'graph': batched_graph,
         'poles': poles,
         'zeros': zeros,
-        'specifications': specifications,  # [batch, 2] = [cutoff_hz, Q]
     }
 
 
@@ -90,10 +86,6 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
     encoder.train()
     decoder.train()
 
-    # Set spec_predictor to train mode if it exists
-    if hasattr(loss_fn, 'spec_predictor'):
-        loss_fn.spec_predictor.train()
-
     total_loss = 0
     metrics_sum = {}
     num_batches = 0
@@ -103,7 +95,6 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
         graph = batch['graph'].to(device)
         poles_list = batch['poles']
         zeros_list = batch['zeros']
-        specifications = batch['specifications'].to(device)  # [batch, 2]
 
         # Encode
         z, mu, logvar = encoder(
@@ -123,12 +114,10 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
             target_node_types=targets['node_types']
         )
 
-        # Loss (with spec prediction)
+        # Loss
         loss, metrics = loss_fn(
             predictions, targets,
-            mu=mu, logvar=logvar,
-            latent=latent,
-            target_specs=specifications
+            mu=mu, logvar=logvar
         )
 
         # Backward
@@ -145,15 +134,11 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
             metrics_sum[key] = metrics_sum.get(key, 0) + value
         num_batches += 1
 
-        # Show spec prediction metrics if available
-        postfix = {
+        pbar.set_postfix({
             'loss': f'{loss.item():.3f}',
             'edge': f'{metrics["edge_exist_acc"]:.0f}%',
             'comp': f'{metrics["component_type_acc"]:.0f}%'
-        }
-        if 'cutoff_error_decades' in metrics and metrics['cutoff_error_decades'] > 0:
-            postfix['fc_err'] = f'{metrics["cutoff_error_decades"]:.2f}'
-        pbar.set_postfix(postfix)
+        })
 
     avg_metrics = {key: value / num_batches for key, value in metrics_sum.items()}
     avg_metrics['total_loss'] = total_loss / num_batches
@@ -165,10 +150,6 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
     encoder.eval()
     decoder.eval()
 
-    # Set spec_predictor to eval mode if it exists
-    if hasattr(loss_fn, 'spec_predictor'):
-        loss_fn.spec_predictor.eval()
-
     total_loss = 0
     metrics_sum = {}
     num_batches = 0
@@ -178,7 +159,6 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
             graph = batch['graph'].to(device)
             poles_list = batch['poles']
             zeros_list = batch['zeros']
-            specifications = batch['specifications'].to(device)
 
             z, mu, logvar = encoder(
                 graph.x, graph.edge_index, graph.edge_attr,
@@ -195,9 +175,7 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
 
             loss, metrics = loss_fn(
                 predictions, targets,
-                mu=mu, logvar=logvar,
-                latent=latent,
-                target_specs=specifications
+                mu=mu, logvar=logvar
             )
 
             total_loss += loss.item()
@@ -245,7 +223,7 @@ def main():
     num_epochs = 100
 
     print("="*60)
-    print("Training Simplified Topology-Only Model")
+    print("Training Topology-Only Model")
     print("="*60)
     print(f"Device: {device}")
     print(f"Random seed: {seed}")
@@ -300,31 +278,18 @@ def main():
     print(f"Encoder params: {sum(p.numel() for p in encoder.parameters()):,}")
     print(f"Decoder params: {sum(p.numel() for p in decoder.parameters()):,}")
 
-    # Loss function with spec prediction
-    # spec_weight forces z[4:8] to encode transfer function info
+    # Loss function
     loss_fn = GumbelSoftmaxCircuitLoss(
         node_type_weight=1.0,
         node_count_weight=5.0,
         edge_component_weight=2.0,
         connectivity_weight=5.0,
-        kl_weight=0.01,  # Low KL for topology separation
-        spec_weight=1.0,  # Spec prediction to prevent z[4:8] collapse
+        kl_weight=0.01,
         use_connectivity_loss=True,
-        use_spec_loss=True,
-        pz_latent_start=4,
-        pz_latent_dim=4
     )
 
-    # Move spec_predictor to device
-    if hasattr(loss_fn, 'spec_predictor'):
-        loss_fn.spec_predictor = loss_fn.spec_predictor.to(device)
-        spec_predictor_params = list(loss_fn.spec_predictor.parameters())
-        print(f"SpecPredictor params: {sum(p.numel() for p in spec_predictor_params):,}")
-    else:
-        spec_predictor_params = []
-
     optimizer = torch.optim.Adam(
-        list(encoder.parameters()) + list(decoder.parameters()) + spec_predictor_params,
+        list(encoder.parameters()) + list(decoder.parameters()),
         lr=learning_rate
     )
 
@@ -350,18 +315,10 @@ def main():
               f"node_count: {train_metrics['node_count_acc']:.1f}%, "
               f"edge: {train_metrics['edge_exist_acc']:.1f}%, "
               f"comp: {train_metrics['component_type_acc']:.1f}%")
-        if 'cutoff_error_decades' in train_metrics:
-            print(f"          spec_loss: {train_metrics['loss_spec']:.4f}, "
-                  f"fc_err: {train_metrics['cutoff_error_decades']:.3f} decades, "
-                  f"Q_err: {train_metrics['q_error']:.3f}")
         print(f"  Val   - loss: {val_metrics['total_loss']:.4f}, "
               f"node_count: {val_metrics['node_count_acc']:.1f}%, "
               f"edge: {val_metrics['edge_exist_acc']:.1f}%, "
               f"comp: {val_metrics['component_type_acc']:.1f}%")
-        if 'cutoff_error_decades' in val_metrics:
-            print(f"          spec_loss: {val_metrics['loss_spec']:.4f}, "
-                  f"fc_err: {val_metrics['cutoff_error_decades']:.3f} decades, "
-                  f"Q_err: {val_metrics['q_error']:.3f}")
 
         if val_metrics['total_loss'] < best_val_loss:
             best_val_loss = val_metrics['total_loss']
@@ -372,8 +329,6 @@ def main():
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_loss': best_val_loss,
             }
-            if hasattr(loss_fn, 'spec_predictor'):
-                checkpoint['spec_predictor_state_dict'] = loss_fn.spec_predictor.state_dict()
             torch.save(checkpoint, f'{checkpoint_dir}/best.pt')
             print(f"  ✓ Saved best model (loss: {best_val_loss:.4f})")
 
@@ -383,8 +338,6 @@ def main():
                 'encoder_state_dict': encoder.state_dict(),
                 'decoder_state_dict': decoder.state_dict(),
             }
-            if hasattr(loss_fn, 'spec_predictor'):
-                checkpoint['spec_predictor_state_dict'] = loss_fn.spec_predictor.state_dict()
             torch.save(checkpoint, f'{checkpoint_dir}/epoch_{epoch}.pt')
 
     print(f"\nTraining complete! Best val loss: {best_val_loss:.4f}")
