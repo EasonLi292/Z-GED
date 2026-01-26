@@ -1,6 +1,6 @@
 # Latent Space Analysis
 
-**Model:** v5.1 (Node-Embedding Encoder)
+**Model:** v5.2 (Dynamic Node Count)
 **Analysis Date:** 2026-01-26
 
 ---
@@ -26,7 +26,7 @@ z = [z_topology | z_values | z_transfer_function]
 
 Computed from 360 circuits (60 per filter type):
 
-### Full 8D Centroids (v5.1 with node-embedding encoder)
+### Full 8D Centroids (v5.2 with node-embedding encoder, dynamic node count)
 
 | Filter Type | z[0] | z[1] | z[2] | z[3] | z[4] | z[5] | z[6] | z[7] |
 |-------------|------|------|------|------|------|------|------|------|
@@ -37,7 +37,7 @@ Computed from 360 circuits (60 per filter type):
 | rlc_series | +0.71 | -3.20 | +0.06 | +0.99 | -0.01 | -0.01 | -0.00 | -0.01 |
 | rlc_parallel | +2.69 | +2.14 | +0.11 | -1.94 | -0.01 | +0.00 | -0.00 | -0.01 |
 
-### Variance by Dimension (v5.1)
+### Variance by Dimension (v5.2)
 
 | Dimension | Role | Mean | Std | Range | Status |
 |-----------|------|------|-----|-------|--------|
@@ -103,7 +103,7 @@ z[3] ≈ -1.9  →  rlc_parallel
 
 ## Transfer Function Dimensions (z[4:8]) — Collapsed
 
-### Current State (v5.1)
+### Current State (v5.2)
 
 Dimensions z[4:8] have near-zero variance (~0.01). The KL divergence loss pushes them to the prior N(0,1) since no decoder loss uses that information.
 

@@ -44,10 +44,10 @@ python scripts/generation/generate_from_specs.py --cutoff 20000 --q-factor 2.0
 | Cutoff | Q | Generated Circuit |
 |--------|---|-------------------|
 | 1 kHz | 0.707 | `GND--R--VOUT, VIN--C--VOUT` (high-pass) |
-| 10 kHz | 0.707 | `GND--RCL--VOUT, VIN--R--VOUT` (RLC parallel) |
+| 10 kHz | 0.707 | `GND--C--VOUT, VIN--R--VOUT` (low-pass) |
 | 10 kHz | 5.0 | `GND--RCL--VOUT, VIN--R--VOUT` (high-Q resonant) |
-| 100 kHz | 0.707 | `GND--C--VOUT, VIN--R--VOUT` (low-pass) |
-| 10 kHz | 0.01 | `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--R--INT1` (band-stop) |
+| 100 kHz | 0.707 | `GND--R--VOUT, VIN--C--VOUT` (high-pass) |
+| 10 kHz | 0.01 | `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT2, INT1--L--INT2` (band-stop) |
 
 ### Python API
 

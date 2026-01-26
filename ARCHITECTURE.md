@@ -1,6 +1,6 @@
 # Circuit Generation Model Architecture
 
-**Model Version:** v5.1 (Node-Embedding Encoder)
+**Model Version:** v5.2 (Dynamic Node Count)
 
 ## Overview
 
@@ -87,7 +87,7 @@ Input: Latent code z (8D)
   ↓
 Context Encoder: Linear(8 → 256) + LayerNorm + ReLU
   ↓
-Node Count Predictor: z[0:2] → 3-way classification (3, 4, or 5 nodes)
+Node Count Predictor: z[0:2] → (max_nodes-2)-way classification (3 to max_nodes nodes)
   ↓
 Autoregressive Node Generation (GND, VIN, VOUT, INTERNAL...)
   ↓
@@ -138,7 +138,7 @@ class LatentGuidedEdgeDecoder:
 ```python
 total_loss = (
     node_type_loss      # Cross-entropy on node types
-  + node_count_loss     # Cross-entropy on node count (3/4/5)
+  + node_count_loss     # Cross-entropy on node count (3 to max_nodes)
   + edge_component_loss # Cross-entropy on 8-way edge-component
   + connectivity_loss   # Ensure VIN/VOUT connected
   + kl_divergence       # VAE regularization
@@ -225,7 +225,7 @@ for i in range(num_nodes):
 
 - **Dataset:** 360 circuits (288 train, 72 val)
 - **Epochs:** 100
-- **Best Val Loss:** 0.9986 (epoch 100)
+- **Best Val Loss:** 1.0252 (epoch 100)
 - **Training Time:** ~12 minutes on CPU
 
 ---
@@ -245,7 +245,7 @@ for i in range(num_nodes):
 - `scripts/training/validate.py` - Validation
 
 ### Checkpoints
-- `checkpoints/production/best.pt` - Best model (val_loss=0.9986)
+- `checkpoints/production/best.pt` - Best model (val_loss=1.0252)
 
 ---
 
@@ -287,6 +287,6 @@ z_new[2:4] = target_values
 
 ---
 
-**Status:** Production ready (v5.1)
+**Status:** Production ready (v5.2)
 
 **Checkpoint:** `checkpoints/production/best.pt`

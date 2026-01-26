@@ -75,7 +75,7 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
         Args:
             predictions:
                 - 'node_types': [batch, num_nodes, 5] logits
-                - 'node_count_logits': [batch, 3]
+                - 'node_count_logits': [batch, max_nodes-2]
                 - 'edge_component_logits': [batch, num_nodes, num_nodes, 8]
             targets:
                 - 'node_types': [batch, num_nodes]
@@ -105,7 +105,7 @@ class GumbelSoftmaxCircuitLoss(nn.Module):
 
             with torch.no_grad():
                 target_node_counts = (target_nodes != 4).sum(dim=1)
-                target_count_class = (target_node_counts - 3).clamp(0, 2).long()
+                target_count_class = (target_node_counts - 3).clamp(0, node_count_logits.size(-1) - 1).long()
 
             loss_node_count = F.cross_entropy(node_count_logits, target_count_class)
 
@@ -209,7 +209,7 @@ if __name__ == '__main__':
 
     predictions = {
         'node_types': torch.randn(batch_size, max_nodes, 5),
-        'node_count_logits': torch.randn(batch_size, 3),
+        'node_count_logits': torch.randn(batch_size, max_nodes - 2),
         'edge_component_logits': torch.randn(batch_size, max_nodes, max_nodes, 8),
     }
 

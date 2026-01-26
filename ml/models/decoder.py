@@ -19,7 +19,7 @@ class SimplifiedCircuitDecoder(nn.Module):
     Minimal decoder for circuit topology generation.
 
     Predicts:
-    - Node count (3, 4, or 5)
+    - Node count (3 to max_nodes)
     - Node types (GND, VIN, VOUT, INTERNAL)
     - Edge-component (8-way: no edge, R, C, L, RC, RL, CL, RCL)
 
@@ -53,12 +53,12 @@ class SimplifiedCircuitDecoder(nn.Module):
             nn.LayerNorm(hidden_dim)
         )
 
-        # Node count predictor (3, 4, or 5 nodes) - uses topology dims of latent
+        # Node count predictor (3 to max_nodes) - uses topology dims of latent
         self.node_count_predictor = nn.Sequential(
             nn.Linear(2, hidden_dim // 4),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 4, 3)
+            nn.Linear(hidden_dim // 4, max_nodes - 2)
         )
 
         # Node decoder
@@ -90,7 +90,7 @@ class SimplifiedCircuitDecoder(nn.Module):
 
         Returns:
             node_types: [batch, num_nodes, 5] logits
-            node_count_logits: [batch, 3] logits
+            node_count_logits: [batch, max_nodes-2] logits
             edge_component_logits: [batch, num_nodes, num_nodes, 8] logits
         """
         batch_size = latent_code.shape[0]
@@ -163,11 +163,12 @@ class SimplifiedCircuitDecoder(nn.Module):
         # Predict node count from topology dimensions
         latent_topo = latent_code[:, :2]
         node_count_logits = self.node_count_predictor(latent_topo)
-        target_nodes = (torch.argmax(node_count_logits, dim=-1) + 3).item()
+        target_nodes = min((torch.argmax(node_count_logits, dim=-1) + 3).item(), self.max_nodes)
 
         if verbose:
             probs = F.softmax(node_count_logits, dim=-1)
-            print(f"Node count: 3={probs[0,0]:.2f}, 4={probs[0,1]:.2f}, 5={probs[0,2]:.2f} → {target_nodes}")
+            parts = ", ".join(f"{i+3}={probs[0,i]:.2f}" for i in range(probs.shape[-1]))
+            print(f"Node count: {parts} → {target_nodes}")
 
         # Generate nodes
         node_embeddings = []

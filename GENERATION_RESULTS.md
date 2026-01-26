@@ -1,6 +1,6 @@
 # Circuit Generation Results
 
-**Model:** v5.1 (Node-Embedding Encoder)
+**Model:** v5.2 (Dynamic Node Count)
 **Dataset:** 360 circuits (288 train, 72 validation)
 **Checkpoint:** `checkpoints/production/best.pt`
 
@@ -10,7 +10,7 @@
 
 | Metric | Training | Validation |
 |--------|----------|------------|
-| Total Loss | 0.91 | 1.00 |
+| Total Loss | 0.92 | 1.03 |
 | Node Count Accuracy | 100% | 100% |
 | Edge Existence Accuracy | 100% | 100% |
 | Component Type Accuracy | 100% | 100% |
@@ -30,8 +30,8 @@ python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
 | Cutoff | Q | Generated Circuit | Status |
 |--------|---|-------------------|--------|
 | 1 kHz | 0.707 | `GND--R--VOUT, VIN--C--VOUT` | Valid |
-| 10 kHz | 0.707 | `GND--RCL--VOUT, VIN--R--VOUT` | Valid |
-| 100 kHz | 0.707 | `GND--C--VOUT, VIN--R--VOUT` | Valid |
+| 10 kHz | 0.707 | `GND--C--VOUT, VIN--R--VOUT` | Valid |
+| 100 kHz | 0.707 | `GND--R--VOUT, VIN--C--VOUT` | Valid |
 | 10 kHz | 5.0 | `GND--RCL--VOUT, VIN--R--VOUT` | Valid |
 
 ### Edge Cases
@@ -146,30 +146,30 @@ The model can generate **novel topologies not seen in training** through latent 
 
 | Category | Unique Topologies | Samples |
 |----------|-------------------|---------|
-| Known (in training) | 6 | 326 (65%) |
-| **Valid novel** | **18** | **97 (19%)** |
-| Invalid (disconnected) | - | 77 (15%) |
+| Known (in training) | 6 | 331 (66%) |
+| **Valid novel** | **14** | **90 (18%)** |
+| Invalid (disconnected) | - | 79 (16%) |
 
 ### Top Valid Novel Topologies Discovered
 
 | Topology | Count | Nodes | Components |
 |----------|-------|-------|------------|
-| `GND--R--VOUT, INT1--L--INT2, VIN--L--INT1, VOUT--C--INT1, VOUT--C--INT2` | 17 | 5 | RLC |
-| `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--L--INT1, VOUT--C--INT1, VOUT--C--INT2` | 13 | 5 | RLC |
-| `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1` | 11 | 4 | R |
-| `GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--C--INT1, VOUT--C--INT2` | 10 | 5 | RLC |
-| `GND--R--VOUT, VIN--R--VOUT` | 6 | 3 | R |
-| `GND--R--VOUT, VIN--L--INT1, VOUT--R--INT1` | 6 | 4 | RL |
+| `GND--R--VOUT, VIN--R--VOUT` | 26 | 3 | R |
+| `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--C--INT2` | 10 | 5 | RLC |
+| `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1` | 9 | 4 | R |
+| `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--C--INT1, VOUT--C--INT2` | 9 | 5 | RLC |
+| `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1` | 6 | 4 | RC |
+| `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--C--INT1` | 5 | 5 | RLC |
 
 ### Generalization Capability
 
 **Strengths:**
 - Compositional generalization (recombines learned components)
-- 18 unique valid novel topologies discovered
-- Maintains graph connectivity in 85% of samples
+- 14 unique valid novel topologies discovered
+- Maintains graph connectivity in 84% of samples
 
 **Limitations:**
-- Most samples (65%) reproduce training topologies
+- Most samples (66%) reproduce training topologies
 - Novel circuits are variations, not fundamentally new architectures
 - No guarantee of electrical validity (only structural validity)
 
