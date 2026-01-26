@@ -7,14 +7,16 @@ This directory contains the neural network architectures for circuit generation.
 ### Core Components
 
 - **encoder.py** - `HierarchicalEncoder`
-  - 8D latent space VAE encoder
-  - Hierarchical decomposition: [2D topology | 2D values | 4D transfer function]
-  - Graph neural network-based encoding
+  - 8D latent space VAE encoder (~97,600 params)
+  - 3-layer ImpedanceGNN → hierarchical branches:
+    - Branch 1: Mean+max pooling → z[0:2] (topology)
+    - Branch 2: GND/VIN/VOUT node embeddings → z[2:4] (values)
+    - Branch 3: DeepSets on poles/zeros → z[4:8] (transfer function)
 
-- **decoder.py** - `LatentGuidedGraphGPTDecoder`
-  - Main autoregressive decoder for circuit generation
+- **decoder.py** - `SimplifiedCircuitDecoder`
+  - Autoregressive decoder for circuit generation (~4.9M params)
   - Latent-guided generation with cross-attention
-  - Produces graph structure and component values
+  - Produces node types, edge existence, and component types
 
 - **decoder_components.py** - Helper classes for the decoder
   - `LatentDecomposer` - Splits latent code into semantic parts
@@ -58,12 +60,13 @@ Older/experimental models preserved for reference:
 ## Model Flow
 
 ```
-Input Circuit → HierarchicalEncoder → 8D Latent Code → LatentGuidedGraphGPTDecoder → Output Circuit
+Input Circuit → HierarchicalEncoder → 8D Latent Code → SimplifiedCircuitDecoder → Output Circuit
                      (encoder.py)                         (decoder.py)
 
-Specifications [cutoff, Q] → Decoder Conditions → Circuit Generation
+Latent code alone determines the generated circuit (no external conditions).
 ```
 
 ## Configuration
 
-Production models use configuration from `configs/production.yaml` (formerly `latent_guided_decoder.yaml`).
+Production models are configured in `scripts/training/train.py` with hardcoded defaults.
+Config files in `configs/` are available for experimental training variants.

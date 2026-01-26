@@ -116,7 +116,7 @@ Older/experimental scripts preserved for reference:
 
 **Training:**
 ```bash
-python scripts/training/train.py --config configs/production.yaml
+python scripts/training/train.py
 ```
 
 **Testing:**

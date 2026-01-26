@@ -1,12 +1,12 @@
 # Circuit Generation Model Architecture
 
-**Model Version:** v5.0 (Latent-Only Generation)
+**Model Version:** v5.1 (Node-Embedding Encoder)
 
 ## Overview
 
 This model generates RLC filter circuit topologies from an 8-dimensional latent space. Unlike conditional VAEs, no external specifications are required - the latent code alone determines the circuit structure.
 
-**Key Change from v4.7:** Removed condition inputs (frequency, Q-factor). The decoder now uses only the latent code.
+**Key Change from v5.0:** Encoder Branch 2 (component values) now uses GND/VIN/VOUT node embeddings from the GNN instead of position-specific edge encoders.
 
 ---
 
@@ -27,7 +27,7 @@ Hierarchical latent: 8D = [topology(2) | values(2) | transfer_function(4)]
 Output: μ, σ for VAE sampling
 ```
 
-**Parameters:** ~95,000
+**Parameters:** ~97,600
 
 **Component-Aware Message Passing:**
 ```python
@@ -63,17 +63,17 @@ z = [z_topology | z_values | z_transfer_function]
 
 **Statistics (from 360 training circuits):**
 ```
-z[0]: mean=-0.50, std=1.99, range=[-3.10, 3.27]
-z[1]: mean=-0.87, std=2.96, range=[-4.03, 3.30]
-z[2]: mean=-0.02, std=0.46, range=[-1.04, 0.78]
-z[3]: mean= 0.05, std=0.68, range=[-1.31, 1.40]
-z[4]: mean=-0.00, std=0.03, range=[-0.03, 0.05]
-z[5]: mean=-0.00, std=0.01, range=[-0.03, 0.01]
-z[6]: mean= 0.01, std=0.04, range=[-0.03, 0.08]
-z[7]: mean=-0.01, std=0.01, range=[-0.02, 0.03]
+z[0]: mean= 1.00, std=2.22, range=[-3.61, 2.73]
+z[1]: mean= 0.36, std=2.51, range=[-3.23, 2.60]
+z[2]: mean= 0.00, std=0.10, range=[-0.24, 0.18]
+z[3]: mean=-0.07, std=1.34, range=[-2.02, 2.03]
+z[4]: mean=-0.00, std=0.01, range=[-0.01, 0.01]
+z[5]: mean=-0.00, std=0.01, range=[-0.04, 0.01]
+z[6]: mean= 0.01, std=0.01, range=[-0.02, 0.03]
+z[7]: mean= 0.00, std=0.02, range=[-0.03, 0.05]
 ```
 
-The topology dimensions (z[0:2]) have the highest variance, as they encode the most structural information.
+The topology dimensions (z[0:2]) have the highest variance, encoding graph structure and filter type. z[3] (values branch) also has meaningful variance (std=1.34), encoding component configuration from the GND/VIN/VOUT node embeddings.
 
 ---
 
@@ -98,16 +98,7 @@ Output: node_types, edge_existence, component_types
 
 **Parameters:** ~4.9M
 
-**Key Design: No Conditions**
-
-Previous versions concatenated conditions (frequency, Q) with latent:
-```python
-# Old (v4.7):
-context = encoder(torch.cat([latent, conditions], dim=-1))
-
-# New (v5.0):
-context = encoder(latent)  # Latent alone determines everything
-```
+**Key Design:** The latent code alone determines the circuit. No external conditions (frequency, Q) are needed.
 
 ---
 
@@ -133,7 +124,7 @@ class LatentGuidedEdgeDecoder:
         edge = self.edge_encoder(concat([node_i, node_j]))
 
         # Cross-attention to latent context
-        context = self.context_proj(latent)  # No conditions!
+        context = self.context_proj(latent)
         attended = self.cross_attention(edge, context)
 
         # 8-way classification
@@ -234,7 +225,7 @@ for i in range(num_nodes):
 
 - **Dataset:** 360 circuits (288 train, 72 val)
 - **Epochs:** 100
-- **Best Val Loss:** 1.0044 (epoch 95)
+- **Best Val Loss:** 0.9986 (epoch 100)
 - **Training Time:** ~12 minutes on CPU
 
 ---
@@ -254,18 +245,18 @@ for i in range(num_nodes):
 - `scripts/training/validate.py` - Validation
 
 ### Checkpoints
-- `checkpoints/production/best.pt` - Best model (val_loss=1.0044)
+- `checkpoints/production/best.pt` - Best model (val_loss=0.9986)
 
 ---
 
 ## Design Decisions
 
-### Why Remove Conditions?
+### Why Node Embeddings Instead of Edge Encoders?
 
-1. **Simplicity** - Latent space alone encodes all circuit information
-2. **Flexibility** - Can sample, interpolate, or modify latents freely
-3. **Decoupling** - No need to specify frequency/Q for generation
-4. **Better Reconstruction** - 100% accuracy vs 90% with conditions
+1. **Leverages GNN** - The 3-layer ImpedanceGNN already propagates edge/component info into node embeddings via message passing
+2. **Simpler** - Eliminates 3 separate edge encoder MLPs and per-edge iteration loop
+3. **Position-aware** - GND/VIN/VOUT embeddings naturally encode what components connect to ground, input, and output
+4. **Better z[3] utilization** - The values branch dimension z[3] now has std=1.34 (vs 0.68 before), distinguishing component configurations (e.g., high_pass z[3]=+2.0 vs rlc_parallel z[3]=-1.9)
 
 ### Why Joint Edge-Component Prediction?
 
@@ -296,6 +287,6 @@ z_new[2:4] = target_values
 
 ---
 
-**Status:** Production ready
+**Status:** Production ready (v5.1)
 
 **Checkpoint:** `checkpoints/production/best.pt`

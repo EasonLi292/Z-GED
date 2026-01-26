@@ -1,12 +1,13 @@
-# Z-GED: Specification-Driven Circuit Generation
+# Z-GED: Circuit Topology Generation via Graph VAE
 
-Automated RLC filter circuit synthesis using a VAE with component-aware GNN encoder. Generate circuit topologies by specifying **cutoff frequency** and **Q-factor**, or by sampling/interpolating in an 8-dimensional latent space.
+Automated RLC filter circuit synthesis using a VAE with component-aware GNN encoder. Generate circuit topologies by sampling/interpolating in an 8-dimensional latent space, or by specifying **cutoff frequency** and **Q-factor** via K-NN lookup.
 
 ## What It Does
 
-Z-GED generates RLC filter circuits that match target specifications:
+Z-GED generates RLC filter circuits from a learned latent space:
 
 ```bash
+# Generate from specifications (K-NN interpolation in latent space)
 python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
 # Output: GND--RCL--VOUT, VIN--R--VOUT
 ```
@@ -46,6 +47,7 @@ python scripts/generation/generate_from_specs.py --cutoff 20000 --q-factor 2.0
 | 10 kHz | 0.707 | `GND--RCL--VOUT, VIN--R--VOUT` (RLC parallel) |
 | 10 kHz | 5.0 | `GND--RCL--VOUT, VIN--R--VOUT` (high-Q resonant) |
 | 100 kHz | 0.707 | `GND--C--VOUT, VIN--R--VOUT` (low-pass) |
+| 10 kHz | 0.01 | `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--R--INT1` (band-stop) |
 
 ### Python API
 
@@ -98,16 +100,19 @@ Z-GED/
 
 ## How It Works
 
-1. **Encoder** - Component-aware GNN encodes circuits into 8D latent space
+1. **Encoder** - 3-layer component-aware GNN (ImpedanceConv) encodes circuits into 8D latent space
+   - Branch 1 (Topology): Mean+max pooling of all node embeddings → z[0:2]
+   - Branch 2 (Values): GND/VIN/VOUT node embeddings → z[2:4]
+   - Branch 3 (Transfer Function): DeepSets on poles/zeros → z[4:8]
 2. **Latent Space** - Hierarchical structure: `[topology(2D) | values(2D) | transfer_function(4D)]`
 3. **Decoder** - Autoregressive transformer generates nodes and edges with component types
 
 ### Latent Space Structure
 
 The 8D latent space is hierarchically organized:
-- `z[0:2]` - Topology encoding (graph structure, filter type)
-- `z[2:4]` - Component values encoding
-- `z[4:8]` - Transfer function encoding (poles/zeros)
+- `z[0:2]` - Topology encoding (graph structure, filter type, node count)
+- `z[2:4]` - Component values encoding (from GND/VIN/VOUT node embeddings)
+- `z[4:8]` - Transfer function encoding (poles/zeros via DeepSets)
 
 ## Example Outputs
 

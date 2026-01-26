@@ -95,7 +95,7 @@ encoder = HierarchicalEncoder(
     dropout=0.1
 ).to(device)
 
-# Initialize decoder (no conditions_dim anymore!)
+# Initialize decoder
 decoder = SimplifiedCircuitDecoder(
     latent_dim=8,
     hidden_dim=256,
@@ -126,7 +126,7 @@ print(f"Loaded from epoch {checkpoint['epoch']}, val_loss={checkpoint['val_loss'
 # Sample random latent code
 z = torch.randn(1, 8)
 
-# Generate circuit (no conditions needed!)
+# Generate circuit from latent code
 with torch.no_grad():
     result = decoder.generate(z)
 
@@ -305,7 +305,7 @@ python scripts/training/train.py
 ```python
 # Key parts of train.py
 
-# Create models (no conditions_dim for decoder)
+# Create models
 encoder = HierarchicalEncoder(...)
 decoder = SimplifiedCircuitDecoder(latent_dim=8, hidden_dim=256, ...)
 
@@ -319,7 +319,7 @@ for epoch in range(100):
         std = torch.exp(0.5 * logvar)
         latent = mu + torch.randn_like(std) * std
 
-        # Decode (no conditions!)
+        # Decode
         predictions = decoder(latent_code=latent, target_node_types=targets)
 
         # Compute loss and backprop
@@ -480,17 +480,13 @@ cd /path/to/Z-GED
 python scripts/training/train.py
 ```
 
-### Issue: Old code using conditions
+### Issue: Old checkpoint incompatible
 
-**Problem:** Code that passes `conditions` to decoder will fail.
+**Problem:** Checkpoints from older model versions (v5.0 or earlier with edge encoders) won't load with the current encoder.
 
-**Fix:** Remove conditions parameter:
-```python
-# Old (broken):
-result = decoder.generate(z, conditions)
-
-# New (correct):
-result = decoder.generate(z)
+**Fix:** Retrain the model:
+```bash
+python scripts/training/train.py
 ```
 
 ---

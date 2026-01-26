@@ -1,7 +1,7 @@
 # Latent Space Analysis
 
-**Model:** v5.0 (Latent-Only Decoder)
-**Analysis Date:** 2025-01-24
+**Model:** v5.1 (Node-Embedding Encoder)
+**Analysis Date:** 2026-01-26
 
 ---
 
@@ -26,31 +26,31 @@ z = [z_topology | z_values | z_transfer_function]
 
 Computed from 360 circuits (60 per filter type):
 
-### Full 8D Centroids (v5.1 with spec predictor)
+### Full 8D Centroids (v5.1 with node-embedding encoder)
 
 | Filter Type | z[0] | z[1] | z[2] | z[3] | z[4] | z[5] | z[6] | z[7] |
 |-------------|------|------|------|------|------|------|------|------|
-| low_pass | -1.36 | -4.25 | 0.04 | 0.03 | -2.62 | 1.23 | 0.20 | 0.37 |
-| high_pass | 0.25 | -4.32 | -0.79 | -0.38 | -3.65 | 1.58 | 0.00 | 0.52 |
-| band_pass | 3.47 | 0.77 | 0.02 | 0.02 | -4.38 | 1.91 | -0.03 | 0.63 |
-| band_stop | -3.10 | 2.11 | -0.03 | -0.03 | -4.47 | 1.93 | -0.08 | 0.66 |
-| rlc_series | -1.28 | 3.33 | -0.02 | -0.02 | -4.46 | 1.95 | -0.04 | 0.64 |
-| rlc_parallel | -1.11 | -3.37 | 0.71 | 0.56 | -4.47 | 1.96 | -0.04 | 0.64 |
-
-**Note:** z[4:8] now has meaningful variance encoding transfer function info.
+| low_pass | +2.71 | +2.55 | -0.17 | -0.07 | +0.01 | +0.00 | +0.03 | +0.05 |
+| high_pass | +2.60 | +2.38 | +0.08 | +1.99 | -0.01 | +0.00 | +0.00 | -0.01 |
+| band_pass | -3.57 | +1.38 | +0.00 | +0.01 | -0.01 | -0.00 | -0.00 | -0.01 |
+| band_stop | +0.85 | -3.10 | -0.06 | -1.41 | -0.01 | +0.00 | +0.01 | -0.00 |
+| rlc_series | +0.71 | -3.20 | +0.06 | +0.99 | -0.01 | -0.01 | -0.00 | -0.01 |
+| rlc_parallel | +2.69 | +2.14 | +0.11 | -1.94 | -0.01 | +0.00 | -0.00 | -0.01 |
 
 ### Variance by Dimension (v5.1)
 
-| Dimension | Role | Range (v5.1) | Status |
-|-----------|------|--------------|--------|
-| z[0] | Filter type | [-3.10, 3.47] | **Active** |
-| z[1] | Complexity | [-4.32, 3.33] | **Active** |
-| z[2] | Values | [-0.79, 0.71] | Moderate |
-| z[3] | Values | [-0.38, 0.56] | Moderate |
-| z[4] | Transfer func | [-2.62, -4.47] | **Active** (was collapsed) |
-| z[5] | Transfer func | [1.23, 1.96] | **Active** (was collapsed) |
-| z[6] | Transfer func | [-0.08, 0.20] | Moderate |
-| z[7] | Transfer func | [0.37, 0.66] | Moderate |
+| Dimension | Role | Mean | Std | Range | Status |
+|-----------|------|------|-----|-------|--------|
+| z[0] | Topology | +1.00 | 2.22 | [-3.61, 2.73] | **Active** |
+| z[1] | Topology | +0.36 | 2.51 | [-3.23, 2.60] | **Active** |
+| z[2] | Values | +0.00 | 0.10 | [-0.24, 0.18] | Collapsed |
+| z[3] | Values | -0.07 | 1.34 | [-2.02, 2.03] | **Active** |
+| z[4] | Transfer func | -0.00 | 0.01 | [-0.01, 0.01] | Collapsed |
+| z[5] | Transfer func | -0.00 | 0.01 | [-0.04, 0.01] | Collapsed |
+| z[6] | Transfer func | +0.01 | 0.01 | [-0.02, 0.03] | Collapsed |
+| z[7] | Transfer func | +0.00 | 0.02 | [-0.03, 0.05] | Collapsed |
+
+**Note:** The node-embedding encoder activates z[3] (std=1.34) which distinguishes component configurations (e.g., high_pass z[3]=+2.0 vs rlc_parallel z[3]=-1.9). z[4:8] remains collapsed as no loss directly uses transfer function information.
 
 ---
 
@@ -59,71 +59,60 @@ Computed from 360 circuits (60 per filter type):
 ### z[0]: Filter Type Axis
 
 ```
-z[0] < -2.5  →  band_stop (5-node notch filter)
-z[0] ≈ -1.5  →  rlc_parallel / rlc_series
-z[0] ≈ -0.5  →  low_pass (3-node RC)
-z[0] ≈ +0.5  →  high_pass (3-node RC)
-z[0] > +2.5  →  band_pass (4-node RLC)
+z[0] < -3.0  →  band_pass (4-node RLC)
+z[0] ≈ +0.7  →  band_stop / rlc_series (4-5 node)
+z[0] > +2.5  →  3-node circuits (low_pass, high_pass, rlc_parallel)
 ```
 
 ### z[1]: Complexity Axis
 
 ```
-z[1] < -3.0  →  Simple 3-node circuits (low_pass, high_pass, rlc_parallel)
-z[1] ≈  0.0  →  4-node circuits (band_pass)
-z[1] > +2.0  →  Complex 4-5 node circuits (band_stop, rlc_series)
+z[1] > +2.0  →  Simple 3-node circuits (low_pass, high_pass, rlc_parallel)
+z[1] ≈ +1.4  →  4-node circuits (band_pass)
+z[1] < -3.0  →  Complex 4-5 node circuits (band_stop, rlc_series)
 ```
 
-### 2D Visualization
+### z[3]: Component Configuration Axis
+
+```
+z[3] ≈ +2.0  →  high_pass (C on VIN-VOUT)
+z[3] ≈ +1.0  →  rlc_series
+z[3] ≈  0.0  →  low_pass / band_pass
+z[3] ≈ -1.4  →  band_stop
+z[3] ≈ -1.9  →  rlc_parallel
+```
+
+### 2D Visualization (z[0] vs z[1])
 
 ```
         z[1]
          ^
-    +4   |     rlc_series
-         |        *
-    +2   |   band_stop
-         |      *
-     0   |           band_pass
-         |              *
-    -2   |
+    +3   | low_pass  rlc_parallel  high_pass
+         |    *          *            *
+    +1   |                      band_pass
+         |                         *
+    -1   |
          |
-    -4   |  low_pass    high_pass    rlc_parallel
-         |     *           *             *
+    -3   |         rlc_series  band_stop
+         |            *           *
          +---------------------------------> z[0]
-            -3    -1     0     +1    +3
+            -4    -2     0     +1    +3
 ```
 
 ---
 
-## Fixed: Transfer Function Dimensions Now Active
+## Transfer Function Dimensions (z[4:8]) — Collapsed
 
-### Previous Issue (v5.0)
+### Current State (v5.1)
 
-Dimensions z[4:8] had near-zero variance (~0.01) because no loss used that information.
+Dimensions z[4:8] have near-zero variance (~0.01). The KL divergence loss pushes them to the prior N(0,1) since no decoder loss uses that information.
 
-### Solution Implemented (v5.1)
-
-Added auxiliary spec predictor that predicts (cutoff, Q) from z[4:8].
-
-### Results After Retraining
-
-| Dimension | Before (v5.0) | After (v5.1) |
-|-----------|---------------|--------------|
-| z[4] range | [-0.03, 0.05] | [-2.6, -4.5] |
-| z[5] range | [-0.03, 0.01] | [1.2, 2.0] |
-| z[6] range | [-0.03, 0.08] | [-0.08, 0.20] |
-| z[7] range | [-0.02, 0.03] | [0.37, 0.67] |
-
-**Spec prediction accuracy:**
-- Cutoff error: 0.5 decades (was 4.1)
-- Q error: 0.47 (was 0.74)
-
-### Root Cause Analysis
+### Root Cause
 
 ```
 Encoder:
-  Branch 1: GNN → z[0:2] (topology)
-  Branch 2: Edge features → z[2:4] (values)
+  Branch 1: GNN mean+max pooling → z[0:2] (topology)
+  Branch 2: GND/VIN/VOUT node embeddings → z[2:4] (values)
   Branch 3: DeepSets(poles, zeros) → z[4:8] (transfer function)
 
 Decoder:
@@ -141,7 +130,7 @@ Loss:
 
 **What happens during training:**
 
-1. Decoder learns to reconstruct topology using only z[0:4]
+1. Decoder learns to reconstruct topology using z[0:4] (3 active dimensions)
 2. z[4:8] provides no useful gradient (nothing depends on it)
 3. KL loss pushes all dimensions toward the prior N(0,1)
 4. Without competing signal, z[4:8] collapses to near-zero
@@ -153,11 +142,15 @@ Loss:
 - Cannot generate circuits with specific cutoff/Q by manipulating z[4:8]
 - The 4D "transfer function" portion of latent space is wasted
 
+### What DID Improve (v5.0 → v5.1)
+
+The node-embedding encoder activated z[3] (std=1.34 vs 0.68), giving the values branch a meaningful dimension that distinguishes component configurations. This is because GND/VIN/VOUT node embeddings from the GNN carry richer position-specific information than the previous edge encoders.
+
 ---
 
-## Proposed Solutions
+## Proposed Solutions for z[4:8] Collapse
 
-### Option 1: Auxiliary Specification Predictor (Recommended)
+### Option 1: Auxiliary Specification Predictor
 
 Add a small MLP that predicts (cutoff, Q) from z[4:8]:
 
