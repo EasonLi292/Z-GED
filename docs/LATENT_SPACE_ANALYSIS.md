@@ -29,64 +29,69 @@ Computed from 360 circuits (60 per filter type):
 
 | Filter Type | z[0] | z[1] | z[2] | z[3] | z[4] | z[5] | z[6] | z[7] |
 |-------------|------|------|------|------|------|------|------|------|
-| low_pass | -3.69 | -2.27 | +0.88 | -1.46 | +0.01 | -0.01 | +0.02 | +0.03 |
-| high_pass | -3.64 | -2.22 | -1.68 | -0.23 | +0.00 | +0.00 | -0.00 | +0.00 |
-| band_pass | -1.54 | +4.13 | -0.06 | -0.11 | +0.00 | -0.00 | +0.00 | -0.00 |
-| band_stop | +2.45 | -2.07 | -0.07 | -1.27 | -0.01 | -0.03 | +0.00 | -0.01 |
-| rlc_series | +2.51 | -2.05 | +0.23 | +1.22 | +0.00 | -0.00 | +0.00 | -0.01 |
-| rlc_parallel | -3.64 | -2.33 | +0.84 | +1.32 | -0.00 | +0.00 | +0.00 | +0.00 |
+| low_pass | +0.65 | -3.23 | -2.89 | +1.63 | +0.32 | -0.20 | +0.57 | +0.10 |
+| high_pass | +0.28 | -3.82 | -1.80 | -1.29 | -0.24 | -0.05 | +0.67 | +0.54 |
+| band_pass | +3.22 | +1.45 | +2.62 | -2.16 | -0.46 | -0.03 | +0.54 | +0.63 |
+| band_stop | -2.96 | +1.00 | +0.52 | +2.44 | -0.89 | +0.10 | +0.96 | +1.13 |
+| rlc_series | -4.02 | +1.17 | +0.93 | +0.05 | -0.50 | -0.03 | +0.55 | +0.66 |
+| rlc_parallel | +0.62 | -1.80 | -4.04 | -0.83 | -0.34 | -0.04 | +0.59 | +0.57 |
 
 ### Variance by Dimension
 
 | Dimension | Role | Mean | Std | Range | Status |
 |-----------|------|------|-----|-------|--------|
-| z[0] | Topology | -1.26 | 2.75 | [-3.72, +2.54] | **Active** |
-| z[1] | Topology | -1.13 | 2.36 | [-2.43, +4.19] | **Active** |
-| z[2] | Values | +0.03 | 0.85 | [-1.71, +0.92] | **Active** |
-| z[3] | Values | -0.09 | 1.08 | [-1.52, +1.38] | **Active** |
-| z[4] | Transfer func | -0.00 | 0.01 | [-0.02, +0.01] | Collapsed |
-| z[5] | Transfer func | -0.01 | 0.01 | [-0.03, +0.01] | Collapsed |
-| z[6] | Transfer func | +0.00 | 0.01 | [-0.01, +0.02] | Collapsed |
-| z[7] | Transfer func | +0.00 | 0.01 | [-0.04, +0.03] | Collapsed |
+| z[0] | Topology | -0.37 | 2.43 | [-4.12, +3.29] | **Active** |
+| z[1] | Topology | -0.87 | 2.17 | [-3.84, +1.48] | **Active** |
+| z[2] | Values | -0.78 | 2.32 | [-4.18, +2.67] | **Active** |
+| z[3] | Values | -0.03 | 1.62 | [-2.20, +2.50] | **Active** |
+| z[4] | Transfer func | -0.35 | 0.40 | [-1.22, +0.41] | Weak |
+| z[5] | Transfer func | -0.04 | 0.09 | [-0.21, +0.15] | Collapsed |
+| z[6] | Transfer func | +0.65 | 0.17 | [+0.38, +1.00] | Weak |
+| z[7] | Transfer func | +0.60 | 0.31 | [+0.07, +1.40] | Weak |
 
-**Note:** Both values dimensions are now active: z[2] (std=0.85) distinguishes low_pass/rlc_parallel (+0.84/+0.88) from high_pass (-1.68), while z[3] (std=1.08) separates rlc_parallel/rlc_series (+1.32/+1.22) from low_pass (-1.46). z[4:8] remains collapsed since no loss directly uses transfer function information.
+**Note:** z[0:4] are strongly active with std > 1.6. z[4], z[6], z[7] show weak but non-zero variance (std 0.17–0.40), partially encoding transfer function information — z[4] separates band_stop (-0.89) from low_pass (+0.32), and z[7] separates low_pass (+0.10) from band_stop (+1.13). z[5] remains effectively collapsed (std=0.09). The transfer function dimensions are no longer fully collapsed as in earlier models, likely because the full 8D latent is now used by the node count predictor, providing a gradient signal through z[4:8].
 
 ---
 
 ## Latent Space Interpretation
 
-### z[0]: Complexity Axis
+### z[0]: Filter Complexity Axis
 
 ```
-z[0] < -3.5  →  3-node circuits (low_pass, high_pass, rlc_parallel)
-z[0] ≈ -1.5  →  4-node circuits (band_pass)
-z[0] > +2.4  →  4-5 node circuits (band_stop, rlc_series)
+z[0] ≈ -4.0  →  rlc_series (4-node)
+z[0] ≈ -3.0  →  band_stop (5-node)
+z[0] ≈ +0.3  →  high_pass (3-node)
+z[0] ≈ +0.6  →  low_pass / rlc_parallel (3-node)
+z[0] ≈ +3.2  →  band_pass (4-node)
 ```
 
-### z[1]: Band-pass Axis
+### z[1]: 3-node vs Multi-node Axis
 
 ```
-z[1] > +4.0  →  band_pass (4-node distributed LC)
-z[1] ≈ -2.0  →  all other topologies
+z[1] < -3.0  →  3-node circuits (low_pass, high_pass, rlc_parallel)
+z[1] ≈ +1.0  →  4-5 node circuits (band_pass, band_stop, rlc_series)
 ```
 
 ### z[2]: Component Configuration Axis
 
 ```
-z[2] ≈ +0.9  →  low_pass / rlc_parallel (C or RCL to ground)
-z[2] ≈ +0.2  →  rlc_series
-z[2] ≈ -0.1  →  band_pass / band_stop
-z[2] ≈ -1.7  →  high_pass (C on VIN-VOUT)
+z[2] ≈ -4.0  →  rlc_parallel (RCL to ground)
+z[2] ≈ -2.9  →  low_pass (C to ground)
+z[2] ≈ -1.8  →  high_pass (C on VIN-VOUT)
+z[2] ≈ +0.5  →  band_stop
+z[2] ≈ +0.9  →  rlc_series
+z[2] ≈ +2.6  →  band_pass (distributed LC)
 ```
 
 ### z[3]: Component Type Axis
 
 ```
-z[3] ≈ +1.3  →  rlc_parallel / rlc_series
-z[3] ≈ -0.1  →  band_pass
-z[3] ≈ -0.2  →  high_pass
-z[3] ≈ -1.3  →  band_stop
-z[3] ≈ -1.5  →  low_pass
+z[3] ≈ +2.4  →  band_stop
+z[3] ≈ +1.6  →  low_pass
+z[3] ≈ +0.1  →  rlc_series
+z[3] ≈ -0.8  →  rlc_parallel
+z[3] ≈ -1.3  →  high_pass
+z[3] ≈ -2.2  →  band_pass
 ```
 
 ### 2D Visualization (z[0] vs z[1])
@@ -94,27 +99,39 @@ z[3] ≈ -1.5  →  low_pass
 ```
         z[1]
          ^
-    +4   |                band_pass
-         |                    *
-    +2   |
+    +2   |       band_stop   rlc_series   band_pass
+         |          *            *            *
+    +1   |
          |
      0   |
          |
-    -2   | low_pass  high_pass  rlc_parallel    band_stop  rlc_series
-         |    *          *          *               *          *
+    -1   |                              rlc_parallel
+         |                                   *
+    -2   |
+         |
+    -3   |  low_pass   high_pass
+         |     *           *
+    -4   |
          +--------------------------------------------------------------> z[0]
-            -4        -3                          +2        +3
+            -4        -3        -2        -1         0        +1        +2        +3
 ```
 
 ---
 
-## Transfer Function Dimensions (z[4:8]) — Collapsed
+## Transfer Function Dimensions (z[4:8]) — Partially Active
 
 ### Current State
 
-Dimensions z[4:8] have near-zero variance (~0.01). The KL divergence loss pushes them to the prior N(0,1) since no decoder loss uses that information.
+Dimensions z[4:8] show weak but non-zero variance (std 0.09–0.40), a significant improvement over earlier models where all four had std ≈ 0.01. The node count predictor now uses the full 8D latent, providing a gradient signal that prevents complete collapse.
 
-### Root Cause
+| Dimension | Std | Separation Example |
+|-----------|-----|-------------------|
+| z[4] | 0.40 | band_stop (-0.89) vs low_pass (+0.32) |
+| z[5] | 0.09 | Near-collapsed |
+| z[6] | 0.17 | band_stop (+0.96) vs band_pass (+0.54) |
+| z[7] | 0.31 | band_stop (+1.13) vs low_pass (+0.10) |
+
+### Root Cause of Remaining Weakness
 
 ```
 Encoder:
@@ -123,35 +140,30 @@ Encoder:
   Branch 3: DeepSets(poles, zeros) → z[4:8] (transfer function)
 
 Decoder:
-  z (all 8D) → topology prediction
+  z (all 8D) → node count prediction (provides gradient to z[4:8])
+  z (all 8D) → context encoder → node/edge generation
 
 Loss:
   ✓ Node type loss (cross-entropy)
   ✓ Edge-component loss (8-way classification)
   ✓ Connectivity loss
   ✓ KL divergence (pushes toward N(0,1))
+  ~ Node count predictor uses full 8D (weak gradient to z[4:8])
 
   ✗ NO reconstruction loss for poles/zeros
-  ✗ NO auxiliary task using z[4:8]
+  ✗ NO auxiliary task specifically targeting z[4:8]
 ```
-
-**What happens during training:**
-
-1. Decoder learns to reconstruct topology using z[0:4] (4 active dimensions)
-2. z[4:8] provides no useful gradient (nothing depends on it)
-3. KL loss pushes all dimensions toward the prior N(0,1)
-4. Without competing signal, z[4:8] collapses to near-zero
 
 ### Impact
 
-- Transfer function information is **not encoded** in latent space
-- Cannot interpolate between different frequency responses
-- Cannot generate circuits with specific cutoff/Q by manipulating z[4:8]
-- The 4D "transfer function" portion of latent space is wasted
+- z[4:8] encodes some filter-type information but not transfer function details
+- Cannot reliably interpolate between different frequency responses using z[4:8] alone
+- z[4] and z[7] show the most promise for encoding additional structure
+- z[5] remains effectively unused
 
 ---
 
-## Proposed Solutions for z[4:8] Collapse
+## Proposed Solutions for z[4:8] Activation
 
 ### Option 1: Auxiliary Specification Predictor
 

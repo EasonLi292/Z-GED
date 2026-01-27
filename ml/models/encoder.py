@@ -4,11 +4,11 @@ Hierarchical Encoder for GraphVAE.
 Encodes circuit graphs into a hierarchical latent space.
 
 Production configuration (8D):
-    z = [z_topo (2D) | z_values (2D) | z_pz (4D)]
+    z = [z_topo (2D) | z_structure (2D) | z_pz (4D)]
 
 where:
     - z_topo: Encodes graph topology and filter type
-    - z_values: Encodes component values and their distributions
+    - z_structure: Encodes terminal structure (GND/VIN/VOUT node embeddings)
     - z_pz: Encodes poles/zeros (transfer function behavior)
 
 The latent dimensions are configurable via constructor parameters.
@@ -34,7 +34,7 @@ class HierarchicalEncoder(nn.Module):
 
         Stage 2: Hierarchical latent encoding
             Branch 1 (Topology): Global pooling → MLP → μ_topo, log_σ_topo → z_topo [2D]
-            Branch 2 (Values): GND/VIN/VOUT node embeddings → MLP → μ_values, log_σ_values → z_values [2D]
+            Branch 2 (Structure): GND/VIN/VOUT node embeddings → MLP → μ_structure, log_σ_structure → z_structure [2D]
             Branch 3 (Poles/Zeros): DeepSets → MLP → μ_pz, log_σ_pz → z_pz [4D]
 
     Args:
@@ -44,7 +44,7 @@ class HierarchicalEncoder(nn.Module):
         gnn_num_layers: Number of GNN layers (default: 3)
         latent_dim: Total latent dimension (default: 8)
         topo_latent_dim: Topology latent dimension (default: 2)
-        values_latent_dim: Values latent dimension (default: 2)
+        structure_latent_dim: Structure latent dimension (default: 2)
         pz_latent_dim: Poles/zeros latent dimension (default: 4)
         dropout: Dropout probability (default: 0.1)
     """
@@ -59,30 +59,30 @@ class HierarchicalEncoder(nn.Module):
         dropout: float = 0.1,
         # Variable branch dimensions (defaults: 2D + 2D + 4D for 8D total)
         topo_latent_dim: Optional[int] = None,
-        values_latent_dim: Optional[int] = None,
+        structure_latent_dim: Optional[int] = None,
         pz_latent_dim: Optional[int] = None
     ):
         super().__init__()
 
         # Set branch dimensions
-        if topo_latent_dim is None or values_latent_dim is None or pz_latent_dim is None:
-            # Production defaults: 2D topology + 2D values + 4D TF = 8D total
+        if topo_latent_dim is None or structure_latent_dim is None or pz_latent_dim is None:
+            # Production defaults: 2D topology + 2D structure + 4D TF = 8D total
             if latent_dim == 8:
                 self.topo_latent_dim = 2
-                self.values_latent_dim = 2
+                self.structure_latent_dim = 2
                 self.pz_latent_dim = 4
             else:
                 # Fall back to equal split for other latent dimensions
                 assert latent_dim % 3 == 0, "Latent dim must be divisible by 3 for equal split"
                 self.topo_latent_dim = latent_dim // 3
-                self.values_latent_dim = latent_dim // 3
+                self.structure_latent_dim = latent_dim // 3
                 self.pz_latent_dim = latent_dim // 3
         else:
             self.topo_latent_dim = topo_latent_dim
-            self.values_latent_dim = values_latent_dim
+            self.structure_latent_dim = structure_latent_dim
             self.pz_latent_dim = pz_latent_dim
-            assert topo_latent_dim + values_latent_dim + pz_latent_dim == latent_dim, \
-                f"Branch dims {topo_latent_dim}+{values_latent_dim}+{pz_latent_dim} != {latent_dim}"
+            assert topo_latent_dim + structure_latent_dim + pz_latent_dim == latent_dim, \
+                f"Branch dims {topo_latent_dim}+{structure_latent_dim}+{pz_latent_dim} != {latent_dim}"
 
         self.node_feature_dim = node_feature_dim
         self.edge_feature_dim = edge_feature_dim
