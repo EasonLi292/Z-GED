@@ -16,8 +16,8 @@ from collections import Counter
 from ml.data.dataset import CircuitDataset
 from ml.models.encoder import HierarchicalEncoder
 from ml.models.decoder import SimplifiedCircuitDecoder
-from ml.losses.gumbel_softmax_loss import GumbelSoftmaxCircuitLoss
-from ml.models.gumbel_softmax_utils import masks_to_component_type
+from ml.losses.circuit_loss import CircuitLoss
+from ml.models.component_utils import masks_to_component_type
 from torch_geometric.data import Batch
 
 
@@ -279,7 +279,7 @@ def main():
     print(f"Decoder params: {sum(p.numel() for p in decoder.parameters()):,}")
 
     # Loss function
-    loss_fn = GumbelSoftmaxCircuitLoss(
+    loss_fn = CircuitLoss(
         node_type_weight=1.0,
         node_count_weight=5.0,
         edge_component_weight=2.0,

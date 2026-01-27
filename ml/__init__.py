@@ -5,4 +5,3 @@ A deep learning framework for discovering intrinsic circuit properties
 through variational autoencoding of circuit graphs.
 """
 
-__version__ = '0.1.0'

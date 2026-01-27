@@ -1,6 +1,5 @@
 # Latent Space Analysis
 
-**Model:** v5.2 (Dynamic Node Count)
 **Analysis Date:** 2026-01-26
 
 ---
@@ -26,7 +25,7 @@ z = [z_topology | z_values | z_transfer_function]
 
 Computed from 360 circuits (60 per filter type):
 
-### Full 8D Centroids (v5.2 with node-embedding encoder, dynamic node count)
+### Full 8D Centroids
 
 | Filter Type | z[0] | z[1] | z[2] | z[3] | z[4] | z[5] | z[6] | z[7] |
 |-------------|------|------|------|------|------|------|------|------|
@@ -37,7 +36,7 @@ Computed from 360 circuits (60 per filter type):
 | rlc_series | +0.71 | -3.20 | +0.06 | +0.99 | -0.01 | -0.01 | -0.00 | -0.01 |
 | rlc_parallel | +2.69 | +2.14 | +0.11 | -1.94 | -0.01 | +0.00 | -0.00 | -0.01 |
 
-### Variance by Dimension (v5.2)
+### Variance by Dimension
 
 | Dimension | Role | Mean | Std | Range | Status |
 |-----------|------|------|-----|-------|--------|
@@ -50,7 +49,7 @@ Computed from 360 circuits (60 per filter type):
 | z[6] | Transfer func | +0.01 | 0.01 | [-0.02, 0.03] | Collapsed |
 | z[7] | Transfer func | +0.00 | 0.02 | [-0.03, 0.05] | Collapsed |
 
-**Note:** The node-embedding encoder activates z[3] (std=1.34) which distinguishes component configurations (e.g., high_pass z[3]=+2.0 vs rlc_parallel z[3]=-1.9). z[4:8] remains collapsed as no loss directly uses transfer function information.
+**Note:** The node-embedding encoder activates z[3] (std=1.34) which distinguishes component configurations (e.g., high_pass z[3]=+2.0 vs rlc_parallel z[3]=-1.9). z[4:8] remains collapsed since no loss directly uses transfer function information.
 
 ---
 
@@ -103,7 +102,7 @@ z[3] ≈ -1.9  →  rlc_parallel
 
 ## Transfer Function Dimensions (z[4:8]) — Collapsed
 
-### Current State (v5.2)
+### Current State
 
 Dimensions z[4:8] have near-zero variance (~0.01). The KL divergence loss pushes them to the prior N(0,1) since no decoder loss uses that information.
 
@@ -141,10 +140,6 @@ Loss:
 - Cannot interpolate between different frequency responses
 - Cannot generate circuits with specific cutoff/Q by manipulating z[4:8]
 - The 4D "transfer function" portion of latent space is wasted
-
-### What DID Improve (v5.0 → v5.1)
-
-The node-embedding encoder activated z[3] (std=1.34 vs 0.68), giving the values branch a meaningful dimension that distinguishes component configurations. This is because GND/VIN/VOUT node embeddings from the GNN carry richer position-specific information than the previous edge encoders.
 
 ---
 
@@ -242,5 +237,5 @@ loss_contrastive = contrastive_loss(z_pz, cutoff_q_labels)
 
 - **Interpolation script:** `scripts/generation/interpolate_filter_types.py`
 - **Encoder:** `ml/models/encoder.py`
-- **Loss function:** `ml/losses/gumbel_softmax_loss.py`
+- **Loss function:** `ml/losses/circuit_loss.py`
 - **This analysis:** `docs/LATENT_SPACE_ANALYSIS.md`

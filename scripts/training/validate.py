@@ -10,7 +10,7 @@ from ml.models.decoder import LatentGuidedGraphGPTDecoder
 from ml.data.dataset import CircuitDataset
 from torch.utils.data import DataLoader, Subset
 from torch_geometric.data import Batch
-from ml.models.gumbel_softmax_utils import masks_to_component_type
+from ml.models.component_utils import masks_to_component_type
 
 def collate_circuit_batch(batch_list):
     graphs = [item['graph'] for item in batch_list]

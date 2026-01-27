@@ -482,7 +482,7 @@ python scripts/training/train.py
 
 ### Issue: Old checkpoint incompatible
 
-**Problem:** Checkpoints from older model versions (v5.0 or earlier with edge encoders) won't load with the current encoder.
+**Problem:** Checkpoints from older models won't load with the current encoder.
 
 **Fix:** Retrain the model:
 ```bash

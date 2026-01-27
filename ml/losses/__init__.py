@@ -1,9 +1,9 @@
 """Loss functions for circuit generation training."""
 
-from .gumbel_softmax_loss import GumbelSoftmaxCircuitLoss
+from .circuit_loss import CircuitLoss
 from .connectivity_loss import ConnectivityLoss
 
 __all__ = [
-    'GumbelSoftmaxCircuitLoss',
+    'CircuitLoss',
     'ConnectivityLoss',
 ]

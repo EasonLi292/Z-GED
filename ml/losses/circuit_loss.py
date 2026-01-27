@@ -23,7 +23,7 @@ except ImportError:
     from ml.losses.connectivity_loss import ConnectivityLoss
 
 
-class GumbelSoftmaxCircuitLoss(nn.Module):
+class CircuitLoss(nn.Module):
     """
     Circuit generation loss.
 
@@ -219,7 +219,7 @@ if __name__ == '__main__':
         'component_types': torch.randint(0, 8, (batch_size, max_nodes, max_nodes)),
     }
 
-    loss_fn = GumbelSoftmaxCircuitLoss(use_connectivity_loss=False)
+    loss_fn = CircuitLoss(use_connectivity_loss=False)
     total_loss, metrics = loss_fn(predictions, targets)
 
     print(f"Total loss: {total_loss.item():.4f}")

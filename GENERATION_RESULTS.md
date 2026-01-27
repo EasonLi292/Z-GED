@@ -1,6 +1,5 @@
 # Circuit Generation Results
 
-**Model:** v5.2 (Dynamic Node Count)
 **Dataset:** 360 circuits (288 train, 72 validation)
 **Checkpoint:** `checkpoints/production/best.pt`
 

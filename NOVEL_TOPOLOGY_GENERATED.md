@@ -1,6 +1,5 @@
 # Novel Topology Generation Analysis
 
-**Model:** v5.2 (Dynamic Node Count)
 **Analysis Date:** 2026-01-26
 
 ---

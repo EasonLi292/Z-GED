@@ -224,17 +224,3 @@ This ensures reproducibility - you can always see exactly what settings were use
 - Train longer (200 epochs)
 - Increase latent_dim for more capacity
 
-## Version History
-
-- **v1.0**: Original configs (base_config.yaml)
-- **v2.0**: Optimized weights (December 2025)
-  - tf_weight: 0.5 → 0.01
-  - kl_weight: 0.05 → 0.1
-  - 53% loss reduction
-
-## Future Configurations
-
-Planned configurations for Phase 2 optimizations:
-- `large_model.yaml`: Increased capacity (128 hidden, 32 latent)
-- `curriculum.yaml`: Progressive loss weight scheduling
-- `beta_vae.yaml`: Strong disentanglement focus

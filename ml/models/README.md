@@ -39,9 +39,8 @@ This directory contains the neural network architectures for circuit generation.
 
 ### Utilities
 
-- **gumbel_softmax_utils.py** - Gumbel-Softmax sampling utilities
-  - Discrete component type sampling
-  - Component masking and conversion
+- **component_utils.py** - Component type utilities
+  - Component type encoding and conversion
 
 - **constants.py** - Filter types and circuit templates
   - Standard filter definitions

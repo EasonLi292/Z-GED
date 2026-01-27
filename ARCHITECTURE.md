@@ -1,12 +1,8 @@
 # Circuit Generation Model Architecture
 
-**Model Version:** v5.2 (Dynamic Node Count)
-
 ## Overview
 
 This model generates RLC filter circuit topologies from an 8-dimensional latent space. Unlike conditional VAEs, no external specifications are required - the latent code alone determines the circuit structure.
-
-**Key Change from v5.0:** Encoder Branch 2 (component values) now uses GND/VIN/VOUT node embeddings from the GNN instead of position-specific edge encoders.
 
 ---
 
@@ -240,7 +236,7 @@ for i in range(num_nodes):
 - `ml/models/node_decoder.py` - AutoregressiveNodeDecoder
 
 ### Training
-- `ml/losses/gumbel_softmax_loss.py` - GumbelSoftmaxCircuitLoss
+- `ml/losses/circuit_loss.py` - CircuitLoss
 - `scripts/training/train.py` - Training script
 - `scripts/training/validate.py` - Validation
 
@@ -287,6 +283,6 @@ z_new[2:4] = target_values
 
 ---
 
-**Status:** Production ready (v5.2)
+**Status:** Production ready
 
 **Checkpoint:** `checkpoints/production/best.pt`

@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import torch
 import numpy as np
 from ml.data.dataset import CircuitDataset
-from ml.models.gumbel_softmax_utils import masks_to_component_type
+from ml.models.component_utils import masks_to_component_type
 from collections import defaultdict
 
 print("="*70)
