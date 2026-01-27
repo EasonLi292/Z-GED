@@ -53,9 +53,9 @@ class SimplifiedCircuitDecoder(nn.Module):
             nn.LayerNorm(hidden_dim)
         )
 
-        # Node count predictor (3 to max_nodes) - uses topology dims of latent
+        # Node count predictor (3 to max_nodes)
         self.node_count_predictor = nn.Sequential(
-            nn.Linear(2, hidden_dim // 4),
+            nn.Linear(latent_dim, hidden_dim // 4),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim // 4, max_nodes - 2)
@@ -107,9 +107,8 @@ class SimplifiedCircuitDecoder(nn.Module):
         # Encode context (latent only)
         context = self.context_encoder(latent_code)
 
-        # Predict node count from topology dimensions of latent
-        latent_topo = latent_code[:, :2]
-        node_count_logits = self.node_count_predictor(latent_topo)
+        # Predict node count from full latent
+        node_count_logits = self.node_count_predictor(latent_code)
 
         # Generate nodes
         node_embeddings = []
@@ -178,9 +177,8 @@ class SimplifiedCircuitDecoder(nn.Module):
         # Encode context (latent only)
         context = self.context_encoder(latent_code)
 
-        # Predict node count from topology dimensions
-        latent_topo = latent_code[:, :2]
-        node_count_logits = self.node_count_predictor(latent_topo)
+        # Predict node count from full latent
+        node_count_logits = self.node_count_predictor(latent_code)
         target_nodes = min((torch.argmax(node_count_logits, dim=-1) + 3).item(), self.max_nodes)
 
         if verbose:
