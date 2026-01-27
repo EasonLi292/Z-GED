@@ -9,9 +9,7 @@ scripts/
 ├── training/       # Model training and validation
 ├── testing/        # Test suites
 ├── generation/     # Circuit generation
-├── analysis/       # Analysis and debugging
-├── utils/          # Utilities
-└── archive/        # Archived/experimental scripts
+└── analysis/       # Analysis and debugging
 ```
 
 ## Training
@@ -44,10 +42,6 @@ scripts/
 - **test_single_spec.py** - Test single specification in detail
   - Useful for debugging specific cases
 
-- **test_hybrid_specs.py** - Test hybrid/cross-type specifications
-  - Forces interpolation across filter types
-  - Tests generalization capability
-
 ## Generation
 
 **Main Generation:**
@@ -56,61 +50,10 @@ scripts/
   - Output: Circuit with component values and netlist
   - Uses K-NN interpolation in latent space
 
-**Utilities:**
-- **extract_circuit_diagrams.py** - Extract detailed topology for documentation
-  - Outputs circuit diagrams
-  - Useful for creating visualizations
-
-## Analysis
-
-**Error Analysis:**
-- **analyze_error_sources.py** - Investigate specification error sources
-  - Decoder reconstruction error
-  - K-NN interpolation error
-  - Condition signal strength
-  - Topology diversity
-
-**Model Analysis:**
-- **analyze_overfitting.py** - Analyze potential overfitting
-  - Model complexity vs dataset size
-  - Training/validation loss analysis
-
-- **analyze_filter_types.py** - Analyze filter type distribution
-  - Training data balance
-  - Generated topology patterns
-
-**Debugging:**
-- **debug_circuit_netlist.py** - Debug SPICE netlist generation
-  - Outputs actual SPICE netlist
-  - Useful for troubleshooting simulation issues
-
-## Utils
-
-**Dataset Tools:**
-- **inspect_dataset.py** - Inspect dataset contents
-  - Shows circuit statistics
-  - Validates data integrity
-
-- **generate_doubled_dataset.py** - Generate augmented dataset
-  - Creates larger dataset through augmentation
-  - Useful for experiments
-
-**System Tools:**
-- **check_gpu.py** - Check GPU availability and CUDA setup
-  - Validates PyTorch GPU access
-  - Tests MPS (Apple Silicon) if available
-
-- **precompute_ged.py** - Precompute graph edit distances
-  - For GED-based metrics
-  - Speeds up evaluation
-
-## Archive
-
-Older/experimental scripts preserved for reference:
-- `test_unseen_specs.py` - Redundant with test_comprehensive_specs
-- `test_topology_viability.py` - One-off topology analysis
-- `evaluate_tf.py` - Transfer function evaluation
-- `generate_targeted_tf.py` - Targeted generation (experimental)
+**Interpolation:**
+- **interpolate_filter_types.py** - Interpolate between filter types in latent space
+  - Smooth transitions between topologies
+  - Useful for exploring latent space structure
 
 ## Usage Examples
 
@@ -127,9 +70,4 @@ python scripts/testing/test_comprehensive_specs.py
 **Generation:**
 ```bash
 python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
-```
-
-**Analysis:**
-```bash
-python scripts/analysis/analyze_error_sources.py
 ```

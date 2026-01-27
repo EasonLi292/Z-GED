@@ -9,7 +9,6 @@ tests/
 ├── unit/                      # Unit tests for individual components
 │   ├── test_dataset.py        # Dataset loading and preprocessing
 │   ├── test_models.py         # Model architectures (encoder, decoder, GNN)
-│   ├── test_losses.py         # Loss functions
 │   └── test_component_substitution.py  # GED component substitution
 │
 ├── spec_generation/           # Specification-based circuit generation tests
@@ -38,7 +37,7 @@ python3 run_tests.py --suite spec
 ```bash
 python3 tests/unit/test_dataset.py
 python3 tests/unit/test_models.py
-python3 tests/unit/test_losses.py
+python3 tests/unit/test_component_substitution.py
 ```
 
 ## Test Coverage
@@ -57,18 +56,10 @@ python3 tests/unit/test_losses.py
 - ✅ ImpedanceConv layer (custom message passing)
 - ✅ ImpedanceGNN (3-layer GNN)
 - ✅ DeepSets (variable-length poles/zeros)
-- ✅ HierarchicalEncoder (24D latent)
-- ✅ HybridDecoder (template-based)
-- ✅ End-to-end VAE (encode → decode)
-- ✅ Real data integration
-
-**test_losses.py** - Loss functions
-- ✅ Chamfer distance (variable-length sets)
-- ✅ Reconstruction loss (topology + edges)
-- ✅ Transfer function loss (poles/zeros)
-- ✅ GED metric learning loss
-- ✅ Composite loss (multi-objective)
-- ✅ Gradient flow
+- ✅ HierarchicalEncoder (8D latent)
+- ✅ SimplifiedCircuitDecoder generation
+- ✅ SimplifiedCircuitDecoder forward with teacher forcing (autoregressive edges)
+- ✅ SimplifiedCircuitDecoder forward without teacher forcing
 - ✅ Real data integration
 
 **test_component_substitution.py** - GED component substitution
@@ -99,10 +90,10 @@ python3 tests/unit/test_losses.py
 ## Test Statistics
 
 ```
-Total test files: 7
-Total test cases: ~50+
+Total test files: 6
+Total test cases: ~40+
 Passing rate: 100% (except known band-stop Q limitation)
-Coverage: Dataset, Models, Losses, GED, Spec Generation
+Coverage: Dataset, Models, GED, Spec Generation
 ```
 
 ## Expected Test Output
@@ -113,7 +104,7 @@ Coverage: Dataset, Models, Losses, GED, Spec Generation
 GRAPHVAE TEST SUITE
 ======================================================================
 
-Running 7 test files...
+Running 6 test files...
 
 Running: tests/unit/test_dataset.py
 ...
@@ -121,35 +112,22 @@ Running: tests/unit/test_dataset.py
 
 Running: tests/unit/test_models.py
 ...
-✅ Phase 2 Complete: Model Architecture Ready
-
-Running: tests/unit/test_losses.py
-...
-✅ Phase 3 Complete: Loss Functions Ready
+ALL MODEL TESTS PASSED!
 
 ======================================================================
 TEST SUMMARY
 ======================================================================
   test_dataset.py                     ✅ PASS
   test_models.py                      ✅ PASS
-  test_losses.py                      ✅ PASS
   test_component_substitution.py      ✅ PASS
   test_spec_basic.py                  ✅ PASS
   test_bandpass_spec.py               ✅ PASS
   test_spec_generation.py             ✅ PASS
 
-Passed: 7/7
-
-🎉 ALL TESTS PASSED!
+Passed: 6/6
 ```
 
 ## Known Issues
-
-### test_losses.py - Untrained model warnings
-- **Issue**: KL divergence may be inf for untrained models
-- **Expected**: mu/logvar ±1000s causes exp overflow
-- **Impact**: None (will stabilize during training)
-- **Status**: Normal behavior
 
 ### test_spec_generation.py - Band-stop Q error
 - **Issue**: Band-stop Q factor has ~40% error

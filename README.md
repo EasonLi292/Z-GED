@@ -105,7 +105,7 @@ Z-GED/
    - Branch 2 (Values): GND/VIN/VOUT node embeddings → z[2:4]
    - Branch 3 (Transfer Function): DeepSets on poles/zeros → z[4:8]
 2. **Latent Space** - Hierarchical structure: `[topology(2D) | values(2D) | transfer_function(4D)]`
-3. **Decoder** - Autoregressive transformer generates nodes and edges with component types
+3. **Decoder** - Autoregressive transformer generates nodes; GRU-based autoregressive edge decoder generates edges with component types (each edge conditioned on all previous edge decisions)
 
 ### Latent Space Structure
 

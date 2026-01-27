@@ -207,6 +207,22 @@ def test_decoder():
     assert output['node_types'].shape[1] <= 5
     assert output['edge_existence'].shape == (batch_size, num_nodes, num_nodes)
 
+    # Test forward with teacher forcing
+    print("\n  Testing forward with teacher forcing...")
+    decoder.train()
+    target_nodes = torch.randint(0, 4, (batch_size, 4))
+    target_edges = torch.randint(0, 8, (batch_size, 4, 4))
+    out = decoder(z, target_node_types=target_nodes, target_edges=target_edges)
+    assert out['node_types'].shape == (batch_size, 4, 5)
+    assert out['edge_component_logits'].shape == (batch_size, 4, 4, 8)
+    print(f"  Teacher forcing output: node_types={out['node_types'].shape}, "
+          f"edges={out['edge_component_logits'].shape}")
+
+    # Test forward without teacher forcing (autoregressive with own predictions)
+    out2 = decoder(z, target_node_types=target_nodes)
+    assert out2['edge_component_logits'].shape == (batch_size, 4, 4, 8)
+    print(f"  No teacher forcing output: edges={out2['edge_component_logits'].shape}")
+
     print(f"\nModel parameters: {sum(p.numel() for p in decoder.parameters()):,}")
     print("\n  SimplifiedCircuitDecoder test passed")
 

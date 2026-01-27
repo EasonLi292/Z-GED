@@ -108,10 +108,18 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
 
         targets = graph_to_dense_format(graph)
 
+        # Unified edge-component target for teacher forcing (0=no edge, 1-7=type)
+        target_edge_components = torch.where(
+            targets['edge_existence'] > 0.5,
+            targets['component_types'],
+            torch.zeros_like(targets['component_types'])
+        ).long()
+
         # Forward (latent only, no conditions)
         predictions = decoder(
             latent_code=latent,
-            target_node_types=targets['node_types']
+            target_node_types=targets['node_types'],
+            target_edges=target_edge_components
         )
 
         # Loss
@@ -168,9 +176,17 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
             latent = mu  # Use mean for validation
             targets = graph_to_dense_format(graph)
 
+            # Unified edge-component target for teacher forcing (0=no edge, 1-7=type)
+            target_edge_components = torch.where(
+                targets['edge_existence'] > 0.5,
+                targets['component_types'],
+                torch.zeros_like(targets['component_types'])
+            ).long()
+
             predictions = decoder(
                 latent_code=latent,
-                target_node_types=targets['node_types']
+                target_node_types=targets['node_types'],
+                target_edges=target_edge_components
             )
 
             loss, metrics = loss_fn(

@@ -9,7 +9,7 @@
 
 | Metric | Training | Validation |
 |--------|----------|------------|
-| Total Loss | 0.92 | 1.03 |
+| Total Loss | 0.97 | 1.02 |
 | Node Count Accuracy | 100% | 100% |
 | Edge Existence Accuracy | 100% | 100% |
 | Component Type Accuracy | 100% | 100% |
@@ -29,8 +29,8 @@ python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
 | Cutoff | Q | Generated Circuit | Status |
 |--------|---|-------------------|--------|
 | 1 kHz | 0.707 | `GND--R--VOUT, VIN--C--VOUT` | Valid |
-| 10 kHz | 0.707 | `GND--C--VOUT, VIN--R--VOUT` | Valid |
-| 100 kHz | 0.707 | `GND--R--VOUT, VIN--C--VOUT` | Valid |
+| 10 kHz | 0.707 | `GND--RCL--VOUT, VIN--R--VOUT` | Valid |
+| 100 kHz | 0.707 | `GND--C--VOUT, VIN--R--VOUT` | Valid |
 | 10 kHz | 5.0 | `GND--RCL--VOUT, VIN--R--VOUT` | Valid |
 
 ### Edge Cases
@@ -78,17 +78,17 @@ The 8D latent space clusters by filter type. Generating from cluster centroids:
 
 | Filter Type | z[0] | z[1] | z[3] | Generated from Centroid |
 |-------------|------|------|------|-------------------------|
-| low_pass | +2.71 | +2.55 | -0.07 | `GND--C--VOUT, VIN--R--VOUT` |
-| high_pass | +2.60 | +2.38 | +1.99 | `GND--R--VOUT, VIN--C--VOUT` |
-| band_pass | -3.57 | +1.38 | +0.01 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` |
-| band_stop | +0.85 | -3.10 | -1.41 | `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--R--INT1` |
-| rlc_series | +0.71 | -3.20 | +0.99 | `GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--C--INT2` |
-| rlc_parallel | +2.69 | +2.14 | -1.94 | `GND--RCL--VOUT, VIN--R--VOUT` |
+| low_pass | -3.69 | -2.27 | -1.46 | `GND--C--VOUT, VIN--R--VOUT` |
+| high_pass | -3.64 | -2.22 | -0.23 | `GND--R--VOUT, VIN--C--VOUT` |
+| band_pass | -1.54 | +4.13 | -0.11 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` |
+| band_stop | +2.45 | -2.07 | -1.27 | `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--R--INT1` |
+| rlc_series | +2.51 | -2.05 | +1.22 | `GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--C--INT2` |
+| rlc_parallel | -3.64 | -2.33 | +1.32 | `GND--RCL--VOUT, VIN--R--VOUT` |
 
 **Observations:**
-- z[0] separates band_pass (negative) from the 3-node circuits (positive)
-- z[1] separates complex 4-5 node circuits (negative) from simple 3-node circuits (positive)
-- z[3] (values branch) distinguishes component configurations: high_pass (+2.0) vs rlc_parallel (-1.9)
+- z[0] separates complex 4-5 node circuits (positive) from 3-node circuits (negative)
+- z[1] separates band_pass (positive) from other topologies (negative)
+- z[3] (values branch) distinguishes component configurations: rlc_parallel (+1.32) vs low_pass (-1.46)
 
 ---
 
@@ -113,13 +113,13 @@ The 8D latent space clusters by filter type. Generating from cluster centroids:
 
 ### Low-pass → High-pass
 
-R and C swap positions at α ≈ 0.5:
+R and C swap positions at α ≈ 0.75:
 
 | α | Generated |
 |---|-----------|
 | 0.00 | `GND--C--VOUT, VIN--R--VOUT` (low-pass) |
 | 0.25 | `GND--C--VOUT, VIN--R--VOUT` |
-| 0.50 | `GND--R--VOUT, VIN--C--VOUT` (transition) |
+| 0.50 | `GND--C--VOUT, VIN--R--VOUT` (transition) |
 | 0.75 | `GND--R--VOUT, VIN--C--VOUT` |
 | 1.00 | `GND--R--VOUT, VIN--C--VOUT` (high-pass) |
 
@@ -131,7 +131,7 @@ Distributed → lumped transition:
 |---|-----------|
 | 0.00 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` (distributed LC) |
 | 0.25 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` |
-| 0.50 | `GND--RCL--VOUT, VIN--R--VOUT` (transition) |
+| 0.50 | `GND--R--VOUT` (transition) |
 | 0.75 | `GND--RCL--VOUT, VIN--R--VOUT` |
 | 1.00 | `GND--RCL--VOUT, VIN--R--VOUT` (lumped RCL) |
 
@@ -139,36 +139,35 @@ Distributed → lumped transition:
 
 ## Novel Topology Generation
 
-The model can generate **novel topologies not seen in training** through latent space interpolation and sampling.
+The model can generate **novel topologies not seen in training** through latent space sampling.
 
 ### Exploration Results (500 samples)
 
 | Category | Unique Topologies | Samples |
 |----------|-------------------|---------|
-| Known (in training) | 6 | 331 (66%) |
-| **Valid novel** | **14** | **90 (18%)** |
-| Invalid (disconnected) | - | 79 (16%) |
+| Known (in training) | 6 | 390 (78%) |
+| **Valid novel** | **10** | **65 (13%)** |
+| Invalid (disconnected) | - | 45 (9%) |
 
 ### Top Valid Novel Topologies Discovered
 
 | Topology | Count | Nodes | Components |
 |----------|-------|-------|------------|
-| `GND--R--VOUT, VIN--R--VOUT` | 26 | 3 | R |
-| `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--C--INT2` | 10 | 5 | RLC |
-| `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1` | 9 | 4 | R |
-| `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--C--INT1, VOUT--C--INT2` | 9 | 5 | RLC |
-| `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1` | 6 | 4 | RC |
-| `GND--C--INT2, GND--R--VOUT, INT1--L--INT2, VIN--R--INT1, VOUT--C--INT1` | 5 | 5 | RLC |
+| `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1` | 33 | 4 | R |
+| `GND--R--VOUT, VIN--R--INT1` | 10 | 4 | R |
+| `GND--R--VOUT, INT1--L--INT2, VIN--L--INT1, VOUT--C--INT1, VOUT--C--INT2` | 5 | 5 | RLC |
+| `GND--C--VOUT, VIN--R--INT1, VIN--R--VOUT, VOUT--R--INT1` | 5 | 4 | RC |
+| `GND--R--VOUT, VIN--L--INT1, VOUT--R--INT1` | 4 | 4 | RL |
 
 ### Generalization Capability
 
 **Strengths:**
 - Compositional generalization (recombines learned components)
-- 14 unique valid novel topologies discovered
-- Maintains graph connectivity in 84% of samples
+- 10 unique valid novel topologies discovered
+- Maintains graph connectivity in 91% of samples
 
 **Limitations:**
-- Most samples (66%) reproduce training topologies
+- Most samples (78%) reproduce training topologies
 - Novel circuits are variations, not fundamentally new architectures
 - No guarantee of electrical validity (only structural validity)
 

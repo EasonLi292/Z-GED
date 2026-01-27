@@ -1,6 +1,6 @@
 # Latent Space Analysis
 
-**Analysis Date:** 2026-01-26
+**Analysis Date:** 2026-01-27
 
 ---
 
@@ -29,56 +29,64 @@ Computed from 360 circuits (60 per filter type):
 
 | Filter Type | z[0] | z[1] | z[2] | z[3] | z[4] | z[5] | z[6] | z[7] |
 |-------------|------|------|------|------|------|------|------|------|
-| low_pass | +2.71 | +2.55 | -0.17 | -0.07 | +0.01 | +0.00 | +0.03 | +0.05 |
-| high_pass | +2.60 | +2.38 | +0.08 | +1.99 | -0.01 | +0.00 | +0.00 | -0.01 |
-| band_pass | -3.57 | +1.38 | +0.00 | +0.01 | -0.01 | -0.00 | -0.00 | -0.01 |
-| band_stop | +0.85 | -3.10 | -0.06 | -1.41 | -0.01 | +0.00 | +0.01 | -0.00 |
-| rlc_series | +0.71 | -3.20 | +0.06 | +0.99 | -0.01 | -0.01 | -0.00 | -0.01 |
-| rlc_parallel | +2.69 | +2.14 | +0.11 | -1.94 | -0.01 | +0.00 | -0.00 | -0.01 |
+| low_pass | -3.69 | -2.27 | +0.88 | -1.46 | +0.01 | -0.01 | +0.02 | +0.03 |
+| high_pass | -3.64 | -2.22 | -1.68 | -0.23 | +0.00 | +0.00 | -0.00 | +0.00 |
+| band_pass | -1.54 | +4.13 | -0.06 | -0.11 | +0.00 | -0.00 | +0.00 | -0.00 |
+| band_stop | +2.45 | -2.07 | -0.07 | -1.27 | -0.01 | -0.03 | +0.00 | -0.01 |
+| rlc_series | +2.51 | -2.05 | +0.23 | +1.22 | +0.00 | -0.00 | +0.00 | -0.01 |
+| rlc_parallel | -3.64 | -2.33 | +0.84 | +1.32 | -0.00 | +0.00 | +0.00 | +0.00 |
 
 ### Variance by Dimension
 
 | Dimension | Role | Mean | Std | Range | Status |
 |-----------|------|------|-----|-------|--------|
-| z[0] | Topology | +1.00 | 2.22 | [-3.61, 2.73] | **Active** |
-| z[1] | Topology | +0.36 | 2.51 | [-3.23, 2.60] | **Active** |
-| z[2] | Values | +0.00 | 0.10 | [-0.24, 0.18] | Collapsed |
-| z[3] | Values | -0.07 | 1.34 | [-2.02, 2.03] | **Active** |
-| z[4] | Transfer func | -0.00 | 0.01 | [-0.01, 0.01] | Collapsed |
-| z[5] | Transfer func | -0.00 | 0.01 | [-0.04, 0.01] | Collapsed |
-| z[6] | Transfer func | +0.01 | 0.01 | [-0.02, 0.03] | Collapsed |
-| z[7] | Transfer func | +0.00 | 0.02 | [-0.03, 0.05] | Collapsed |
+| z[0] | Topology | -1.26 | 2.75 | [-3.72, +2.54] | **Active** |
+| z[1] | Topology | -1.13 | 2.36 | [-2.43, +4.19] | **Active** |
+| z[2] | Values | +0.03 | 0.85 | [-1.71, +0.92] | **Active** |
+| z[3] | Values | -0.09 | 1.08 | [-1.52, +1.38] | **Active** |
+| z[4] | Transfer func | -0.00 | 0.01 | [-0.02, +0.01] | Collapsed |
+| z[5] | Transfer func | -0.01 | 0.01 | [-0.03, +0.01] | Collapsed |
+| z[6] | Transfer func | +0.00 | 0.01 | [-0.01, +0.02] | Collapsed |
+| z[7] | Transfer func | +0.00 | 0.01 | [-0.04, +0.03] | Collapsed |
 
-**Note:** The node-embedding encoder activates z[3] (std=1.34) which distinguishes component configurations (e.g., high_pass z[3]=+2.0 vs rlc_parallel z[3]=-1.9). z[4:8] remains collapsed since no loss directly uses transfer function information.
+**Note:** Both values dimensions are now active: z[2] (std=0.85) distinguishes low_pass/rlc_parallel (+0.84/+0.88) from high_pass (-1.68), while z[3] (std=1.08) separates rlc_parallel/rlc_series (+1.32/+1.22) from low_pass (-1.46). z[4:8] remains collapsed since no loss directly uses transfer function information.
 
 ---
 
 ## Latent Space Interpretation
 
-### z[0]: Filter Type Axis
+### z[0]: Complexity Axis
 
 ```
-z[0] < -3.0  →  band_pass (4-node RLC)
-z[0] ≈ +0.7  →  band_stop / rlc_series (4-5 node)
-z[0] > +2.5  →  3-node circuits (low_pass, high_pass, rlc_parallel)
+z[0] < -3.5  →  3-node circuits (low_pass, high_pass, rlc_parallel)
+z[0] ≈ -1.5  →  4-node circuits (band_pass)
+z[0] > +2.4  →  4-5 node circuits (band_stop, rlc_series)
 ```
 
-### z[1]: Complexity Axis
+### z[1]: Band-pass Axis
 
 ```
-z[1] > +2.0  →  Simple 3-node circuits (low_pass, high_pass, rlc_parallel)
-z[1] ≈ +1.4  →  4-node circuits (band_pass)
-z[1] < -3.0  →  Complex 4-5 node circuits (band_stop, rlc_series)
+z[1] > +4.0  →  band_pass (4-node distributed LC)
+z[1] ≈ -2.0  →  all other topologies
 ```
 
-### z[3]: Component Configuration Axis
+### z[2]: Component Configuration Axis
 
 ```
-z[3] ≈ +2.0  →  high_pass (C on VIN-VOUT)
-z[3] ≈ +1.0  →  rlc_series
-z[3] ≈  0.0  →  low_pass / band_pass
-z[3] ≈ -1.4  →  band_stop
-z[3] ≈ -1.9  →  rlc_parallel
+z[2] ≈ +0.9  →  low_pass / rlc_parallel (C or RCL to ground)
+z[2] ≈ +0.2  →  rlc_series
+z[2] ≈ -0.1  →  band_pass / band_stop
+z[2] ≈ -1.7  →  high_pass (C on VIN-VOUT)
+```
+
+### z[3]: Component Type Axis
+
+```
+z[3] ≈ +1.3  →  rlc_parallel / rlc_series
+z[3] ≈ -0.1  →  band_pass
+z[3] ≈ -0.2  →  high_pass
+z[3] ≈ -1.3  →  band_stop
+z[3] ≈ -1.5  →  low_pass
 ```
 
 ### 2D Visualization (z[0] vs z[1])
@@ -86,16 +94,16 @@ z[3] ≈ -1.9  →  rlc_parallel
 ```
         z[1]
          ^
-    +3   | low_pass  rlc_parallel  high_pass
-         |    *          *            *
-    +1   |                      band_pass
-         |                         *
-    -1   |
+    +4   |                band_pass
+         |                    *
+    +2   |
          |
-    -3   |         rlc_series  band_stop
-         |            *           *
-         +---------------------------------> z[0]
-            -4    -2     0     +1    +3
+     0   |
+         |
+    -2   | low_pass  high_pass  rlc_parallel    band_stop  rlc_series
+         |    *          *          *               *          *
+         +--------------------------------------------------------------> z[0]
+            -4        -3                          +2        +3
 ```
 
 ---
@@ -129,7 +137,7 @@ Loss:
 
 **What happens during training:**
 
-1. Decoder learns to reconstruct topology using z[0:4] (3 active dimensions)
+1. Decoder learns to reconstruct topology using z[0:4] (4 active dimensions)
 2. z[4:8] provides no useful gradient (nothing depends on it)
 3. KL loss pushes all dimensions toward the prior N(0,1)
 4. Without competing signal, z[4:8] collapses to near-zero

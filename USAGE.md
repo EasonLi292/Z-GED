@@ -319,8 +319,19 @@ for epoch in range(100):
         std = torch.exp(0.5 * logvar)
         latent = mu + torch.randn_like(std) * std
 
-        # Decode
-        predictions = decoder(latent_code=latent, target_node_types=targets)
+        # Unified edge-component target for teacher forcing (0=no edge, 1-7=type)
+        target_edge_components = torch.where(
+            targets['edge_existence'] > 0.5,
+            targets['component_types'],
+            torch.zeros_like(targets['component_types'])
+        ).long()
+
+        # Decode (teacher forcing: ground-truth edges fed back autoregressively)
+        predictions = decoder(
+            latent_code=latent,
+            target_node_types=targets['node_types'],
+            target_edges=target_edge_components
+        )
 
         # Compute loss and backprop
         loss = criterion(predictions, targets)
@@ -507,13 +518,25 @@ class SimplifiedCircuitDecoder:
         dropout: float = 0.1
     )
 
+    def forward(
+        self,
+        latent_code: Tensor,                    # [batch, latent_dim]
+        target_node_types: Optional[Tensor],     # [batch, num_nodes] teacher forcing
+        target_edges: Optional[Tensor] = None    # [batch, num_nodes, num_nodes] 0-7 teacher forcing
+    ) -> Dict[str, Tensor]:
+        """Training forward pass with teacher forcing for edges."""
+        # Returns:
+        #   node_types: [batch, num_nodes, 5] logits
+        #   node_count_logits: [batch, max_nodes-2] logits
+        #   edge_component_logits: [batch, num_nodes, num_nodes, 8] logits
+
     def generate(
         self,
         latent_code: Tensor,      # [batch, latent_dim]
         edge_threshold: float = 0.5,
         verbose: bool = False
     ) -> Dict[str, Tensor]:
-        """Generate circuit from latent code."""
+        """Generate circuit from latent code (autoregressive edge decoding)."""
         # Returns:
         #   node_types: [batch, num_nodes]
         #   edge_existence: [batch, num_nodes, num_nodes]

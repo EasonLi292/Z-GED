@@ -88,6 +88,13 @@ class SimplifiedCircuitDecoder(nn.Module):
         """
         Forward pass (training).
 
+        Args:
+            latent_code: [batch, latent_dim]
+            target_node_types: [batch, num_nodes] for teacher forcing nodes
+            target_edges: [batch, num_nodes, num_nodes] unified edge-component
+                target (0=no edge, 1-7=component type) for teacher forcing edges.
+                If None, uses predicted (argmax) edges as autoregressive input.
+
         Returns:
             node_types: [batch, num_nodes, 5] logits
             node_count_logits: [batch, max_nodes-2] logits
@@ -121,18 +128,29 @@ class SimplifiedCircuitDecoder(nn.Module):
 
         node_logits = torch.stack(node_logits_list, dim=1)
 
-        # Generate edges (topology only)
+        # Generate edges autoregressively (teacher forcing if targets provided)
         edge_component_logits = torch.zeros(batch_size, num_nodes, num_nodes, 8, device=device)
+
+        edge_hidden = self.edge_decoder.init_hidden(batch_size, device)
+        prev_edge_token = torch.zeros(batch_size, dtype=torch.long, device=device)
 
         for i in range(num_nodes):
             for j in range(i):
-                logits = self.edge_decoder(
+                logits, edge_hidden = self.edge_decoder(
                     node_embeddings[i],
                     node_embeddings[j],
-                    latent_code
+                    latent_code,
+                    edge_hidden,
+                    prev_edge_token
                 )
                 edge_component_logits[:, i, j, :] = logits
                 edge_component_logits[:, j, i, :] = logits  # Symmetric
+
+                # Teacher forcing: use ground truth; otherwise use predicted
+                if target_edges is not None:
+                    prev_edge_token = target_edges[:, i, j].long()
+                else:
+                    prev_edge_token = torch.argmax(logits, dim=-1)
 
         return {
             'node_types': node_logits,
@@ -197,16 +215,21 @@ class SimplifiedCircuitDecoder(nn.Module):
             names = ['GND', 'VIN', 'VOUT', 'INT', 'MASK']
             print(f"Nodes: {[names[t.item()] for t in predicted_node_types]}")
 
-        # Generate edges
+        # Generate edges autoregressively
         edge_existence = torch.zeros(batch_size, target_nodes, target_nodes, device=device)
         component_types = torch.zeros(batch_size, target_nodes, target_nodes, dtype=torch.long, device=device)
 
+        edge_hidden = self.edge_decoder.init_hidden(batch_size, device)
+        prev_edge_token = torch.zeros(batch_size, dtype=torch.long, device=device)
+
         for i in range(target_nodes):
             for j in range(i):
-                logits = self.edge_decoder(
+                logits, edge_hidden = self.edge_decoder(
                     node_embeddings[i],
                     node_embeddings[j],
-                    latent_code
+                    latent_code,
+                    edge_hidden,
+                    prev_edge_token
                 )
 
                 probs = F.softmax(logits[0], dim=-1)
@@ -218,6 +241,9 @@ class SimplifiedCircuitDecoder(nn.Module):
                     edge_existence[0, j, i] = 1.0
                     component_types[0, i, j] = predicted_class
                     component_types[0, j, i] = predicted_class
+
+                # Feed back the predicted decision for next step
+                prev_edge_token = torch.argmax(logits, dim=-1)
 
         if verbose:
             num_edges = int(edge_existence.sum().item() // 2)
@@ -245,10 +271,16 @@ if __name__ == '__main__':
     print("\nGeneration:")
     circuit = decoder.generate(latent, verbose=True)
 
-    print("\nForward pass:")
+    print("\nForward pass (with teacher forcing):")
     target_nodes = torch.randint(0, 5, (1, 4))
-    out = decoder(latent, target_node_types=target_nodes)
+    target_edges = torch.randint(0, 8, (1, 4, 4))
+    out = decoder(latent, target_node_types=target_nodes, target_edges=target_edges)
     print(f"  node_types: {out['node_types'].shape}")
     print(f"  edge_component_logits: {out['edge_component_logits'].shape}")
+
+    print("\nForward pass (without teacher forcing):")
+    out2 = decoder(latent, target_node_types=target_nodes)
+    print(f"  node_types: {out2['node_types'].shape}")
+    print(f"  edge_component_logits: {out2['edge_component_logits'].shape}")
 
     print("\n✅ Test passed!")

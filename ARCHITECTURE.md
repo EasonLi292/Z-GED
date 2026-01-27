@@ -59,17 +59,17 @@ z = [z_topology | z_values | z_transfer_function]
 
 **Statistics (from 360 training circuits):**
 ```
-z[0]: mean= 1.00, std=2.22, range=[-3.61, 2.73]
-z[1]: mean= 0.36, std=2.51, range=[-3.23, 2.60]
-z[2]: mean= 0.00, std=0.10, range=[-0.24, 0.18]
-z[3]: mean=-0.07, std=1.34, range=[-2.02, 2.03]
-z[4]: mean=-0.00, std=0.01, range=[-0.01, 0.01]
-z[5]: mean=-0.00, std=0.01, range=[-0.04, 0.01]
-z[6]: mean= 0.01, std=0.01, range=[-0.02, 0.03]
-z[7]: mean= 0.00, std=0.02, range=[-0.03, 0.05]
+z[0]: mean=-1.26, std=2.75, range=[-3.72, +2.54]
+z[1]: mean=-1.13, std=2.36, range=[-2.43, +4.19]
+z[2]: mean=+0.03, std=0.85, range=[-1.71, +0.92]
+z[3]: mean=-0.09, std=1.08, range=[-1.52, +1.38]
+z[4]: mean=-0.00, std=0.01, range=[-0.02, +0.01]
+z[5]: mean=-0.01, std=0.01, range=[-0.03, +0.01]
+z[6]: mean=+0.00, std=0.01, range=[-0.01, +0.02]
+z[7]: mean=+0.00, std=0.01, range=[-0.04, +0.03]
 ```
 
-The topology dimensions (z[0:2]) have the highest variance, encoding graph structure and filter type. z[3] (values branch) also has meaningful variance (std=1.34), encoding component configuration from the GND/VIN/VOUT node embeddings.
+The topology dimensions (z[0:2]) have the highest variance, encoding graph structure and filter type. Both values branch dimensions are active: z[2] (std=0.85) and z[3] (std=1.08), encoding component configuration from the GND/VIN/VOUT node embeddings.
 
 ---
 
@@ -87,14 +87,14 @@ Node Count Predictor: z[0:2] → (max_nodes-2)-way classification (3 to max_node
   ↓
 Autoregressive Node Generation (GND, VIN, VOUT, INTERNAL...)
   ↓
-Joint Edge-Component Prediction (for each node pair)
+Autoregressive Edge-Component Prediction (GRU-based, for each node pair)
   ↓
 Output: node_types, edge_existence, component_types
 ```
 
-**Parameters:** ~4.9M
+**Parameters:** ~5.6M
 
-**Key Design:** The latent code alone determines the circuit. No external conditions (frequency, Q) are needed.
+**Key Design:** The latent code alone determines the circuit. No external conditions (frequency, Q) are needed. Edge decisions are autoregressive — each edge is conditioned on all previous edge decisions via a GRU hidden state (GraphRNN "Edge-level RNN" concept).
 
 ---
 
@@ -112,10 +112,10 @@ Class 6: Edge with CL (parallel)
 Class 7: Edge with RCL (parallel)
 ```
 
-**Edge Decoder:**
+**Edge Decoder (Autoregressive):**
 ```python
 class LatentGuidedEdgeDecoder:
-    def forward(self, node_i, node_j, latent):
+    def forward(self, node_i, node_j, latent, edge_hidden_state, previous_edge_token):
         # Encode node pair
         edge = self.edge_encoder(concat([node_i, node_j]))
 
@@ -123,9 +123,20 @@ class LatentGuidedEdgeDecoder:
         context = self.context_proj(latent)
         attended = self.cross_attention(edge, context)
 
+        # Embed previous edge decision + GRU step
+        prev_embed = self.edge_token_embedding(previous_edge_token)
+        new_hidden = self.edge_gru(concat([attended, prev_embed]), edge_hidden_state)
+
+        # Fuse: [node pair repr, latent context, sequential state]
+        fused = self.fusion(concat([edge, attended, new_hidden]))
+
         # 8-way classification
-        return self.output_head(attended)  # → [batch, 8]
+        return self.output_head(fused), new_hidden  # → [batch, 8], [batch, 256]
 ```
+
+**Training:** Teacher forcing — the ground-truth edge class from position (i, j) is fed as `previous_edge_token` for position (i, j+1).
+
+**Inference:** The model's own predicted class is fed back autoregressively.
 
 ---
 
@@ -221,7 +232,7 @@ for i in range(num_nodes):
 
 - **Dataset:** 360 circuits (288 train, 72 val)
 - **Epochs:** 100
-- **Best Val Loss:** 1.0252 (epoch 100)
+- **Best Val Loss:** 1.0181 (epoch 97)
 - **Training Time:** ~12 minutes on CPU
 
 ---
@@ -241,7 +252,7 @@ for i in range(num_nodes):
 - `scripts/training/validate.py` - Validation
 
 ### Checkpoints
-- `checkpoints/production/best.pt` - Best model (val_loss=1.0252)
+- `checkpoints/production/best.pt` - Best model (val_loss=1.0181)
 
 ---
 
@@ -285,4 +296,4 @@ z_new[2:4] = target_values
 
 **Status:** Production ready
 
-**Checkpoint:** `checkpoints/production/best.pt`
+**Checkpoint:** `checkpoints/production/best.pt` (val_loss=1.0181)
