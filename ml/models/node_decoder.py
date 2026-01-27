@@ -47,6 +47,10 @@ class AutoregressiveNodeDecoder(nn.Module):
         # Positional encoding
         self.position_embedding = nn.Embedding(max_position_embeddings, hidden_dim)
 
+        # Length conditioning (total node count for this generation pass)
+        # +1 because count N requires index N (e.g., 10 nodes needs index 10)
+        self.length_embedding = nn.Embedding(max_position_embeddings + 1, hidden_dim)
+
         # Transformer decoder
         decoder_layer = nn.TransformerDecoderLayer(
             d_model=hidden_dim,
@@ -69,6 +73,7 @@ class AutoregressiveNodeDecoder(nn.Module):
         self,
         context: torch.Tensor,
         position: int,
+        total_node_count: int,
         previous_nodes: Optional[List[torch.Tensor]] = None,
         teacher_node_type: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -78,6 +83,7 @@ class AutoregressiveNodeDecoder(nn.Module):
         Args:
             context: Context embedding [batch, hidden_dim] (latent + specs)
             position: Node position (0, 1, 2, ...)
+            total_node_count: Total number of nodes for this generation pass
             previous_nodes: List of previous node embeddings
             teacher_node_type: Ground truth node type for teacher forcing [batch]
 
@@ -88,12 +94,16 @@ class AutoregressiveNodeDecoder(nn.Module):
         batch_size = context.shape[0]
         device = context.device
 
-        # Add positional encoding to context
+        # Add positional encoding and length conditioning to context
         pos_embed = self.position_embedding(
             torch.tensor([position], device=device)
         ).expand(batch_size, -1)  # [batch, hidden_dim]
 
-        query = context + pos_embed  # [batch, hidden_dim]
+        len_embed = self.length_embedding(
+            torch.tensor([total_node_count], device=device)
+        ).expand(batch_size, -1)  # [batch, hidden_dim]
+
+        query = context + pos_embed + len_embed  # [batch, hidden_dim]
         query = query.unsqueeze(1)  # [batch, 1, hidden_dim]
 
         # If first node, no previous context to attend to

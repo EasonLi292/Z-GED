@@ -119,6 +119,7 @@ class SimplifiedCircuitDecoder(nn.Module):
             node_logits, node_embed = self.node_decoder(
                 context=context,
                 position=i,
+                total_node_count=num_nodes,
                 previous_nodes=node_embeddings,
                 teacher_node_type=teacher_type
             )
@@ -194,6 +195,7 @@ class SimplifiedCircuitDecoder(nn.Module):
             node_logits, _ = self.node_decoder(
                 context=context,
                 position=i,
+                total_node_count=target_nodes,
                 previous_nodes=node_embeddings,
                 teacher_node_type=None
             )
