@@ -43,6 +43,7 @@ class SimplifiedCircuitDecoder(nn.Module):
         self.latent_dim = latent_dim
         self.hidden_dim = hidden_dim
         self.max_nodes = max_nodes
+        self.max_edges = max_nodes * (max_nodes - 1) // 2
 
         # Context encoder (latent only, no conditions)
         self.context_encoder = nn.Sequential(
@@ -76,7 +77,8 @@ class SimplifiedCircuitDecoder(nn.Module):
             hidden_dim=hidden_dim,
             latent_dim=latent_dim,
             num_attention_heads=4,
-            dropout=dropout
+            dropout=dropout,
+            max_edges=self.max_edges
         )
 
     def forward(
@@ -131,26 +133,47 @@ class SimplifiedCircuitDecoder(nn.Module):
         # Generate edges autoregressively (teacher forcing if targets provided)
         edge_component_logits = torch.zeros(batch_size, num_nodes, num_nodes, 8, device=device)
 
-        edge_hidden = self.edge_decoder.init_hidden(batch_size, device)
-        prev_edge_token = torch.zeros(batch_size, dtype=torch.long, device=device)
+        edge_pairs = [(i, j) for i in range(num_nodes) for j in range(i)]
+        if edge_pairs:
+            node_i_seq = torch.stack([node_embeddings[i] for i, _ in edge_pairs], dim=1)
+            node_j_seq = torch.stack([node_embeddings[j] for _, j in edge_pairs], dim=1)
 
-        for i in range(num_nodes):
-            for j in range(i):
-                logits, edge_hidden = self.edge_decoder(
-                    node_embeddings[i],
-                    node_embeddings[j],
-                    latent_code,
-                    edge_hidden,
-                    prev_edge_token
-                )
-                edge_component_logits[:, i, j, :] = logits
-                edge_component_logits[:, j, i, :] = logits  # Symmetric
+            if target_edges is not None:
+                target_seq = torch.stack(
+                    [target_edges[:, i, j] for i, j in edge_pairs],
+                    dim=1
+                ).long()
+                prev_tokens = torch.zeros(batch_size, len(edge_pairs), dtype=torch.long, device=device)
+                if len(edge_pairs) > 1:
+                    prev_tokens[:, 1:] = target_seq[:, :-1]
 
-                # Teacher forcing: use ground truth; otherwise use predicted
-                if target_edges is not None:
-                    prev_edge_token = target_edges[:, i, j].long()
-                else:
-                    prev_edge_token = torch.argmax(logits, dim=-1)
+                logits_seq = self.edge_decoder(node_i_seq, node_j_seq, latent_code, prev_tokens)
+                for idx, (i, j) in enumerate(edge_pairs):
+                    edge_component_logits[:, i, j, :] = logits_seq[:, idx, :]
+                    edge_component_logits[:, j, i, :] = logits_seq[:, idx, :]  # Symmetric
+            else:
+                predicted_tokens = []
+                node_i_prefix = []
+                node_j_prefix = []
+
+                for idx, (i, j) in enumerate(edge_pairs):
+                    node_i_prefix.append(node_embeddings[i])
+                    node_j_prefix.append(node_embeddings[j])
+                    node_i_step = torch.stack(node_i_prefix, dim=1)
+                    node_j_step = torch.stack(node_j_prefix, dim=1)
+
+                    if idx == 0:
+                        prev_tokens = torch.zeros(batch_size, 1, dtype=torch.long, device=device)
+                    else:
+                        prev_tokens = torch.zeros(batch_size, idx + 1, dtype=torch.long, device=device)
+                        prev_tokens[:, 1:] = torch.stack(predicted_tokens, dim=1)
+
+                    logits_seq = self.edge_decoder(node_i_step, node_j_step, latent_code, prev_tokens)
+                    logits = logits_seq[:, -1, :]
+                    edge_component_logits[:, i, j, :] = logits
+                    edge_component_logits[:, j, i, :] = logits  # Symmetric
+
+                    predicted_tokens.append(torch.argmax(logits, dim=-1))
 
         return {
             'node_types': node_logits,
@@ -219,18 +242,26 @@ class SimplifiedCircuitDecoder(nn.Module):
         edge_existence = torch.zeros(batch_size, target_nodes, target_nodes, device=device)
         component_types = torch.zeros(batch_size, target_nodes, target_nodes, dtype=torch.long, device=device)
 
-        edge_hidden = self.edge_decoder.init_hidden(batch_size, device)
-        prev_edge_token = torch.zeros(batch_size, dtype=torch.long, device=device)
+        edge_pairs = [(i, j) for i in range(target_nodes) for j in range(i)]
+        if edge_pairs:
+            predicted_tokens = []
+            node_i_prefix = []
+            node_j_prefix = []
 
-        for i in range(target_nodes):
-            for j in range(i):
-                logits, edge_hidden = self.edge_decoder(
-                    node_embeddings[i],
-                    node_embeddings[j],
-                    latent_code,
-                    edge_hidden,
-                    prev_edge_token
-                )
+            for idx, (i, j) in enumerate(edge_pairs):
+                node_i_prefix.append(node_embeddings[i])
+                node_j_prefix.append(node_embeddings[j])
+                node_i_step = torch.stack(node_i_prefix, dim=1)
+                node_j_step = torch.stack(node_j_prefix, dim=1)
+
+                if idx == 0:
+                    prev_tokens = torch.zeros(batch_size, 1, dtype=torch.long, device=device)
+                else:
+                    prev_tokens = torch.zeros(batch_size, idx + 1, dtype=torch.long, device=device)
+                    prev_tokens[:, 1:] = torch.stack(predicted_tokens, dim=1)
+
+                logits_seq = self.edge_decoder(node_i_step, node_j_step, latent_code, prev_tokens)
+                logits = logits_seq[:, -1, :]
 
                 probs = F.softmax(logits[0], dim=-1)
                 edge_prob = 1.0 - probs[0]
@@ -243,7 +274,7 @@ class SimplifiedCircuitDecoder(nn.Module):
                     component_types[0, j, i] = predicted_class
 
                 # Feed back the predicted decision for next step
-                prev_edge_token = torch.argmax(logits, dim=-1)
+                predicted_tokens.append(torch.argmax(logits, dim=-1))
 
         if verbose:
             num_edges = int(edge_existence.sum().item() // 2)

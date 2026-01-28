@@ -16,13 +16,13 @@ This directory contains the neural network architectures for circuit generation.
 - **decoder.py** - `SimplifiedCircuitDecoder`
   - Autoregressive decoder for circuit generation (~5.6M params)
   - Autoregressive node generation (transformer-based)
-  - Autoregressive edge generation (GRU-based, GraphRNN "Edge-level RNN" concept)
+  - Autoregressive edge generation (Transformer-based, causal self-attention)
   - Teacher forcing during training; own predictions fed back at inference
 
 - **decoder_components.py** - `LatentGuidedEdgeDecoder`
   - Edge-level autoregressive generation with latent guidance
-  - GRU cell maintains hidden state across all edge decisions
-  - Cross-attention to latent code + fusion with GRU hidden state
+  - Causal self-attention over edge decisions (Transformer encoder)
+  - Latent code + edge tokens + positional embeddings condition decisions
   - 8-way classification (0=no edge, 1-7=component type)
 
 - **node_decoder.py** - `AutoregressiveNodeDecoder`
@@ -52,7 +52,7 @@ Input Circuit → HierarchicalEncoder → 8D Latent Code → SimplifiedCircuitDe
 Decoding pipeline:
   z (8D) → Context Encoder → Node Count Predictor
                             → Autoregressive Node Decoder (transformer)
-                            → Autoregressive Edge Decoder (GRU + cross-attention)
+                            → Autoregressive Edge Decoder (Transformer + causal mask)
                             → node_types, edge_existence, component_types
 
 Latent code alone determines the generated circuit (no external conditions).

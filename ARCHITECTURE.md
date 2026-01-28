@@ -87,14 +87,14 @@ Node Count Predictor: z[0:2] → (max_nodes-2)-way classification (3 to max_node
   ↓
 Autoregressive Node Generation (GND, VIN, VOUT, INTERNAL...)
   ↓
-Autoregressive Edge-Component Prediction (GRU-based, for each node pair)
+Autoregressive Edge-Component Prediction (Transformer-based, for each node pair)
   ↓
 Output: node_types, edge_existence, component_types
 ```
 
 **Parameters:** ~5.6M
 
-**Key Design:** The latent code alone determines the circuit. No external conditions (frequency, Q) are needed. Edge decisions are autoregressive — each edge is conditioned on all previous edge decisions via a GRU hidden state (GraphRNN "Edge-level RNN" concept).
+**Key Design:** The latent code alone determines the circuit. No external conditions (frequency, Q) are needed. Edge decisions are autoregressive — each edge is conditioned on all previous edge decisions via causal self-attention over the edge sequence.
 
 ---
 
@@ -115,28 +115,26 @@ Class 7: Edge with RCL (parallel)
 **Edge Decoder (Autoregressive):**
 ```python
 class LatentGuidedEdgeDecoder:
-    def forward(self, node_i, node_j, latent, edge_hidden_state, previous_edge_token):
-        # Encode node pair
-        edge = self.edge_encoder(concat([node_i, node_j]))
+    def forward(self, node_i, node_j, latent, previous_edge_tokens):
+        # Encode node pairs
+        edge = self.edge_encoder(concat([node_i, node_j]))  # [batch, seq, hidden]
 
-        # Cross-attention to latent context
-        context = self.context_proj(latent)
-        attended = self.cross_attention(edge, context)
+        # Add latent context + position + previous edge tokens
+        context = self.context_proj(latent).unsqueeze(1)
+        pos_embed = self.position_embedding(arange(seq_len))
+        prev_embed = self.edge_token_embedding(previous_edge_tokens)
+        x = edge + context + pos_embed + prev_embed
 
-        # Embed previous edge decision + GRU step
-        prev_embed = self.edge_token_embedding(previous_edge_token)
-        new_hidden = self.edge_gru(concat([attended, prev_embed]), edge_hidden_state)
-
-        # Fuse: [node pair repr, latent context, sequential state]
-        fused = self.fusion(concat([edge, attended, new_hidden]))
+        # Causal self-attention over edge sequence
+        x = self.transformer(x, mask=causal_mask)
 
         # 8-way classification
-        return self.output_head(fused), new_hidden  # → [batch, 8], [batch, 256]
+        return self.output_head(x)  # → [batch, seq, 8]
 ```
 
-**Training:** Teacher forcing — the ground-truth edge class from position (i, j) is fed as `previous_edge_token` for position (i, j+1).
+**Training:** Teacher forcing — the ground-truth edge class sequence is shifted right and fed as `previous_edge_tokens`.
 
-**Inference:** The model's own predicted class is fed back autoregressively.
+**Inference:** The model's own predicted classes are fed back autoregressively.
 
 ---
 

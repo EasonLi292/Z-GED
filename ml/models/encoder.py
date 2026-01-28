@@ -45,6 +45,7 @@ class HierarchicalEncoder(nn.Module):
         latent_dim: Total latent dimension (default: 8)
         topo_latent_dim: Topology latent dimension (default: 2)
         structure_latent_dim: Structure latent dimension (default: 2)
+        values_latent_dim: Alias for structure_latent_dim (default: None)
         pz_latent_dim: Poles/zeros latent dimension (default: 4)
         dropout: Dropout probability (default: 0.1)
     """
@@ -60,11 +61,17 @@ class HierarchicalEncoder(nn.Module):
         # Variable branch dimensions (defaults: 2D + 2D + 4D for 8D total)
         topo_latent_dim: Optional[int] = None,
         structure_latent_dim: Optional[int] = None,
+        values_latent_dim: Optional[int] = None,
         pz_latent_dim: Optional[int] = None
     ):
         super().__init__()
 
         # Set branch dimensions
+        if values_latent_dim is not None:
+            if structure_latent_dim is not None and structure_latent_dim != values_latent_dim:
+                raise ValueError("values_latent_dim and structure_latent_dim must match when both are set")
+            structure_latent_dim = values_latent_dim
+
         if topo_latent_dim is None or structure_latent_dim is None or pz_latent_dim is None:
             # Production defaults: 2D topology + 2D structure + 4D TF = 8D total
             if latent_dim == 8:
@@ -88,6 +95,8 @@ class HierarchicalEncoder(nn.Module):
         self.edge_feature_dim = edge_feature_dim
         self.gnn_hidden_dim = gnn_hidden_dim
         self.latent_dim = latent_dim
+        # Backward compatibility for older configs/tests
+        self.values_latent_dim = self.structure_latent_dim
 
         # Stage 1: Impedance-Aware GNN
         self.gnn = ImpedanceGNN(
