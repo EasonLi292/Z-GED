@@ -19,15 +19,16 @@ class ImpedanceConv(MessagePassing):
 
     Uses separate message transformations for each component type (R, C, L)
     to ensure the network distinguishes between different components.
+    Component values directly condition the message via concatenation.
 
-    Edge attr format: [C_norm, G_norm, L_inv_norm, is_R, is_C, is_L, is_parallel]
-    The component type one-hot (is_R, is_C, is_L at indices 3, 4, 5) is used
-    to select which transformation to apply.
+    Edge attr format: [log10(R), log10(C), log10(L)]
+    where 0 = component absent (log10 values never naturally equal 0).
+    Presence masks are derived internally from nonzero values.
 
     Args:
         in_channels: Input node feature dimension
         out_channels: Output node feature dimension
-        edge_dim: Edge feature dimension (default: 7)
+        edge_dim: Edge feature dimension (default: 3)
         aggr: Aggregation method (default: 'add')
         bias: Whether to add bias (default: True)
         dropout: Dropout probability (default: 0.1)
@@ -37,7 +38,7 @@ class ImpedanceConv(MessagePassing):
         self,
         in_channels: int,
         out_channels: int,
-        edge_dim: int = 7,
+        edge_dim: int = 3,
         aggr: str = 'add',
         bias: bool = True,
         dropout: float = 0.1,
@@ -54,12 +55,11 @@ class ImpedanceConv(MessagePassing):
         self.lin_node = nn.Linear(in_channels, out_channels, bias=False)
 
         # Component-type-specific message transformations
-        # Each component type has its own transformation
-        # This ensures the network MUST distinguish between R, C, L
-        self.lin_R = nn.Linear(out_channels + 3, out_channels)  # 3 = continuous edge features
-        self.lin_C = nn.Linear(out_channels + 3, out_channels)
-        self.lin_L = nn.Linear(out_channels + 3, out_channels)
-        self.lin_parallel = nn.Linear(out_channels + 3, out_channels)  # For parallel combinations
+        # Each takes [x_j, component_value] as input (out_channels + 1)
+        # The value directly conditions the message
+        self.lin_R = nn.Linear(out_channels + 1, out_channels)
+        self.lin_C = nn.Linear(out_channels + 1, out_channels)
+        self.lin_L = nn.Linear(out_channels + 1, out_channels)
 
         # Attention for edge importance (based on node features only)
         self.att = nn.Sequential(
@@ -82,7 +82,6 @@ class ImpedanceConv(MessagePassing):
         self.lin_R.reset_parameters()
         self.lin_C.reset_parameters()
         self.lin_L.reset_parameters()
-        self.lin_parallel.reset_parameters()
 
         # Initialize attention MLP
         for layer in self.att:
@@ -145,41 +144,34 @@ class ImpedanceConv(MessagePassing):
         edge_attr: torch.Tensor
     ) -> torch.Tensor:
         """
-        Construct messages from neighbors using component-specific transformations.
+        Construct messages from neighbors using value-conditioned component transforms.
 
         Args:
             x_i: Target node features [E, out_channels]
             x_j: Source node features [E, out_channels]
-            edge_attr: Edge features [E, edge_dim]
-                Format: [C_norm, G_norm, L_inv_norm, is_R, is_C, is_L, is_parallel]
+            edge_attr: Edge features [E, 3]
+                Format: [log10(R), log10(C), log10(L)] where 0 = absent
 
         Returns:
             messages: Weighted messages [E, out_channels]
         """
-        # Extract component type masks and continuous features
-        continuous_features = edge_attr[:, :3]  # [C_norm, G_norm, L_inv_norm]
-        is_R = edge_attr[:, 3:4]  # [E, 1]
-        is_C = edge_attr[:, 4:5]  # [E, 1]
-        is_L = edge_attr[:, 5:6]  # [E, 1]
-        is_parallel = edge_attr[:, 6:7]  # [E, 1]
+        # Extract log10 component values
+        val_R = edge_attr[:, 0:1]  # [E, 1]
+        val_C = edge_attr[:, 1:2]  # [E, 1]
+        val_L = edge_attr[:, 2:3]  # [E, 1]
 
-        # Concatenate neighbor features with continuous edge features
-        node_edge_input = torch.cat([x_j, continuous_features], dim=-1)  # [E, out_channels + 3]
+        # Derive presence masks (0 = absent, nonzero = present)
+        is_R = (val_R.abs() > 0.01).float()  # [E, 1]
+        is_C = (val_C.abs() > 0.01).float()  # [E, 1]
+        is_L = (val_L.abs() > 0.01).float()  # [E, 1]
 
-        # Apply component-specific transformations
-        msg_R = self.lin_R(node_edge_input)  # [E, out_channels]
-        msg_C = self.lin_C(node_edge_input)  # [E, out_channels]
-        msg_L = self.lin_L(node_edge_input)  # [E, out_channels]
-        msg_parallel = self.lin_parallel(node_edge_input)  # [E, out_channels]
+        # Value-conditioned component transforms: cat([x_j, value])
+        msg_R = self.lin_R(torch.cat([x_j, val_R], dim=-1))  # [E, out_channels]
+        msg_C = self.lin_C(torch.cat([x_j, val_C], dim=-1))  # [E, out_channels]
+        msg_L = self.lin_L(torch.cat([x_j, val_L], dim=-1))  # [E, out_channels]
 
-        # Use component type to select/weight the appropriate message
-        # For single components: use the corresponding transformation
-        # For parallel: blend with parallel transformation
+        # Route by presence mask (compound components activate multiple transforms)
         message = is_R * msg_R + is_C * msg_C + is_L * msg_L
-
-        # For parallel combinations (is_parallel=1), add parallel transformation
-        # This handles RCL, RC, RL, CL parallel combinations
-        message = message + is_parallel * msg_parallel
 
         # Compute attention weights (based on node features, not edge type)
         att_input = torch.cat([x_i, x_j], dim=-1)
@@ -227,7 +219,7 @@ class ImpedanceGNN(nn.Module):
         hidden_channels: int,
         out_channels: int,
         num_layers: int = 3,
-        edge_dim: int = 7,
+        edge_dim: int = 3,
         dropout: float = 0.1,
         use_residual: bool = True
     ):

@@ -16,9 +16,9 @@ data:
 
 # Model architecture - ULTRA-OPTIMIZED (8D from 24D)
 model:
-  # Node and edge features (unchanged)
+  # Node and edge features
   node_feature_dim: 4
-  edge_feature_dim: 7
+  edge_feature_dim: 3  # [log10(R), log10(C), log10(L)]
 
   # GNN encoder (unchanged)
   gnn_hidden_dim: 64

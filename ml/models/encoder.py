@@ -29,7 +29,7 @@ class HierarchicalEncoder(nn.Module):
 
     Architecture:
         Stage 1: Impedance-aware GNN (3 layers)
-            Input: Node features [4D] + Edge features [7D]
+            Input: Node features [4D] + Edge features [3D: log10(R), log10(C), log10(L)]
             Output: Node embeddings [64D]
 
         Stage 2: Hierarchical latent encoding
@@ -39,7 +39,7 @@ class HierarchicalEncoder(nn.Module):
 
     Args:
         node_feature_dim: Input node feature dimension (default: 4)
-        edge_feature_dim: Input edge feature dimension (default: 7)
+        edge_feature_dim: Input edge feature dimension (default: 3)
         gnn_hidden_dim: Hidden dimension for GNN (default: 64)
         gnn_num_layers: Number of GNN layers (default: 3)
         latent_dim: Total latent dimension (default: 8)
@@ -53,7 +53,7 @@ class HierarchicalEncoder(nn.Module):
     def __init__(
         self,
         node_feature_dim: int = 4,
-        edge_feature_dim: int = 7,
+        edge_feature_dim: int = 3,
         gnn_hidden_dim: int = 64,
         gnn_num_layers: int = 3,
         latent_dim: int = 8,

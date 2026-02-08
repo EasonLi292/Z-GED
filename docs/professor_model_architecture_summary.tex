@@ -1,0 +1,213 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black
+}
+
+\title{\textbf{Z-GED Model Architecture Summary}\\
+\large Graph-VAE Circuit Topology Generation for RLC Filters}
+\author{Project Technical Brief}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{Executive Summary}
+Z-GED is a variational graph generative model that maps RLC circuits to an 8-dimensional latent space and decodes latent codes into circuit topologies. The system combines:
+\begin{itemize}
+  \item a component-aware GNN encoder for graph structure and element semantics,
+  \item a hierarchical latent decomposition for topology, component-structure, and transfer-function factors,
+  \item an autoregressive transformer decoder for node and edge-component generation.
+\end{itemize}
+In repository-reported validation results, the model reaches near-perfect structural reconstruction on the benchmark split (72 validation circuits), suggesting strong in-distribution fidelity.
+
+\section{Problem Formulation}
+Given a circuit graph \(G = (V, E)\) with typed nodes and impedance-derived edge attributes, the model learns:
+\[
+q_{\phi}(z \mid G, P, Z), \quad p_{\theta}(G \mid z),
+\]
+where \(P\) and \(Z\) are variable-length pole/zero sets, and \(z \in \mathbb{R}^8\).
+
+Generation can be done by:
+\begin{itemize}
+  \item random latent sampling \(z \sim \mathcal{N}(0, I)\),
+  \item encoding an existing graph and decoding \(z\),
+  \item interpolation between latent codes.
+\end{itemize}
+
+\section{Input Representation}
+\subsection{Node Features}
+Each node is one-hot encoded with 4 categories:
+\[
+[\text{is\_GND}, \text{is\_VIN}, \text{is\_VOUT}, \text{is\_INTERNAL}].
+\]
+
+\subsection{Edge Features}
+Each directed edge uses 3 features:
+\[
+[\log_{10}R,\ \log_{10}C,\ \log_{10}L],
+\]
+with \(0\) used as the sentinel for ``component absent'' on that edge.
+Component-presence masks are derived inside \texttt{ImpedanceConv} via thresholding.
+
+\subsection{Auxiliary Physical Descriptors}
+Poles and zeros are provided as variable-length sets of 2D real-imaginary vectors and encoded via DeepSets.
+
+\section{Encoder Architecture (HierarchicalEncoder)}
+\subsection{Stage 1: Component-Aware Message Passing}
+The encoder uses a 3-layer ImpedanceGNN built from \texttt{ImpedanceConv}. Messages are component-specific:
+\[
+m_{ij} =
+\mathbf{1}_{R,ij}\,f_R([h_j, \log_{10}R_{ij}]) +
+\mathbf{1}_{C,ij}\,f_C([h_j, \log_{10}C_{ij}]) +
+\mathbf{1}_{L,ij}\,f_L([h_j, \log_{10}L_{ij}]),
+\]
+where \(\mathbf{1}_{R,ij}, \mathbf{1}_{C,ij}, \mathbf{1}_{L,ij}\) are internally derived presence indicators.
+The resulting message is then weighted by learned attention and aggregated.
+
+\subsection{Stage 2: Three-Branch Latent Heads}
+The encoder forms three latent branches:
+\begin{itemize}
+  \item \textbf{Topology branch} (\(z_{\text{topo}} \in \mathbb{R}^2\)): global mean+max pooled node embeddings.
+  \item \textbf{Structure/values branch} (\(z_{\text{struct}} \in \mathbb{R}^2\)): concatenated embeddings of GND/VIN/VOUT.
+  \item \textbf{Pole-zero branch} (\(z_{\text{pz}} \in \mathbb{R}^4\)): DeepSets encodings of poles and zeros.
+\end{itemize}
+Concatenation gives \(z = [z_{\text{topo}}, z_{\text{struct}}, z_{\text{pz}}] \in \mathbb{R}^8\), with VAE sampling:
+\[
+z = \mu + \exp\!\left(\frac{1}{2}\log \sigma^2\right)\odot \epsilon,\quad \epsilon \sim \mathcal{N}(0, I).
+\]
+
+\section{Decoder Architecture (SimplifiedCircuitDecoder)}
+\subsection{Latent-to-Context Projection}
+The latent code is projected through an MLP with LayerNorm to a hidden state (\(d=256\) in production config).
+
+\subsection{Node Count Prediction}
+Node count is classified directly from \(z\) over classes \(3,4,\dots,\text{max\_nodes}\).
+
+\subsection{Autoregressive Node Decoder}
+Nodes are generated sequentially using a transformer decoder:
+\[
+p(v_i \mid z, v_{<i}, N).
+\]
+The query includes latent context, position embedding, and total-length embedding.
+
+\subsection{Autoregressive Edge-Component Decoder}
+For ordered edge pairs \((i,j)\) with \(j < i\), the model predicts an 8-class variable:
+\[
+c_t \in \{0,1,\dots,7\},
+\]
+where 0 means no edge, and 1--7 encode \{R, C, L, RC, RL, CL, RCL\}.
+The factorization is:
+\[
+p(C \mid z, V) = \prod_{t=1}^{T} p(c_t \mid z, V, c_{<t}),
+\]
+implemented with causal self-attention and previous edge-token embeddings (teacher forcing in training, autoregressive feedback at inference).
+
+\section{Training Objective}
+The total loss is:
+\[
+\mathcal{L} =
+\lambda_n \mathcal{L}_{\text{node-type}} +
+\lambda_c \mathcal{L}_{\text{node-count}} +
+\lambda_e \mathcal{L}_{\text{edge-comp}} +
+\lambda_{conn} \mathcal{L}_{\text{connectivity}} +
+\lambda_{kl} \mathcal{L}_{KL}.
+\]
+Repository training configuration:
+\[
+(\lambda_n,\lambda_c,\lambda_e,\lambda_{conn},\lambda_{kl}) =
+(1.0,\ 5.0,\ 2.0,\ 5.0,\ 0.01),
+\]
+with KL warmup during early epochs.
+
+\subsection{Connectivity Regularization}
+Connectivity loss penalizes:
+\begin{itemize}
+  \item disconnected VIN,
+  \item disconnected VOUT,
+  \item globally weak graph connectivity,
+  \item isolated non-mask nodes.
+\end{itemize}
+
+\section{Model Size and Data Regime}
+Reported architecture scale:
+\begin{itemize}
+  \item Encoder: \(83{,}411\) parameters.
+  \item Decoder: \(7{,}698{,}901\) parameters.
+\end{itemize}
+Reported dataset and split:
+\begin{itemize}
+  \item 360 circuits total, 6 filter families (60 per family).
+  \item 288 train / 72 validation.
+\end{itemize}
+
+\section{Empirical Results (Repository-Reported)}
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+Metric & Training & Validation \\
+\midrule
+Total loss & 0.95 & 1.03 \\
+Node-count accuracy & 100\% & 100\% \\
+Edge-existence accuracy & 100\% & 100\% \\
+Component-type accuracy & 100\% & 100\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Additional reported latent-space behavior:
+\begin{itemize}
+  \item clear clustering by filter family in \(z_{0:4}\),
+  \item smooth topology transitions under latent interpolation,
+  \item non-trivial but weaker activity in transfer-function dimensions \(z_{4:8}\).
+\end{itemize}
+
+\section{Strengths and Caveats for Academic Discussion}
+\subsection{Strengths}
+\begin{itemize}
+  \item Physically informed edge featurization and component-aware message passing.
+  \item Explicit autoregressive dependence for edge decisions via causal attention.
+  \item Interpretable latent decomposition aligned with topology and spectral descriptors.
+  \item Good in-distribution reconstruction and generation fidelity in project benchmarks.
+\end{itemize}
+
+\subsection{Caveats}
+\begin{itemize}
+  \item Benchmark appears structurally templated; perfect scores may reflect limited topology entropy.
+  \item Transfer-function branch (\(z_{4:8}\)) is only weakly supervised by current objectives.
+  \item Random latent sampling still yields invalid circuits in reported novelty sweeps.
+  \item Specification-conditioned generation in scripts is partly driven by latent-neighbor retrieval, not solely by an end-to-end conditional decoder.
+\end{itemize}
+
+\section{Recommended Next Experiments}
+\begin{itemize}
+  \item Add auxiliary supervision from \((f_c, Q)\) or pole/zero reconstruction losses to activate \(z_{4:8}\).
+  \item Evaluate out-of-distribution robustness with wider component ranges and unseen topologies.
+  \item Compare against non-autoregressive graph decoders and conditional baselines.
+  \item Validate generated circuits via SPICE-based functional metrics, not only structural matching.
+\end{itemize}
+
+\section*{Code Pointers}
+Core files in this repository:
+\begin{itemize}
+  \item \path{ml/models/encoder.py}
+  \item \path{ml/models/gnn_layers.py}
+  \item \path{ml/models/decoder.py}
+  \item \path{ml/models/decoder_components.py}
+  \item \path{ml/models/node_decoder.py}
+  \item \path{ml/losses/circuit_loss.py}
+  \item \path{ml/losses/connectivity_loss.py}
+  \item \path{ml/data/dataset.py}
+\end{itemize}
+
+\end{document}

@@ -141,7 +141,7 @@ def main():
     print("Loading models...", flush=True)
     encoder = HierarchicalEncoder(
         node_feature_dim=4,
-        edge_feature_dim=7,
+        edge_feature_dim=3,
         gnn_hidden_dim=64,
         gnn_num_layers=3,
         latent_dim=8,

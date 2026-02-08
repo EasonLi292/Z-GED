@@ -85,7 +85,7 @@ device = 'cpu'
 # Initialize encoder
 encoder = HierarchicalEncoder(
     node_feature_dim=4,
-    edge_feature_dim=7,
+    edge_feature_dim=3,  # [log10(R), log10(C), log10(L)]
     gnn_hidden_dim=64,
     gnn_num_layers=3,
     latent_dim=8,
@@ -115,6 +115,17 @@ decoder.eval()
 
 print(f"Loaded from epoch {checkpoint['epoch']}, val_loss={checkpoint['val_loss']:.4f}")
 ```
+
+### Edge Feature Format
+
+The current model expects edge features in this format:
+
+```python
+edge_attr[e] = [log10(R), log10(C), log10(L)]  # 0 means component absent
+```
+
+`is_R/is_C/is_L` masks are derived internally in `ImpedanceConv` via
+`abs(value) > 0.01`, not stored as separate edge channels.
 
 ---
 
@@ -550,7 +561,7 @@ class HierarchicalEncoder:
     def __init__(
         self,
         node_feature_dim: int = 4,
-        edge_feature_dim: int = 7,
+        edge_feature_dim: int = 3,  # [log10(R), log10(C), log10(L)]
         gnn_hidden_dim: int = 64,
         gnn_num_layers: int = 3,
         latent_dim: int = 8,

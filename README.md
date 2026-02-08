@@ -101,6 +101,8 @@ Z-GED/
 ## How It Works
 
 1. **Encoder** - 3-layer component-aware GNN (ImpedanceConv) encodes circuits into 8D latent space
+   - Edge features are 3D: `[log10(R), log10(C), log10(L)]` (0 means component absent)
+   - Component presence masks (`is_R/is_C/is_L`) are derived inside `ImpedanceConv`
    - Branch 1 (Topology): Mean+max pooling of all node embeddings → z[0:2]
    - Branch 2 (Values): GND/VIN/VOUT node embeddings → z[2:4]
    - Branch 3 (Transfer Function): DeepSets on poles/zeros → z[4:8]
@@ -113,6 +115,11 @@ The 8D latent space is hierarchically organized:
 - `z[0:2]` - Topology encoding (graph structure, filter type, node count)
 - `z[2:4]` - Component values encoding (from GND/VIN/VOUT node embeddings)
 - `z[4:8]` - Transfer function encoding (poles/zeros via DeepSets)
+
+### Current Model Size
+
+- Encoder parameters: `83,411`
+- Decoder parameters: `7,698,901`
 
 ## Example Outputs
 

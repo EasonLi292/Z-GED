@@ -49,8 +49,7 @@ class CircuitDataset(Dataset):
         dataset_path: str = 'rlc_dataset/filter_dataset.pkl',
         ged_matrix_path: Optional[str] = None,
         k_neighbors: int = 5,
-        normalize_features: bool = True,
-        log_scale_impedance: bool = True
+        normalize_features: bool = True
     ):
         """
         Initialize the circuit dataset.
@@ -59,13 +58,11 @@ class CircuitDataset(Dataset):
             dataset_path: Path to the pickle file with circuits
             ged_matrix_path: Optional path to precomputed GED matrix
             k_neighbors: Number of nearest neighbors to include
-            normalize_features: Whether to normalize node/edge features
-            log_scale_impedance: Whether to log-scale impedance features
+            normalize_features: Whether to normalize pole/zero features
         """
         self.dataset_path = dataset_path
         self.k_neighbors = k_neighbors
         self.normalize_features = normalize_features
-        self.log_scale_impedance = log_scale_impedance
 
         # Load circuit data
         with open(dataset_path, 'rb') as f:
@@ -79,93 +76,15 @@ class CircuitDataset(Dataset):
             self.ged_matrix = np.load(ged_matrix_path)
             print(f"Loaded GED matrix from {ged_matrix_path}")
 
-        # Compute normalization statistics if needed
+        # Compute normalization statistics for poles/zeros
         if normalize_features:
             self._compute_normalization_stats()
 
     def _compute_normalization_stats(self):
         """
-        Compute mean/std for feature normalization with practical range clipping.
-
-        This implements Option 3 fix for component value normalization:
-        1. Clip to practical ranges BEFORE logging
-        2. Use proper z-score normalization (mean=0, std=1)
+        Compute mean/std for pole/zero normalization.
+        Edge features use raw log10 component values (no normalization needed).
         """
-        # Collect all impedance features
-        all_C = []
-        all_G = []
-        all_L_inv = []
-
-        for circuit in self.circuits:
-            for neighbors in circuit['graph_adj']['adjacency']:
-                for edge in neighbors:
-                    imp_den = edge['impedance_den']  # [C, G, L_inv]
-                    C, G, L_inv = imp_den
-                    all_C.append(C)
-                    all_G.append(G)
-                    all_L_inv.append(L_inv)
-
-        all_C = np.array(all_C)
-        all_G = np.array(all_G)
-        all_L_inv = np.array(all_L_inv)
-
-        if self.log_scale_impedance:
-            # Option 3: Clip to practical ranges BEFORE logging
-            # This prevents extreme values from polluting the normalization
-
-            # Convert G and L_inv back to R and L for clipping
-            # (avoiding division by zero with epsilon)
-            all_R = 1.0 / (all_G + 1e-15)
-            all_L = 1.0 / (all_L_inv + 1e-15)
-
-            # Clip to practical component ranges
-            # These ranges are based on common off-the-shelf components
-            R_practical = np.clip(all_R, 10, 100e3)        # 10Ω to 100kΩ
-            L_practical = np.clip(all_L, 1e-9, 10e-3)      # 1nH to 10mH
-            C_practical = np.clip(all_C, 1e-12, 1e-6)      # 1pF to 1μF
-
-            # Convert back to G and L_inv
-            G_practical = 1.0 / R_practical
-            L_inv_practical = 1.0 / L_practical
-
-            # Log transform
-            log_C = np.log(C_practical + 1e-15)
-            log_G = np.log(G_practical + 1e-15)
-            log_L_inv = np.log(L_inv_practical + 1e-15)
-
-            # Z-score normalization (centered at 0, std=1)
-            # This is the key fix - previous normalization didn't center at 0
-            C_mean = log_C.mean()
-            C_std = log_C.std() + 1e-8
-            G_mean = log_G.mean()
-            G_std = log_G.std() + 1e-8
-            L_inv_mean = log_L_inv.mean()
-            L_inv_std = log_L_inv.std() + 1e-8
-
-            # Store as tensors
-            self.impedance_mean = torch.tensor([C_mean, G_mean, L_inv_mean], dtype=torch.float32)
-            self.impedance_std = torch.tensor([C_std, G_std, L_inv_std], dtype=torch.float32)
-
-            print(f"Impedance normalization (with practical range clipping):")
-            print(f"  C:     mean={C_mean:.3f}, std={C_std:.3f}")
-            print(f"  G:     mean={G_mean:.3f}, std={G_std:.3f}")
-            print(f"  L_inv: mean={L_inv_mean:.3f}, std={L_inv_std:.3f}")
-
-            # Print practical ranges for reference
-            print(f"\nPractical component ranges:")
-            print(f"  R: 10Ω to 100kΩ")
-            print(f"  L: 1nH to 10mH")
-            print(f"  C: 1pF to 1μF")
-        else:
-            # If not log-scaling, just use simple mean/std
-            all_impedances = np.stack([all_C, all_G, all_L_inv], axis=1)
-            self.impedance_mean = torch.tensor(all_impedances.mean(axis=0), dtype=torch.float32)
-            self.impedance_std = torch.tensor(all_impedances.std(axis=0) + 1e-8, dtype=torch.float32)
-
-            print(f"Impedance normalization:")
-            print(f"  Mean: {self.impedance_mean.numpy()}")
-            print(f"  Std:  {self.impedance_std.numpy()}")
-
         # Collect pole/zero magnitudes for normalization
         all_pole_mags = []
         all_zero_mags = []
@@ -339,47 +258,16 @@ class CircuitDataset(Dataset):
                 target_id = neighbor['id']
                 edge_index.append([source_id, target_id])
 
-                # Edge features: impedance_den = [C, G, L_inv]
-                imp_den = neighbor['impedance_den']
-
-                # Create binary masks indicating which components are present
-                # Original values before log-scaling for accurate thresholding
+                # Edge features: [log10(R), log10(C), log10(L)]
+                # 0 = component absent (log10 values are never 0: R>0, C<0, L<0)
+                imp_den = neighbor['impedance_den']  # [C, G, L_inv]
                 C, G, L_inv = imp_den
-                has_C = 1.0 if C > 1e-12 else 0.0
-                has_R = 1.0 if G > 1e-12 else 0.0  # G = 1/R
-                has_L = 1.0 if L_inv > 1e-12 else 0.0  # L_inv = 1/L
-                is_parallel = 1.0  # All components between two nodes are parallel
 
-                if self.log_scale_impedance:
-                    # Apply same practical range clipping as in normalization (Option 3 fix)
-                    # Convert G and L_inv to R and L
-                    R = 1.0 / (G + 1e-15)
-                    L = 1.0 / (L_inv + 1e-15)
+                log_R = np.log10(1.0 / G) if G > 1e-12 else 0.0
+                log_C = np.log10(C) if C > 1e-12 else 0.0
+                log_L = np.log10(1.0 / L_inv) if L_inv > 1e-12 else 0.0
 
-                    # Clip to practical ranges
-                    R_practical = np.clip(R, 10, 100e3)        # 10Ω to 100kΩ
-                    L_practical = np.clip(L, 1e-9, 10e-3)      # 1nH to 10mH
-                    C_practical = np.clip(C, 1e-12, 1e-6)      # 1pF to 1μF
-
-                    # Convert back to G and L_inv
-                    G_practical = 1.0 / R_practical
-                    L_inv_practical = 1.0 / L_practical
-
-                    # Log transform
-                    imp_den = np.log(np.array([C_practical, G_practical, L_inv_practical]) + 1e-15)
-
-                imp_den = torch.tensor(imp_den, dtype=torch.float32)
-
-                # Normalize if requested (z-score normalization)
-                if self.normalize_features:
-                    imp_den = (imp_den - self.impedance_mean) / self.impedance_std
-
-                # Concatenate continuous features + binary masks
-                # Result: [log(C), log(G), log(L_inv), is_R, is_C, is_L, is_parallel]
-                # Note: Order must match GNN expectation: is_R at idx 3, is_C at idx 4, is_L at idx 5
-                binary_masks = torch.tensor([has_R, has_C, has_L, is_parallel], dtype=torch.float32)
-                edge_features = torch.cat([imp_den, binary_masks], dim=0)
-
+                edge_features = torch.tensor([log_R, log_C, log_L], dtype=torch.float32)
                 edge_attr.append(edge_features)
 
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
@@ -710,7 +598,7 @@ def collate_graphgpt_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
 
     node_types = torch.zeros(batch_size, max_nodes, dtype=torch.long)
     edge_existence = torch.zeros(batch_size, max_nodes, max_nodes, dtype=torch.float32)
-    edge_values = torch.zeros(batch_size, max_nodes, max_nodes, 7, dtype=torch.float32)
+    edge_values = torch.zeros(batch_size, max_nodes, max_nodes, 3, dtype=torch.float32)
 
     # Extract specifications (cutoff frequency, Q-factor) from batch items
     specifications = torch.zeros(batch_size, 2, dtype=torch.float32)
@@ -734,7 +622,7 @@ def collate_graphgpt_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
 
         # Convert edge_index to adjacency matrix
         # graph.edge_index is [2, num_edges]
-        # graph.edge_attr is [num_edges, 7]: [log(C), log(G), log(L_inv), has_C, has_R, has_L, is_parallel]
+        # graph.edge_attr is [num_edges, 3]: [is_R, is_C, is_L]
         for edge_idx in range(graph.edge_index.shape[1]):
             src = graph.edge_index[0, edge_idx].item()
             dst = graph.edge_index[1, edge_idx].item()

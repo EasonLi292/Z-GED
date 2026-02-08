@@ -62,12 +62,12 @@ def graph_to_dense_format(graph, max_nodes=6):
         for idx, (src, dst) in enumerate(graph_edges.t()):
             edge_existence[b, src, dst] = 1.0
 
-            # Component type from masks
-            # Edge attr format: [C_norm, G_norm, L_inv_norm, is_R, is_C, is_L, is_parallel]
-            # masks_to_component_type expects: [mask_C, mask_G, mask_L] = [is_C, is_R, is_L]
-            is_R = graph_edge_attr[idx, 3]
-            is_C = graph_edge_attr[idx, 4]
-            is_L = graph_edge_attr[idx, 5]
+            # Component type from log10 values
+            # Edge attr format: [log10(R), log10(C), log10(L)] where 0 = absent
+            # masks_to_component_type expects: [mask_C, mask_G, mask_L]
+            is_R = (graph_edge_attr[idx, 0].abs() > 0.01).float()
+            is_C = (graph_edge_attr[idx, 1].abs() > 0.01).float()
+            is_L = (graph_edge_attr[idx, 2].abs() > 0.01).float()
             masks = torch.stack([is_C, is_R, is_L])  # Reorder to [C, G, L]
             comp_type = masks_to_component_type(masks.unsqueeze(0))[0]
             component_types[b, src, dst] = comp_type
@@ -272,7 +272,7 @@ def main():
     # Create models
     encoder = HierarchicalEncoder(
         node_feature_dim=4,
-        edge_feature_dim=7,
+        edge_feature_dim=3,
         gnn_hidden_dim=64,
         gnn_num_layers=3,
         latent_dim=8,

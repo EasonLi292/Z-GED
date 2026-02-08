@@ -7,14 +7,15 @@ This directory contains the neural network architectures for circuit generation.
 ### Core Components
 
 - **encoder.py** - `HierarchicalEncoder`
-  - 8D latent space VAE encoder (~97,600 params)
+  - 8D latent space VAE encoder (~83,411 params)
   - 3-layer ImpedanceGNN + hierarchical branches:
+    - Edge input format: `[log10(R), log10(C), log10(L)]` (0 means absent)
     - Branch 1: Mean+max pooling → z[0:2] (topology)
     - Branch 2: GND/VIN/VOUT node embeddings → z[2:4] (values)
     - Branch 3: DeepSets on poles/zeros → z[4:8] (transfer function)
 
 - **decoder.py** - `SimplifiedCircuitDecoder`
-  - Autoregressive decoder for circuit generation (~5.6M params)
+  - Autoregressive decoder for circuit generation (~7,698,901 params)
   - Autoregressive node generation (transformer-based)
   - Autoregressive edge generation (Transformer-based, causal self-attention)
   - Teacher forcing during training; own predictions fed back at inference

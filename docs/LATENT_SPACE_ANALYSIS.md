@@ -1,6 +1,7 @@
 # Latent Space Analysis
 
-**Analysis Date:** 2026-01-28
+**Analysis Date:** 2026-02-05
+**Edge features:** 3D log10 values `[log10(R), log10(C), log10(L)]`
 
 ---
 
@@ -29,70 +30,71 @@ Computed from 360 circuits (60 per filter type):
 
 | Filter Type | z[0] | z[1] | z[2] | z[3] | z[4] | z[5] | z[6] | z[7] |
 |-------------|------|------|------|------|------|------|------|------|
-| low_pass | +1.26 | -2.83 | -3.23 | +1.70 | +0.34 | -0.00 | +0.43 | +0.02 |
-| high_pass | +0.89 | -4.19 | -1.61 | -0.64 | -0.09 | +0.22 | +0.66 | +0.41 |
-| band_pass | +2.77 | +1.61 | +2.63 | -2.23 | -0.27 | +0.23 | +0.58 | +0.49 |
-| band_stop | -2.87 | +0.55 | +0.17 | +2.45 | -0.68 | +0.54 | +1.25 | +1.09 |
-| rlc_series | -4.29 | +0.82 | +0.51 | -0.21 | -0.30 | +0.25 | +0.58 | +0.51 |
-| rlc_parallel | +1.30 | -2.26 | -3.50 | -0.76 | -0.18 | +0.21 | +0.60 | +0.44 |
+| low_pass | +2.45 | +1.02 | +1.14 | +3.27 | +0.04 | -0.09 | +0.25 | -0.53 |
+| high_pass | +3.47 | +1.19 | -0.21 | +2.21 | +0.24 | -0.86 | +1.27 | -0.59 |
+| band_pass | -3.03 | +0.40 | -1.49 | +2.01 | +0.26 | -0.87 | +1.30 | -0.65 |
+| band_stop | +0.27 | -1.55 | +1.39 | -3.08 | +0.25 | -1.65 | +2.27 | -0.46 |
+| rlc_series | -1.26 | -2.05 | +2.88 | -2.09 | +0.27 | -0.88 | +1.30 | -0.66 |
+| rlc_parallel | +2.39 | +1.04 | +2.53 | +1.88 | +0.26 | -0.86 | +1.29 | -0.65 |
 
 ### Variance by Dimension
 
 | Dimension | Role | Mean | Std | Range | Status |
 |-----------|------|------|-----|-------|--------|
-| z[0] | Topology | -0.16 | 2.53 | [-4.39, +2.81] | **Active** |
-| z[1] | Topology | -1.05 | 2.15 | [-4.25, +1.66] | **Active** |
-| z[2] | Values | -0.84 | 2.17 | [-3.59, +2.67] | **Active** |
-| z[3] | Values | 0.05 | 1.57 | [-2.32, +2.49] | **Active** |
-| z[4] | Transfer func | -0.19 | 0.33 | [-0.94, +0.41] | Weak |
-| z[5] | Transfer func | 0.24 | 0.16 | [-0.01, +0.66] | Weak |
-| z[6] | Transfer func | 0.68 | 0.27 | [+0.31, +1.33] | Weak |
-| z[7] | Transfer func | 0.49 | 0.32 | [-0.00, +1.36] | Weak |
+| z[0] | Topology | +0.71 | 2.30 | [-3.10, +3.52] | **Active** |
+| z[1] | Topology | +0.01 | 1.31 | [-2.12, +1.21] | **Active** |
+| z[2] | Values | +1.04 | 1.51 | [-1.57, +2.94] | **Active** |
+| z[3] | Values | +0.70 | 2.39 | [-3.15, +3.30] | **Active** |
+| z[4] | Transfer func | +0.22 | 0.08 | [+0.03, +0.35] | Weak |
+| z[5] | Transfer func | -0.87 | 0.45 | [-1.84, -0.08] | Moderate |
+| z[6] | Transfer func | +1.28 | 0.58 | [+0.24, +2.57] | Moderate |
+| z[7] | Transfer func | -0.59 | 0.09 | [-0.90, -0.43] | Weak |
 
-**Note:** z[0:4] are strongly active with std > 1.5. z[4], z[6], z[7] show weak but non-zero variance (std 0.27–0.33), and z[5] is also non-zero (std 0.16). z[4] separates band_stop (-0.68) from low_pass (+0.34), and z[7] separates band_stop (+1.09) from low_pass (+0.02). The transfer-function dimensions are no longer collapsed, likely because the full 8D latent is used by the node count predictor, providing gradient signal through z[4:8].
+**Note:** z[0:4] are strongly active with std > 1.3. z[5] (std=0.45) and z[6] (std=0.58) show moderate variance — z[5] separates band_stop (-1.65) from low_pass (-0.09), and z[6] separates band_stop (+2.27) from low_pass (+0.25). z[4] (std=0.08) and z[7] (std=0.09) remain weak. The transfer-function dimensions are partially active, likely because the full 8D latent is used by the node count predictor, providing gradient signal through z[4:8].
 
 ---
 
 ## Latent Space Interpretation
 
-### z[0]: Filter Complexity Axis
+### z[0]: Filter Type Separation Axis
 
 ```
-z[0] ≈ -4.29  →  rlc_series (4-node)
-z[0] ≈ -2.87  →  band_stop (5-node)
-z[0] ≈ +0.89  →  high_pass (3-node)
-z[0] ≈ +1.26  →  low_pass (3-node)
-z[0] ≈ +1.30  →  rlc_parallel (3-node)
-z[0] ≈ +2.77  →  band_pass (4-node)
+z[0] ≈ -3.03  →  band_pass (4-node)
+z[0] ≈ -1.26  →  rlc_series (5-node)
+z[0] ≈ +0.27  →  band_stop (5-node)
+z[0] ≈ +2.39  →  rlc_parallel (3-node)
+z[0] ≈ +2.45  →  low_pass (3-node)
+z[0] ≈ +3.47  →  high_pass (3-node)
 ```
 
 ### z[1]: 3-node vs Multi-node Axis
 
 ```
-z[1] < -2.83  →  3-node circuits (low_pass, high_pass, rlc_parallel)
-z[1] ≈ +0.55  →  4-5 node circuits (band_pass, band_stop, rlc_series)
+z[1] > +1.0   →  3-node circuits (low_pass, high_pass, rlc_parallel)
+z[1] ≈ +0.40  →  band_pass (4-node)
+z[1] < -1.5   →  5-node circuits (band_stop, rlc_series)
 ```
 
 ### z[2]: Component Configuration Axis
 
 ```
-z[2] ≈ -3.50  →  rlc_parallel (RCL to ground)
-z[2] ≈ -3.23  →  low_pass (C to ground)
-z[2] ≈ -1.61  →  high_pass (C on VIN-VOUT)
-z[2] ≈ +0.17  →  band_stop
-z[2] ≈ +0.51  →  rlc_series
-z[2] ≈ +2.63  →  band_pass (distributed LC)
+z[2] ≈ -1.49  →  band_pass (distributed LC)
+z[2] ≈ -0.21  →  high_pass (C on VIN-VOUT)
+z[2] ≈ +1.14  →  low_pass (C to ground)
+z[2] ≈ +1.39  →  band_stop
+z[2] ≈ +2.53  →  rlc_parallel (RCL to ground)
+z[2] ≈ +2.88  →  rlc_series
 ```
 
-### z[3]: Component Type Axis
+### z[3]: Filter Family Axis
 
 ```
-z[3] ≈ +2.45  →  band_stop
-z[3] ≈ +1.70  →  low_pass
-z[3] ≈ -0.21  →  rlc_series
-z[3] ≈ -0.76  →  rlc_parallel
-z[3] ≈ -0.64  →  high_pass
-z[3] ≈ -2.23  →  band_pass
+z[3] ≈ +3.27  →  low_pass
+z[3] ≈ +2.21  →  high_pass
+z[3] ≈ +2.01  →  band_pass
+z[3] ≈ +1.88  →  rlc_parallel
+z[3] ≈ -2.09  →  rlc_series
+z[3] ≈ -3.08  →  band_stop
 ```
 
 ### 2D Visualization (z[0] vs z[1])
@@ -100,21 +102,17 @@ z[3] ≈ -2.23  →  band_pass
 ```
         z[1]
          ^
-    +2   |       band_stop   rlc_series   band_pass
-         |          *            *            *
-    +1   |
+         |   high_pass   low_pass   rlc_parallel
+    +1   |       *           *           *
+         |                        band_pass
+     0   |                            *
          |
-     0   |
-         |
-    -1   |                              rlc_parallel
-         |                                   *
-    -2   |
-         |
-    -3   |  low_pass   high_pass
-         |     *           *
-    -4   |
+    -1   |              band_stop
+         |                  *
+    -2   |   rlc_series
+         |       *
          +--------------------------------------------------------------> z[0]
-            -4        -3        -2        -1         0        +1        +2        +3
+            -3        -2        -1         0        +1        +2        +3
 ```
 
 ---
@@ -123,14 +121,14 @@ z[3] ≈ -2.23  →  band_pass
 
 ### Current State
 
-Dimensions z[4:8] show weak but non-zero variance (std 0.16–0.33), a significant improvement over earlier models where all four had std ≈ 0.01. The node count predictor now uses the full 8D latent, providing a gradient signal that prevents complete collapse.
+Dimensions z[4:8] show mixed variance. z[5] (std=0.45) and z[6] (std=0.58) show moderate activity, while z[4] (std=0.08) and z[7] (std=0.09) remain weak. The node count predictor uses the full 8D latent, providing gradient signal that prevents complete collapse.
 
 | Dimension | Std | Separation Example |
 |-----------|-----|-------------------|
-| z[4] | 0.33 | band_stop (-0.68) vs low_pass (+0.34) |
-| z[5] | 0.16 | Near-collapsed |
-| z[6] | 0.27 | band_stop (+1.25) vs low_pass (+0.43) |
-| z[7] | 0.32 | band_stop (+1.09) vs low_pass (+0.02) |
+| z[4] | 0.08 | Weak — narrow range [+0.03, +0.35] |
+| z[5] | 0.45 | band_stop (-1.65) vs low_pass (-0.09) |
+| z[6] | 0.58 | band_stop (+2.27) vs low_pass (+0.25) |
+| z[7] | 0.09 | Weak — narrow range [-0.90, -0.43] |
 
 ### Root Cause of Remaining Weakness
 
@@ -157,10 +155,10 @@ Loss:
 
 ### Impact
 
-- z[4:8] encodes some filter-type information but not transfer function details
+- z[5] and z[6] encode some filter-type information (especially band_stop separation) but not full transfer function details
 - Cannot reliably interpolate between different frequency responses using z[4:8] alone
-- z[4] and z[7] show the most promise for encoding additional structure
-- z[5] remains weak and underutilized
+- z[5] (std=0.45) and z[6] (std=0.58) show the most promise for encoding additional structure
+- z[4] and z[7] remain weak and underutilized (std < 0.1)
 
 ---
 

@@ -28,7 +28,7 @@ device = 'cpu'
 # Load models
 encoder = HierarchicalEncoder(
     node_feature_dim=4,
-    edge_feature_dim=7,
+    edge_feature_dim=3,
     gnn_hidden_dim=64,
     gnn_num_layers=3,
     latent_dim=8,
@@ -111,7 +111,7 @@ for i, batch in enumerate(val_loader):
 
         # Check all edges in this circuit
         for edge_idx in range(edge_attr.shape[0]):
-            true_masks = edge_attr[edge_idx, 3:6]
+            true_masks = (edge_attr[edge_idx, 0:3].abs() > 0.01).float()
             true_type = masks_to_component_type(true_masks.unsqueeze(0))[0].item()
 
             # Find corresponding edge in generated circuit

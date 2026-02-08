@@ -21,22 +21,22 @@ def test_impedance_conv():
     print("TEST: ImpedanceConv Layer")
     print("="*70)
 
-    # Create simple graph with correct edge_dim=7
-    # Edge attr: [C_norm, G_norm, L_inv_norm, is_R, is_C, is_L, is_parallel]
+    # Create simple graph with edge_dim=3
+    # Edge attr: [log10(R), log10(C), log10(L)] where 0 = absent
     x = torch.randn(5, 4)  # 5 nodes, 4 features
     edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]], dtype=torch.long)
 
-    # Create edge_attr with component masks
-    edge_attr = torch.zeros(4, 7)
-    edge_attr[:, :3] = torch.randn(4, 3)  # Normalized values
-    edge_attr[0, 3] = 1.0  # R edge
-    edge_attr[1, 4] = 1.0  # C edge
-    edge_attr[2, 5] = 1.0  # L edge
-    edge_attr[3, 3] = 1.0  # R edge
-    edge_attr[3, 4] = 1.0  # Also has C (RC parallel)
+    # Create edge_attr with log10 component values
+    edge_attr = torch.zeros(4, 3)
+    edge_attr[0, 0] = 3.0   # R edge: log10(1000 Ohm)
+    edge_attr[1, 1] = -7.0  # C edge: log10(100nF)
+    edge_attr[2, 2] = -3.0  # L edge: log10(1mH)
+    edge_attr[3, 0] = 2.5   # RCL edge: R = log10(316 Ohm)
+    edge_attr[3, 1] = -8.0  # RCL edge: C = log10(10nF)
+    edge_attr[3, 2] = -2.5  # RCL edge: L = log10(3.16mH)
 
     # Create layer
-    conv = ImpedanceConv(in_channels=4, out_channels=16, edge_dim=7)
+    conv = ImpedanceConv(in_channels=4, out_channels=16, edge_dim=3)
 
     # Forward pass
     out = conv(x, edge_index, edge_attr)
@@ -58,10 +58,9 @@ def test_impedance_gnn():
     x = torch.randn(10, 4)
     edge_index = torch.tensor([[0, 1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 6]], dtype=torch.long)
 
-    # Create edge_attr with component masks (edge_dim=7)
-    edge_attr = torch.zeros(6, 7)
-    edge_attr[:, :3] = torch.randn(6, 3)
-    edge_attr[:, 3] = 1.0  # All R edges
+    # Create edge_attr with log10 component values (edge_dim=3)
+    edge_attr = torch.zeros(6, 3)
+    edge_attr[:, 0] = 3.0  # All R edges: log10(1000 Ohm)
 
     batch = torch.zeros(10, dtype=torch.long)
 
@@ -70,7 +69,7 @@ def test_impedance_gnn():
         hidden_channels=32,
         out_channels=64,
         num_layers=3,
-        edge_dim=7
+        edge_dim=3
     )
 
     out = gnn(x, edge_index, edge_attr, batch)
@@ -115,15 +114,14 @@ def test_encoder():
     batch_size = 4
     latent_dim = 8
 
-    # Create synthetic batch with edge_dim=7
+    # Create synthetic batch with edge_dim=3
     x = torch.randn(15, 4)
     edge_index = torch.tensor([
         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
         [1, 2, 0, 4, 5, 3, 7, 8, 6, 10, 11, 9]
     ], dtype=torch.long)
-    edge_attr = torch.zeros(12, 7)
-    edge_attr[:, :3] = torch.randn(12, 3)
-    edge_attr[:, 3] = 1.0  # All R edges
+    edge_attr = torch.zeros(12, 3)
+    edge_attr[:, 0] = 3.0  # All R edges: log10(1000 Ohm)
     batch = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3])
 
     poles_list = [
@@ -141,7 +139,7 @@ def test_encoder():
 
     encoder = HierarchicalEncoder(
         node_feature_dim=4,
-        edge_feature_dim=7,
+        edge_feature_dim=3,
         gnn_hidden_dim=64,
         latent_dim=latent_dim
     )
@@ -251,7 +249,7 @@ def test_with_real_data():
 
     encoder = HierarchicalEncoder(
         node_feature_dim=4,
-        edge_feature_dim=7,
+        edge_feature_dim=3,
         latent_dim=8
     )
 

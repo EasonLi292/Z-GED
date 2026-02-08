@@ -11,7 +11,7 @@ data:
 
 model:
   node_feature_dim: 4
-  edge_feature_dim: 7  # [log(C), log(G), log(L_inv), has_C, has_R, has_L, is_parallel]
+  edge_feature_dim: 3  # [log10(R), log10(C), log10(L)]
   gnn_hidden_dim: 64
   gnn_num_layers: 3
   latent_dim: 24
