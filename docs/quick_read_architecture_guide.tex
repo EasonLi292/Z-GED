@@ -1,0 +1,198 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black
+}
+
+\title{\textbf{Z-GED Quick Read Guide}\\
+\large What the Code Does, in Plain Language}
+\author{Student + Faculty Friendly Summary}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{1) The Big Picture (30-second version)}
+This project learns to generate circuit topologies (which nodes connect to which, and with what component types) from a compact 8-number latent code.
+
+The flow is:
+\begin{enumerate}
+  \item Turn each circuit into graph numbers (nodes, edges, poles/zeros).
+  \item Encode that graph into 8 latent numbers with a VAE encoder.
+  \item Decode those 8 numbers back into a circuit topology.
+  \item Train with losses that reward correct topology and connectivity.
+\end{enumerate}
+
+\section*{2) What Inputs Look Like in Code}
+\textbf{Node features (4 numbers per node)}
+\[
+[\text{is\_GND},\ \text{is\_VIN},\ \text{is\_VOUT},\ \text{is\_INTERNAL}]
+\]
+Example: VIN node is \([0,1,0,0]\).
+
+\textbf{Edge features (3 numbers per edge)}
+\[
+[\log_{10}(R),\ \log_{10}(C),\ \log_{10}(L)]
+\]
+If a component is absent on that edge, its slot is set to 0.
+
+Example edge with R=1k\(\Omega\), C=100nF, and no inductor:
+\[
+[3.0,\ -7.0,\ 0.0]
+\]
+because \(\log_{10}(1000)=3\), \(\log_{10}(10^{-7})=-7\).
+
+\textbf{Poles and zeros}
+These are variable-length lists of complex values stored as \([\text{real},\text{imag}]\) pairs.
+
+\section*{3) Encoder: How the Model Compresses a Circuit into 8 Numbers}
+The encoder has two main stages.
+
+\subsection*{Stage A: Graph message passing}
+The GNN updates each node by reading neighboring nodes and edge values.
+For each edge, it uses separate transforms for R, C, and L, and derives presence masks from nonzero values:
+\[
+\text{is\_R}=|\log_{10}(R)|>0.01,\quad
+\text{is\_C}=|\log_{10}(C)|>0.01,\quad
+\text{is\_L}=|\log_{10}(L)|>0.01.
+\]
+So the model can treat resistor, capacitor, and inductor effects differently.
+
+\subsection*{Stage B: 3 latent branches}
+After GNN processing, the encoder builds 3 branches:
+\begin{itemize}
+  \item \textbf{Topology branch (2D):} global graph structure.
+  \item \textbf{Structure branch (2D):} uses GND/VIN/VOUT embeddings.
+  \item \textbf{Pole-zero branch (4D):} uses DeepSets over poles/zeros.
+\end{itemize}
+Together:
+\[
+z = [z_{\text{topology}}(2)\ |\ z_{\text{structure}}(2)\ |\ z_{\text{pz}}(4)] \in \mathbb{R}^8.
+\]
+
+Because this is a VAE, code samples from a Gaussian using \(\mu\) and \(\log\sigma^2\):
+\[
+z = \mu + \sigma \odot \epsilon,\quad \epsilon \sim \mathcal{N}(0,I).
+\]
+
+\section*{4) Decoder: How 8 Numbers Become a Circuit}
+The decoder is autoregressive (step-by-step generation):
+\begin{enumerate}
+  \item Predict total node count (3 to max\_nodes).
+  \item Generate node types one at a time.
+  \item Generate edge/component classes one edge at a time with causal attention.
+\end{enumerate}
+
+Edge class is an 8-way choice:
+\begin{center}
+\begin{tabular}{cl}
+\toprule
+Class & Meaning \\
+\midrule
+0 & No edge \\
+1 & R \\
+2 & C \\
+3 & L \\
+4 & RC \\
+5 & RL \\
+6 & CL \\
+7 & RCL \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+This is why the decoder can output both connectivity and component type together.
+
+\section*{5) How Numbers Are Manipulated During Training}
+At each batch:
+\begin{enumerate}
+  \item Encoder outputs \(z,\mu,\log\sigma^2\).
+  \item Targets are converted to dense matrices (node types, edge existence, component classes).
+  \item Decoder predicts logits (unnormalized scores) for:
+  \begin{itemize}
+    \item node type,
+    \item node count,
+    \item edge-component class.
+  \end{itemize}
+  \item Losses compare predicted logits to target labels.
+\end{enumerate}
+
+Total loss in code:
+\[
+\mathcal{L} =
+1.0\,\mathcal{L}_{\text{node-type}} +
+5.0\,\mathcal{L}_{\text{node-count}} +
+2.0\,\mathcal{L}_{\text{edge-comp}} +
+5.0\,\mathcal{L}_{\text{connectivity}} +
+0.01\,\mathcal{L}_{\text{KL}}.
+\]
+
+Interpretation:
+\begin{itemize}
+  \item Bigger weight = optimizer cares more about that objective.
+  \item Connectivity loss strongly pushes VIN/VOUT to remain connected.
+  \item KL loss keeps latent space smooth for sampling/interpolation.
+\end{itemize}
+
+\section*{6) A Tiny End-to-End Example}
+Suppose one circuit edge is represented as:
+\[
+[3.0,\ -7.0,\ 0.0].
+\]
+The model interprets this as:
+\begin{itemize}
+  \item resistor present (1k\(\Omega\)),
+  \item capacitor present (100nF),
+  \item inductor absent.
+\end{itemize}
+
+After full encoding, assume latent code:
+\[
+z=[1.2,-0.8,\ 0.5,-1.1,\ 0.2,0.1,-0.3,0.4].
+\]
+Decoder then predicts:
+\begin{itemize}
+  \item node count (for example 4 nodes),
+  \item node sequence (GND, VIN, VOUT, INTERNAL),
+  \item each edge class (for example R, C, no-edge, ...).
+\end{itemize}
+
+\section*{7) Why This Design Is Easy to Explain}
+\begin{itemize}
+  \item Graph encoder captures local circuit structure.
+  \item Latent code compresses that structure into 8 interpretable dimensions.
+  \item Autoregressive decoder builds a valid graph step-by-step.
+  \item Joint edge-component class avoids inconsistent edge/type predictions.
+\end{itemize}
+
+\section*{8) Current Practical Numbers}
+Using current production code:
+\begin{itemize}
+  \item Encoder parameters: 83,411
+  \item Decoder parameters: 7,698,901
+  \item Dataset size: 360 circuits (288 train / 72 validation)
+\end{itemize}
+
+\section*{9) Where to Look in the Repository}
+\begin{itemize}
+  \item \path{ml/data/dataset.py}
+  \item \path{ml/models/gnn_layers.py}
+  \item \path{ml/models/encoder.py}
+  \item \path{ml/models/decoder.py}
+  \item \path{ml/losses/circuit_loss.py}
+  \item \path{scripts/training/train.py}
+\end{itemize}
+
+\section*{One-line takeaway}
+This code learns a compact 8-number representation of circuits, then uses that representation to generate circuit topology step-by-step with graph-aware deep learning.
+
+\end{document}
