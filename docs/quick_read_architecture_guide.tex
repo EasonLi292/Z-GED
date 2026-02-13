@@ -112,6 +112,46 @@ Class & Meaning \\
 
 This is why the decoder can output both connectivity and component type together.
 
+\subsection*{What Causal Attention Is Doing (Context + K/Q/V)}
+The decoder is a sequence model. At each step, it predicts the \emph{next} graph decision while looking at past decisions.
+
+\textbf{Context used at each decoding step}
+\begin{itemize}
+  \item Global context: latent code \(z\) (the whole-circuit intent).
+  \item Position context: where we are in the sequence (position embedding).
+  \item History context: previously generated nodes/edges.
+  \item Local context: current node position or current node pair \((i,j)\).
+\end{itemize}
+
+\textbf{K/Q/V in plain language}
+\begin{itemize}
+  \item \textbf{Q (Query):} ``What information do I need \emph{right now} to make this prediction?''
+  \item \textbf{K (Key):} ``What kind of information is stored in each past token?''
+  \item \textbf{V (Value):} ``What actual content should be read from each past token?''
+\end{itemize}
+
+Attention scores are computed from Query--Key similarity, then used to mix Values.
+
+\textbf{Node decoder (Transformer decoder)}
+\begin{itemize}
+  \item Query comes from current step token (latent + position + length context).
+  \item Keys/Values come from previously generated node embeddings.
+  \item Output predicts the next node type.
+\end{itemize}
+
+\textbf{Edge decoder (causal self-attention)}
+\begin{itemize}
+  \item Each edge-step token includes edge-pair embedding + latent projection + position + previous-edge-token embedding.
+  \item The causal mask blocks access to future edge steps.
+  \item So edge decision \(t\) can depend on edge decisions \(1\ldots t-1\), but not \(t+1\ldots\).
+\end{itemize}
+
+\textbf{Training vs inference}
+\begin{itemize}
+  \item Training: teacher forcing provides true previous edge classes.
+  \item Inference: model feeds back its own previous predictions.
+\end{itemize}
+
 \section*{5) How Numbers Are Manipulated During Training}
 At each batch:
 \begin{enumerate}
