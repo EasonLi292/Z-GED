@@ -55,42 +55,133 @@ because \(\log_{10}(1000)=3\), \(\log_{10}(10^{-7})=-7\).
 These are variable-length lists of complex values stored as \([\text{real},\text{imag}]\) pairs.
 
 \section*{3) Encoder: How the Model Compresses a Circuit into 8 Numbers}
-The encoder has two main stages.
+Read this in the exact order the encoder runs in code.
 
-\subsection*{Stage A: Graph message passing}
-The GNN updates each node by reading neighboring nodes and edge values.
-For each edge, it uses separate transforms for R, C, and L, and derives presence masks from nonzero values:
-\[
-\text{is\_R}=|\log_{10}(R)|>0.01,\quad
-\text{is\_C}=|\log_{10}(C)|>0.01,\quad
-\text{is\_L}=|\log_{10}(L)|>0.01.
-\]
-So the model can treat resistor, capacitor, and inductor effects differently.
-
-\subsection*{Stage B: 3 latent branches}
-After GNN processing, the encoder builds 3 branches:
+\subsection*{Step E1: Start from node and edge tensors}
 \begin{itemize}
-  \item \textbf{Topology branch (2D):} global graph structure.
-  \item \textbf{Structure branch (2D):} uses GND/VIN/VOUT embeddings.
-  \item \textbf{Pole-zero branch (4D):} uses DeepSets over poles/zeros.
+  \item Nodes: one-hot vectors (size 4 each).
+  \item Edges: \([\log_{10}(R), \log_{10}(C), \log_{10}(L)]\) (size 3 each).
 \end{itemize}
-Together:
+
+\subsection*{Step E2: Run 3 GNN layers (ImpedanceGNN)}
+Each layer applies an \texttt{ImpedanceConv}, then normalization/activation/residual in the wrapper.
+
+\textbf{Inside one ImpedanceConv layer, per directed edge \(j \to i\):}
+\begin{enumerate}
+  \item Read edge values:
+  \[
+  v_R=\log_{10}(R),\quad v_C=\log_{10}(C),\quad v_L=\log_{10}(L).
+  \]
+  \item Build component masks:
+  \[
+  m_R=\mathbf{1}(|v_R|>0.01),\quad
+  m_C=\mathbf{1}(|v_C|>0.01),\quad
+  m_L=\mathbf{1}(|v_L|>0.01).
+  \]
+  \item Compute component-specific messages:
+  \[
+  \text{msg}_R=f_R([h_j, v_R]),\quad
+  \text{msg}_C=f_C([h_j, v_C]),\quad
+  \text{msg}_L=f_L([h_j, v_L]).
+  \]
+  \item Combine by masks (this is the key update you asked about):
+  \[
+  \text{msg}_{j\to i}=m_R\,\text{msg}_R + m_C\,\text{msg}_C + m_L\,\text{msg}_L.
+  \]
+  \item Compute attention weight \(a_{ij}\) from \([h_i,h_j]\), then scale message:
+  \[
+  \tilde{\text{msg}}_{j\to i}=a_{ij}\,\text{msg}_{j\to i}.
+  \]
+\end{enumerate}
+
+\textbf{Then per node \(i\):}
+\begin{enumerate}
+  \item Aggregate incoming messages (sum over neighbors).
+  \item Add bias and dropout (inside \texttt{ImpedanceConv}).
+  \item In \texttt{ImpedanceGNN}: LayerNorm, ReLU (except last layer), and residual add.
+\end{enumerate}
+
+So each layer produces a new node state:
 \[
-z = [z_{\text{topology}}(2)\ |\ z_{\text{structure}}(2)\ |\ z_{\text{pz}}(4)] \in \mathbb{R}^8.
+h_i^{(\ell+1)} = \text{ResidualProj}\!\left(h_i^{(\ell)}\right) + \text{PostProcess}\!\left(\sum_{j\in\mathcal{N}(i)} \tilde{\text{msg}}_{j\to i}\right).
 \]
 
-Because this is a VAE, code samples from a Gaussian using \(\mu\) and \(\log\sigma^2\):
+\subsection*{Step E3: Build 3 latent branches from final node states}
+\begin{itemize}
+  \item \textbf{Topology branch (2D):}
+  mean+max graph pooling \(\to\) MLP \(\to (\mu_{\text{topo}}, \log\sigma^2_{\text{topo}})\).
+  \item \textbf{Structure branch (2D):}
+  extract final embeddings of GND, VIN, VOUT, concatenate, MLP
+  \(\to (\mu_{\text{struct}}, \log\sigma^2_{\text{struct}})\).
+  \item \textbf{Pole-zero branch (4D):}
+  DeepSets(poles), DeepSets(zeros), concatenate, MLP
+  \(\to (\mu_{\text{pz}}, \log\sigma^2_{\text{pz}})\).
+\end{itemize}
+
+\subsection*{Step E4: Concatenate and sample latent code}
+\[
+\mu=[\mu_{\text{topo}}|\mu_{\text{struct}}|\mu_{\text{pz}}],\quad
+\log\sigma^2=[\log\sigma^2_{\text{topo}}|\log\sigma^2_{\text{struct}}|\log\sigma^2_{\text{pz}}].
+\]
+\[
+z=[z_{\text{topology}}(2)\ |\ z_{\text{structure}}(2)\ |\ z_{\text{pz}}(4)] \in \mathbb{R}^8.
+\]
 \[
 z = \mu + \sigma \odot \epsilon,\quad \epsilon \sim \mathcal{N}(0,I).
 \]
 
 \section*{4) Decoder: How 8 Numbers Become a Circuit}
-The decoder is autoregressive (step-by-step generation):
+Read this section as the exact generation order in code:
+
+\subsection*{Step 1: Build global decoder context from latent \(z\)}
+\begin{itemize}
+  \item Input is one 8D latent vector.
+  \item A context MLP turns \(z\) into a hidden-state vector used by later steps.
+\end{itemize}
+
+\subsection*{Step 2: Predict node count first}
+\begin{itemize}
+  \item A node-count head predicts how many nodes to generate (from 3 to max\_nodes).
+  \item This happens before any node/edge sequence decoding.
+\end{itemize}
+
+\subsection*{Step 3: Node Transformer runs next (one node at a time)}
+For node position \(i\):
 \begin{enumerate}
-  \item Predict total node count (3 to max\_nodes).
-  \item Generate node types one at a time.
-  \item Generate edge/component classes one edge at a time with causal attention.
+  \item Build current node token from: latent context + position embedding + total-length embedding.
+  \item Attend to previously generated node embeddings \([0, \dots, i-1]\).
+  \item Predict node-type logits for position \(i\).
+  \item Convert predicted type to node embedding and append to history.
 \end{enumerate}
+
+\textbf{Node Transformer K/Q/V}
+\begin{itemize}
+  \item \(Q\): from the current node token (``what do I need now?'').
+  \item \(K\): from previous-node memory (``what past info is available?'').
+  \item \(V\): from previous-node memory (``what content do I read?'').
+\end{itemize}
+
+\subsection*{Step 4: Edge Transformer runs after nodes (one edge-pair step at a time)}
+Edge pairs are ordered as \((i,j)\) with \(j < i\). For edge step \(t\):
+\begin{enumerate}
+  \item Build edge-step token from:
+  \begin{itemize}
+    \item node-pair embedding (from node \(i,j\)),
+    \item latent projection,
+    \item edge position embedding,
+    \item previous-edge-token embedding.
+  \end{itemize}
+  \item Run Transformer self-attention with a causal mask.
+  \item Predict 8-class edge/component logits for this step.
+  \item Feed predicted edge class to later edge steps.
+\end{enumerate}
+
+\textbf{Edge Transformer K/Q/V}
+\begin{itemize}
+  \item \(Q_t\): from current edge-step token \(x_t\).
+  \item \(K_{1..t}, V_{1..t}\): from current and earlier edge-step tokens.
+  \item Causal mask blocks future steps, so step \(t\) cannot see \(t+1, t+2,\dots\).
+\end{itemize}
 
 Edge class is an 8-way choice:
 \begin{center}
@@ -110,46 +201,10 @@ Class & Meaning \\
 \end{tabular}
 \end{center}
 
-This is why the decoder can output both connectivity and component type together.
-
-\subsection*{What Causal Attention Is Doing (Context + K/Q/V)}
-The decoder is a sequence model. At each step, it predicts the \emph{next} graph decision while looking at past decisions.
-
-\textbf{Context used at each decoding step}
+\subsection*{Step 5: Training vs inference}
 \begin{itemize}
-  \item Global context: latent code \(z\) (the whole-circuit intent).
-  \item Position context: where we are in the sequence (position embedding).
-  \item History context: previously generated nodes/edges.
-  \item Local context: current node position or current node pair \((i,j)\).
-\end{itemize}
-
-\textbf{K/Q/V in plain language}
-\begin{itemize}
-  \item \textbf{Q (Query):} ``What information do I need \emph{right now} to make this prediction?''
-  \item \textbf{K (Key):} ``What kind of information is stored in each past token?''
-  \item \textbf{V (Value):} ``What actual content should be read from each past token?''
-\end{itemize}
-
-Attention scores are computed from Query--Key similarity, then used to mix Values.
-
-\textbf{Node decoder (Transformer decoder)}
-\begin{itemize}
-  \item Query comes from current step token (latent + position + length context).
-  \item Keys/Values come from previously generated node embeddings.
-  \item Output predicts the next node type.
-\end{itemize}
-
-\textbf{Edge decoder (causal self-attention)}
-\begin{itemize}
-  \item Each edge-step token includes edge-pair embedding + latent projection + position + previous-edge-token embedding.
-  \item The causal mask blocks access to future edge steps.
-  \item So edge decision \(t\) can depend on edge decisions \(1\ldots t-1\), but not \(t+1\ldots\).
-\end{itemize}
-
-\textbf{Training vs inference}
-\begin{itemize}
-  \item Training: teacher forcing provides true previous edge classes.
-  \item Inference: model feeds back its own previous predictions.
+  \item Training (teacher forcing): previous edge tokens come from ground truth.
+  \item Inference (generation): previous edge tokens come from model predictions.
 \end{itemize}
 
 \section*{5) How Numbers Are Manipulated During Training}
