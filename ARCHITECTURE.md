@@ -5,6 +5,9 @@
 This model generates RLC filter circuit topologies from an 8-dimensional latent space.
 The decoder is latent-only: no external condition tensor is required at decode time.
 
+**Dataset:** 480 circuits across 8 filter types (60 each):
+`low_pass`, `high_pass`, `band_pass`, `band_stop`, `rlc_series`, `rlc_parallel`, `lc_lowpass`, `cl_highpass`
+
 Current production representation uses **3 edge features**:
 
 ```text
@@ -42,7 +45,15 @@ Circuit graph + poles/zeros
 ### Pole/zero features
 
 - Variable-length lists of `[real, imag]`
-- Log-scale magnitude normalization is applied for poles/zeros
+- Log-scale magnitude normalization is applied for the DeepSets encoder input
+- A separate **pz_target** `[4]` is computed per circuit for supervised loss on z[4:8]:
+  - `sigma_p = signed_log(real(dominant_pole))`
+  - `omega_p = signed_log(|imag(dominant_pole)|)`
+  - `sigma_z = signed_log(real(dominant_zero))`
+  - `omega_z = signed_log(|imag(dominant_zero)|)`
+  - `signed_log(x) = sign(x) * log10(|x| + 1) / 7.0` (normalizes to ~[-1, 1])
+  - Dominant = pole/zero with positive imag part (from conjugate pair) closest to origin
+  - No poles/zeros → 0.0 (unambiguous since signed_log never produces exact 0 for nonzero input)
 
 ### Important preprocessing change
 
@@ -135,6 +146,7 @@ total_loss = (
   + 2.0  * edge_component_loss
   + 5.0  * connectivity_loss
   + 0.01 * kl_loss
+  + 1.0  * pz_loss
 )
 ```
 
@@ -145,7 +157,13 @@ Connectivity loss penalizes:
 - weak global connectivity
 - isolated non-mask nodes
 
-KL warmup is applied in early epochs.
+**Pole/zero supervision loss** (`pz_loss`):
+
+- `F.mse_loss(mu[:, 4:], pz_target)` — forces z[4:8] to encode specific pole/zero values
+- `pz_target` is computed from raw complex poles/zeros using signed-log normalization
+- Converges from ~0.22 to ~0.006 (val) over 100 epochs without degrading other metrics
+
+KL warmup is applied over the first 20 epochs.
 
 ---
 
@@ -160,25 +178,41 @@ Measured from current code/config (`edge_feature_dim=3`, `latent_dim=8`):
 
 ## 6) Current Training/Checkpoint Status
 
-From `checkpoints/production/best.pt`:
+From `checkpoints/production/best.pt` (100 epochs, with pz supervision):
 
-- Best epoch: **95**
-- Validation loss: **1.0291**
+- Best epoch: **99**
+- Validation loss: **1.04** (includes pz_loss component)
+- Validation pz_loss: **0.006**
 
 From current reported results (`GENERATION_RESULTS.md`):
 
 - Node count accuracy: 100%
 - Edge existence accuracy: 100%
 - Component type accuracy: 100%
+- Reconstruction validity: 480/480 (100%)
 
 ---
 
 ## 7) Generation Modes
 
-1. Random latent sampling: `z ~ N(0, I)`
-2. Encode existing circuits, decode `mu`
-3. Latent interpolation
-4. Specification-driven generation via K-NN latent interpolation (`scripts/generation/generate_from_specs.py`)
+1. **Random sampling:** `z ~ N(0, I)` — 89.2% valid rate
+2. **Reconstruction:** encode circuit → decode `mu`
+3. **Centroid generation:** average latent per filter type → decode
+4. **Latent interpolation:** linear blend between two latent codes
+5. **Pole/zero-driven generation** (new, decoder-only):
+   - User specifies dominant pole/zero (real + imag parts)
+   - `z[4:8]` is set via signed-log normalization of those values
+   - `z[0:4]` is sampled from N(0, I) (random topology)
+   - Decoder generates circuit — no encoder or dataset needed
+   - 83% valid rate across test cases
+
+```bash
+# Example: RC low-pass with pole at -6283 rad/s (~1kHz)
+python scripts/generation/generate_from_specs.py --pole-real -6283 --pole-imag 0 --num-samples 5
+
+# Resonant circuit with conjugate pole pair
+python scripts/generation/generate_from_specs.py --pole-real -3142 --pole-imag 49348 --num-samples 5
+```
 
 ---
 
@@ -192,21 +226,26 @@ From current reported results (`GENERATION_RESULTS.md`):
 - `ml/models/decoder_components.py`
 - `ml/models/node_decoder.py`
 
+### Constants
+
+- `ml/models/constants.py` — `PZ_LOG_SCALE`, `FILTER_TYPES`, `CIRCUIT_TEMPLATES`
+
 ### Data and loss
 
-- `ml/data/dataset.py`
-- `ml/losses/circuit_loss.py`
+- `ml/data/dataset.py` — dataset with `pz_target` computation
+- `ml/losses/circuit_loss.py` — includes `pz_loss` term
 - `ml/losses/connectivity_loss.py`
 
 ### Training and generation
 
 - `scripts/training/train.py`
-- `scripts/training/validate.py`
-- `scripts/generation/generate_from_specs.py`
+- `scripts/generation/generate_from_specs.py` — pole/zero-driven generation (decoder-only)
+- `scripts/generation/regenerate_all_results.py` — all 6 result sections
 
 ---
 
 ## Notes on Changes vs Older Docs
 
-If you see references to 7D edge features (`[log(C), log(G), log(L_inv), is_R, is_C, is_L, is_parallel]`), those are outdated.
-The current architecture uses 3D `log10` component values with internally derived presence masks.
+- If you see references to 7D edge features (`[log(C), log(G), log(L_inv), is_R, is_C, is_L, is_parallel]`), those are outdated. The current architecture uses 3D `log10` component values with internally derived presence masks.
+- If you see 6 filter types or 360 circuits, those are outdated. The current dataset has 8 filter types and 480 circuits.
+- If you see `generate_from_specs.py` with `--cutoff`/`--q-factor` args, that is outdated. It now uses `--pole-real`/`--pole-imag`/`--zero-real`/`--zero-imag`.
