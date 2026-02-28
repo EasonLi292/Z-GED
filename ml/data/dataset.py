@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 import sys
 
+from ml.models.constants import PZ_LOG_SCALE
+
 # Add tools to path for imports
 sys.path.insert(0, 'tools')
 
@@ -41,7 +43,9 @@ class CircuitDataset(Dataset):
         'band_pass',
         'band_stop',
         'rlc_series',
-        'rlc_parallel'
+        'rlc_parallel',
+        'lc_lowpass',
+        'cl_highpass'
     ]
 
     def __init__(
@@ -301,6 +305,67 @@ class CircuitDataset(Dataset):
 
         return torch.tensor(neighbor_indices, dtype=torch.long)
 
+    @staticmethod
+    def _signed_log_normalize(x: float, scale: float = PZ_LOG_SCALE) -> float:
+        """Compute signed_log(x) = sign(x) * log10(|x| + 1) / scale."""
+        if abs(x) < 1e-30:
+            return 0.0
+        sign = 1.0 if x >= 0 else -1.0
+        return sign * np.log10(abs(x) + 1.0) / scale
+
+    def _compute_pz_target(self, poles: list, zeros: list) -> torch.Tensor:
+        """
+        Compute 4D pole/zero target from raw complex poles/zeros.
+
+        Returns [sigma_p, omega_p, sigma_z, omega_z] in signed-log scale.
+
+        Dominant pole selection:
+        - For conjugate pairs, take pole with positive imaginary part
+        - For real poles, take the one closest to origin
+        """
+        # --- Dominant pole ---
+        if len(poles) > 0:
+            # Filter to unique poles (keep positive-imag from conjugate pairs)
+            unique_poles = []
+            for p in poles:
+                if isinstance(p, complex):
+                    if p.imag >= 0:
+                        unique_poles.append(p)
+                else:
+                    unique_poles.append(complex(p, 0))
+            if not unique_poles:
+                # All poles had negative imag (shouldn't happen with conjugate pairs)
+                unique_poles = [complex(p) if not isinstance(p, complex) else p for p in poles]
+
+            # Pick dominant: closest to origin among unique poles
+            dominant_pole = min(unique_poles, key=lambda p: abs(p))
+            sigma_p = self._signed_log_normalize(dominant_pole.real)
+            omega_p = self._signed_log_normalize(abs(dominant_pole.imag))
+        else:
+            sigma_p = 0.0
+            omega_p = 0.0
+
+        # --- Dominant zero ---
+        if len(zeros) > 0:
+            unique_zeros = []
+            for z in zeros:
+                if isinstance(z, complex):
+                    if z.imag >= 0:
+                        unique_zeros.append(z)
+                else:
+                    unique_zeros.append(complex(z, 0))
+            if not unique_zeros:
+                unique_zeros = [complex(z) if not isinstance(z, complex) else z for z in zeros]
+
+            dominant_zero = min(unique_zeros, key=lambda z: abs(z))
+            sigma_z = self._signed_log_normalize(dominant_zero.real)
+            omega_z = self._signed_log_normalize(abs(dominant_zero.imag))
+        else:
+            sigma_z = 0.0
+            omega_z = 0.0
+
+        return torch.tensor([sigma_p, omega_p, sigma_z, omega_z], dtype=torch.float32)
+
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """
         Get a single circuit from the dataset.
@@ -401,6 +466,9 @@ class CircuitDataset(Dataset):
         # Package specifications as [cutoff_freq, q_factor]
         specifications = torch.tensor([char_freq, q_factor], dtype=torch.float32)
 
+        # Compute pole/zero supervision target from raw complex values
+        pz_target = self._compute_pz_target(poles, zeros)
+
         return {
             'graph': graph,
             'poles': poles_tensor,
@@ -413,7 +481,8 @@ class CircuitDataset(Dataset):
             'circuit_id': circuit['id'],
             'ged_neighbors': ged_neighbors,
             'idx': idx,
-            'specifications': specifications  # [cutoff_freq, q_factor]
+            'specifications': specifications,  # [cutoff_freq, q_factor]
+            'pz_target': pz_target,  # [sigma_p, omega_p, sigma_z, omega_z]
         }
 
     def get_filter_type_indices(self, filter_type: str) -> List[int]:

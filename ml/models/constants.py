@@ -1,7 +1,10 @@
 """Constants for circuit models."""
 
+# Pole/zero normalization scale: signed_log(x) = sign(x) * log10(|x| + 1) / PZ_LOG_SCALE
+PZ_LOG_SCALE = 7.0
+
 # Filter type ordering (must match dataset)
-FILTER_TYPES = ['low_pass', 'high_pass', 'band_pass', 'band_stop', 'rlc_series', 'rlc_parallel']
+FILTER_TYPES = ['low_pass', 'high_pass', 'band_pass', 'band_stop', 'rlc_series', 'rlc_parallel', 'lc_lowpass', 'cl_highpass']
 
 # Circuit templates for each filter type
 CIRCUIT_TEMPLATES = {
@@ -45,5 +48,17 @@ CIRCUIT_TEMPLATES = {
         'edges': [(0, 2), (0, 3), (1, 2), (2, 0), (2, 1), (2, 3), (3, 0)],
         'num_components': 4,  # R, L, C, R_parallel
         'node_types': [0, 1, 2, 3]
+    },
+    'lc_lowpass': {
+        'num_nodes': 3,
+        'edges': [(0, 2), (1, 2), (2, 0), (2, 1)],
+        'num_components': 2,  # L, C
+        'node_types': [0, 1, 2]
+    },
+    'cl_highpass': {
+        'num_nodes': 3,
+        'edges': [(0, 2), (1, 2), (2, 0), (2, 1)],
+        'num_components': 2,  # C, L
+        'node_types': [0, 1, 2]
     }
 }

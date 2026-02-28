@@ -6,9 +6,12 @@ import pickle
 import uuid
 import warnings
 
-# PySpice Imports
-from PySpice.Spice.Netlist import Circuit
-from PySpice.Unit import u_kOhm, u_Ohm, u_H, u_F, u_uH, u_mH, u_uF, u_nF, u_pF, u_MHz, u_Hz, u_kHz
+# PySpice Imports (optional — only needed for to_pyspice())
+try:
+    from PySpice.Spice.Netlist import Circuit
+    from PySpice.Unit import u_kOhm, u_Ohm, u_H, u_F, u_uH, u_mH, u_uF, u_nF, u_pF, u_MHz, u_Hz, u_kHz
+except ImportError:
+    pass
 
 # Scipy for fitting Transfer Functions
 from scipy import signal
@@ -20,7 +23,7 @@ warnings.filterwarnings('ignore')
 # Configuration
 DATASET_DIR = "rlc_dataset"
 NUM_SAMPLES_PER_FILTER = 60  # Generate 60 variations of each filter type (3x original)
-FILTER_TYPES = ['low_pass', 'high_pass', 'band_pass', 'band_stop', 'rlc_series', 'rlc_parallel']
+FILTER_TYPES = ['low_pass', 'high_pass', 'band_pass', 'band_stop', 'rlc_series', 'rlc_parallel', 'lc_lowpass', 'cl_highpass']
 
 class FilterGenerator:
     def __init__(self):
@@ -172,6 +175,48 @@ class FilterGenerator:
             {'name': 'L1', 'type': 'L', 'value': L, 'node1': 2, 'node2': 0},
             {'name': 'C1', 'type': 'C', 'value': C, 'node1': 2, 'node2': 0},
             {'name': 'R1', 'type': 'R', 'value': R, 'node1': 2, 'node2': 0}
+        ]
+
+        self._build_graph()
+        return f0
+
+    def generate_lc_lowpass_filter(self):
+        """LC Low-pass filter: Vin --L-- Vout --C-- GND"""
+        self.filter_type = 'lc_lowpass'
+        self.components = []
+        self.graph.clear()
+
+        # Randomize component values
+        L = 10 ** random.uniform(-4, -2)  # 0.1mH to 10mH
+        C = 10 ** random.uniform(-9, -6)  # 1nF to 1uF
+
+        # Resonant frequency: f0 = 1 / (2*pi*sqrt(L*C))
+        f0 = 1 / (2 * np.pi * np.sqrt(L * C))
+
+        self.components = [
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 1, 'node2': 2},
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 2, 'node2': 0}
+        ]
+
+        self._build_graph()
+        return f0
+
+    def generate_cl_highpass_filter(self):
+        """CL High-pass filter: Vin --C-- Vout --L-- GND"""
+        self.filter_type = 'cl_highpass'
+        self.components = []
+        self.graph.clear()
+
+        # Randomize component values
+        L = 10 ** random.uniform(-4, -2)  # 0.1mH to 10mH
+        C = 10 ** random.uniform(-9, -6)  # 1nF to 1uF
+
+        # Resonant frequency: f0 = 1 / (2*pi*sqrt(L*C))
+        f0 = 1 / (2 * np.pi * np.sqrt(L * C))
+
+        self.components = [
+            {'name': 'C1', 'type': 'C', 'value': C, 'node1': 1, 'node2': 2},
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 2, 'node2': 0}
         ]
 
         self._build_graph()
@@ -933,6 +978,33 @@ def extract_poles_zeros_gain_analytical(filter_type, components):
             # From circuit analysis, K should normalize to voltage divider at resonance
             gain = R / (R + R_source) if R > 0 else 0.5
 
+    elif filter_type == 'lc_lowpass':
+        # LC Low-pass: Vin(1) --L1-- Vout(2) --C1-- GND(0)
+        # H(s) = Z_C / (Z_L + Z_C) = (1/(sC)) / (sL + 1/(sC)) = 1 / (s²LC + 1)
+        # Poles: s² = -1/(LC) → s = ±j·ω₀ (purely imaginary, undamped)
+        L = comp_dict.get('L1', 0)
+        C = comp_dict.get('C1', 0)
+        if L > 0 and C > 0:
+            omega_0 = 1.0 / np.sqrt(L * C)
+            poles = [complex(0, omega_0), complex(0, -omega_0)]
+            zeros = []
+            # Gain: H(s) = ω₀² / (s² + ω₀²), so K = ω₀²
+            gain = omega_0 ** 2
+
+    elif filter_type == 'cl_highpass':
+        # CL High-pass: Vin(1) --C1-- Vout(2) --L1-- GND(0)
+        # H(s) = Z_L / (Z_C + Z_L) = sL / (1/(sC) + sL) = s²LC / (s²LC + 1)
+        # Poles: s = ±j·ω₀ (same as lc_lowpass)
+        # Zeros: s² = 0 → double zero at DC
+        L = comp_dict.get('L1', 0)
+        C = comp_dict.get('C1', 0)
+        if L > 0 and C > 0:
+            omega_0 = 1.0 / np.sqrt(L * C)
+            poles = [complex(0, omega_0), complex(0, -omega_0)]
+            zeros = [0.0, 0.0]  # Double zero at DC
+            # Gain: H(s) = s² / (s² + ω₀²), leading coefficient = 1.0
+            gain = 1.0
+
     # Convert complex numbers to proper format
     poles = [complex(p) if not isinstance(p, complex) else p for p in poles]
     zeros = [complex(z) if not isinstance(z, complex) else z for z in zeros]
@@ -1036,6 +1108,10 @@ def main():
                 char_freq = gen.generate_rlc_series_resonant()
             elif filter_type == 'rlc_parallel':
                 char_freq = gen.generate_rlc_parallel_resonant()
+            elif filter_type == 'lc_lowpass':
+                char_freq = gen.generate_lc_lowpass_filter()
+            elif filter_type == 'cl_highpass':
+                char_freq = gen.generate_cl_highpass_filter()
 
             # Extract Poles, Zeros, Gain using analytical method (no SPICE needed)
             poles, zeros, gain = extract_poles_zeros_gain_analytical(filter_type, gen.components)

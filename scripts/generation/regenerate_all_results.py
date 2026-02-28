@@ -13,10 +13,11 @@ from ml.data.dataset import CircuitDataset
 from ml.models.encoder import HierarchicalEncoder
 from ml.models.decoder import SimplifiedCircuitDecoder
 from ml.models.component_utils import masks_to_component_type
+from ml.models.constants import PZ_LOG_SCALE
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
-FILTER_TYPES = ['low_pass', 'high_pass', 'band_pass', 'band_stop', 'rlc_series', 'rlc_parallel']
+FILTER_TYPES = ['low_pass', 'high_pass', 'band_pass', 'band_stop', 'rlc_series', 'rlc_parallel', 'lc_lowpass', 'cl_highpass']
 COMP_NAMES = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
 BASE_NAMES = {0: 'GND', 1: 'VIN', 2: 'VOUT', 3: 'INT', 4: 'INT'}
 
@@ -26,8 +27,10 @@ def collate_fn(batch_list):
     poles = [item['poles'] for item in batch_list]
     zeros = [item['zeros'] for item in batch_list]
     specs = torch.stack([item['specifications'] for item in batch_list])
+    pz_target = torch.stack([item['pz_target'] for item in batch_list])
     batched_graph = Batch.from_data_list(graphs)
-    return {'graph': batched_graph, 'poles': poles, 'zeros': zeros, 'specifications': specs}
+    return {'graph': batched_graph, 'poles': poles, 'zeros': zeros,
+            'specifications': specs, 'pz_target': pz_target}
 
 
 def circuit_to_string(circuit):
@@ -308,6 +311,58 @@ def main():
                     if c in comp:
                         comps.add(c)
         print(f"    `{topo}` -> {count} samples ({num_nodes} nodes, components: {', '.join(sorted(comps))})")
+
+    # =========================================================================
+    # 6. POLE/ZERO-DRIVEN GENERATION
+    # =========================================================================
+    print("\n" + "="*70)
+    print("6. POLE/ZERO-DRIVEN GENERATION")
+    print("="*70)
+
+    def signed_log_normalize(x, scale=PZ_LOG_SCALE):
+        if abs(x) < 1e-30:
+            return 0.0
+        sign = 1.0 if x >= 0 else -1.0
+        return sign * np.log10(abs(x) + 1.0) / scale
+
+    def pz_to_latent(pole_real, pole_imag, zero_real, zero_imag):
+        return torch.tensor([
+            signed_log_normalize(pole_real),
+            signed_log_normalize(abs(pole_imag)),
+            signed_log_normalize(zero_real),
+            signed_log_normalize(abs(zero_imag)),
+        ], dtype=torch.float32)
+
+    pz_tests = [
+        # (pole_real, pole_imag, zero_real, zero_imag, description)
+        (-6283, 0, 0, 0,       "RC low-pass ~1kHz (real pole, no zero)"),
+        (-62832, 0, 0, 0,      "RC low-pass ~10kHz"),
+        (-628318, 0, 0, 0,     "RC low-pass ~100kHz"),
+        (0, 0, -6283, 0,       "RC high-pass ~1kHz (no pole, real zero)"),
+        (-3142, 49348, 0, 0,   "Band-pass ~50kHz (conjugate pole)"),
+        (-3142, 49348, 0, 49348, "Band-stop ~50kHz (pole+zero)"),
+        (-100, 0, 0, 0,        "Very low freq pole"),
+        (-1e6, 0, 0, 0,        "Very high freq pole"),
+    ]
+
+    torch.manual_seed(42)
+
+    for pole_r, pole_i, zero_r, zero_i, desc in pz_tests:
+        pz_latent = pz_to_latent(pole_r, pole_i, zero_r, zero_i)
+        print(f"\n  {desc}")
+        print(f"    Pole: {pole_r:+.0f} + {pole_i:.0f}j, Zero: {zero_r:+.0f} + {zero_i:.0f}j")
+        print(f"    z[4:8] = [{pz_latent[0]:+.3f}, {pz_latent[1]:+.3f}, {pz_latent[2]:+.3f}, {pz_latent[3]:+.3f}]")
+
+        # Generate 3 samples per test case
+        results = []
+        for s in range(3):
+            z_topo = torch.randn(4)
+            z = torch.cat([z_topo, pz_latent])
+            circuit = generate(z)
+            cstr = circuit_to_string(circuit)
+            valid = check_validity(circuit)
+            results.append((cstr, valid))
+            print(f"    Sample {s+1}: `{cstr}` [{'Valid' if valid else 'INVALID'}]")
 
     print("\n" + "="*70)
     print("ALL RESULTS GENERATED")

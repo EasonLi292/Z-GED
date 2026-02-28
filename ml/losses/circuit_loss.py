@@ -42,6 +42,7 @@ class CircuitLoss(nn.Module):
         edge_component_weight: float = 2.0,
         connectivity_weight: float = 5.0,
         kl_weight: float = 0.01,
+        pz_weight: float = 1.0,
         use_connectivity_loss: bool = True,
     ):
         super().__init__()
@@ -51,6 +52,7 @@ class CircuitLoss(nn.Module):
         self.edge_component_weight = edge_component_weight
         self.connectivity_weight = connectivity_weight
         self.kl_weight = kl_weight
+        self.pz_weight = pz_weight
 
         self.use_connectivity_loss = use_connectivity_loss
 
@@ -68,6 +70,7 @@ class CircuitLoss(nn.Module):
         targets: Dict[str, torch.Tensor],
         mu: Optional[torch.Tensor] = None,
         logvar: Optional[torch.Tensor] = None,
+        pz_target: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
         Compute circuit generation loss.
@@ -83,6 +86,7 @@ class CircuitLoss(nn.Module):
                 - 'component_types': [batch, num_nodes, num_nodes]
             mu: Latent mean [batch, latent_dim]
             logvar: Latent log-variance [batch, latent_dim]
+            pz_target: Pole/zero target [batch, 4] for mu[:, 4:]
         """
         device = predictions['node_types'].device
 
@@ -174,13 +178,20 @@ class CircuitLoss(nn.Module):
         else:
             kl_loss = torch.tensor(0.0, device=device)
 
+        # 6. Pole/Zero Supervision Loss
+        if pz_target is not None and mu is not None:
+            loss_pz = F.mse_loss(mu[:, 4:], pz_target)
+        else:
+            loss_pz = torch.tensor(0.0, device=device)
+
         # Total
         total_loss = (
             self.node_type_weight * loss_node_type +
             self.node_count_weight * loss_node_count +
             self.edge_component_weight * loss_edge_component +
             self.connectivity_weight * loss_connectivity +
-            self.kl_weight * kl_loss
+            self.kl_weight * kl_loss +
+            self.pz_weight * loss_pz
         )
 
         metrics = {
@@ -189,6 +200,7 @@ class CircuitLoss(nn.Module):
             'loss_edge_component': loss_edge_component.item(),
             'loss_connectivity': loss_connectivity.item() if self.use_connectivity_loss else 0.0,
             'loss_kl': kl_loss.item(),
+            'loss_pz': loss_pz.item(),
             'node_type_acc': node_type_acc,
             'node_count_acc': node_count_acc,
             'edge_exist_acc': edge_acc,

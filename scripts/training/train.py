@@ -26,12 +26,14 @@ def collate_circuit_batch(batch_list):
     graphs = [item['graph'] for item in batch_list]
     poles = [item['poles'] for item in batch_list]
     zeros = [item['zeros'] for item in batch_list]
+    pz_target = torch.stack([item['pz_target'] for item in batch_list])
     batched_graph = Batch.from_data_list(graphs)
 
     return {
         'graph': batched_graph,
         'poles': poles,
         'zeros': zeros,
+        'pz_target': pz_target,
     }
 
 
@@ -95,6 +97,7 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
         graph = batch['graph'].to(device)
         poles_list = batch['poles']
         zeros_list = batch['zeros']
+        pz_target = batch['pz_target'].to(device)
 
         # Encode
         z, mu, logvar = encoder(
@@ -125,7 +128,8 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
         # Loss
         loss, metrics = loss_fn(
             predictions, targets,
-            mu=mu, logvar=logvar
+            mu=mu, logvar=logvar,
+            pz_target=pz_target
         )
 
         # Backward
@@ -167,6 +171,7 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
             graph = batch['graph'].to(device)
             poles_list = batch['poles']
             zeros_list = batch['zeros']
+            pz_target = batch['pz_target'].to(device)
 
             z, mu, logvar = encoder(
                 graph.x, graph.edge_index, graph.edge_attr,
@@ -191,7 +196,8 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
 
             loss, metrics = loss_fn(
                 predictions, targets,
-                mu=mu, logvar=logvar
+                mu=mu, logvar=logvar,
+                pz_target=pz_target
             )
 
             total_loss += loss.item()
@@ -301,6 +307,7 @@ def main():
         edge_component_weight=2.0,
         connectivity_weight=5.0,
         kl_weight=0.01,
+        pz_weight=1.0,
         use_connectivity_loss=True,
     )
 
@@ -328,10 +335,12 @@ def main():
 
         print(f"\nEpoch {epoch}")
         print(f"  Train - loss: {train_metrics['total_loss']:.4f}, "
+              f"pz: {train_metrics['loss_pz']:.4f}, "
               f"node_count: {train_metrics['node_count_acc']:.1f}%, "
               f"edge: {train_metrics['edge_exist_acc']:.1f}%, "
               f"comp: {train_metrics['component_type_acc']:.1f}%")
         print(f"  Val   - loss: {val_metrics['total_loss']:.4f}, "
+              f"pz: {val_metrics['loss_pz']:.4f}, "
               f"node_count: {val_metrics['node_count_acc']:.1f}%, "
               f"edge: {val_metrics['edge_exist_acc']:.1f}%, "
               f"comp: {val_metrics['component_type_acc']:.1f}%")
