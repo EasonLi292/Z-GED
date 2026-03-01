@@ -9,7 +9,7 @@ import sys
 import torch
 sys.path.insert(0, '.')
 
-from ml.models import ImpedanceConv, ImpedanceGNN, GlobalPooling, DeepSets
+from ml.models import ImpedanceConv, ImpedanceGNN, GlobalPooling
 from ml.models import HierarchicalEncoder, SimplifiedCircuitDecoder, CIRCUIT_TEMPLATES
 from ml.data import CircuitDataset, collate_circuit_batch
 from torch.utils.data import DataLoader
@@ -82,29 +82,6 @@ def test_impedance_gnn():
     print("\n  ImpedanceGNN test passed")
 
 
-def test_deep_sets():
-    """Test DeepSets for poles/zeros encoding."""
-    print("\n" + "="*70)
-    print("TEST: DeepSets for Poles/Zeros")
-    print("="*70)
-
-    # Test with variable-length sets
-    poles1 = torch.randn(1, 2)  # 1 pole
-    poles2 = torch.randn(2, 2)  # 2 poles
-
-    deepsets = DeepSets(input_dim=2, hidden_dim=32, output_dim=8)
-
-    out1 = deepsets(poles1)
-    out2 = deepsets(poles2)
-
-    print(f"\n1 pole:  Input {poles1.shape} -> Output {out1.shape}")
-    print(f"2 poles: Input {poles2.shape} -> Output {out2.shape}")
-
-    assert out1.shape == (1, 8)
-    assert out2.shape == (1, 8)
-    print("\n  DeepSets test passed")
-
-
 def test_encoder():
     """Test HierarchicalEncoder."""
     print("\n" + "="*70)
@@ -124,19 +101,6 @@ def test_encoder():
     edge_attr[:, 0] = 3.0  # All R edges: log10(1000 Ohm)
     batch = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3])
 
-    poles_list = [
-        torch.randn(1, 2),
-        torch.randn(2, 2),
-        torch.randn(1, 2),
-        torch.randn(2, 2)
-    ]
-    zeros_list = [
-        torch.zeros(0, 2),
-        torch.randn(1, 2),
-        torch.randn(1, 2),
-        torch.randn(2, 2)
-    ]
-
     encoder = HierarchicalEncoder(
         node_feature_dim=4,
         edge_feature_dim=3,
@@ -144,7 +108,7 @@ def test_encoder():
         latent_dim=latent_dim
     )
 
-    z, mu, logvar = encoder(x, edge_index, edge_attr, batch, poles_list, zeros_list)
+    z, mu, logvar = encoder(x, edge_index, edge_attr, batch)
 
     print(f"\nInput nodes: {x.shape}")
     print(f"Batch size:  {batch_size}")
@@ -257,9 +221,7 @@ def test_with_real_data():
         batch['graph'].x,
         batch['graph'].edge_index,
         batch['graph'].edge_attr,
-        batch['graph'].batch,
-        batch['poles'],
-        batch['zeros']
+        batch['graph'].batch
     )
 
     print(f"\nEncoded:")
@@ -296,7 +258,6 @@ def main():
 
     test_impedance_conv()
     test_impedance_gnn()
-    test_deep_sets()
     test_encoder()
     test_decoder()
     test_with_real_data()

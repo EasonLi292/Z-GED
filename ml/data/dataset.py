@@ -124,61 +124,6 @@ class CircuitDataset(Dataset):
         print(f"  Pole: mean={self.log_pole_mean:.2f}, std={self.log_pole_std:.2f}")
         print(f"  Zero: mean={self.log_zero_mean:.2f}, std={self.log_zero_std:.2f}")
 
-    def get_normalization_stats(self) -> Dict:
-        """Get normalization statistics for denormalization."""
-        return {
-            'log_pole_mean': self.log_pole_mean if hasattr(self, 'log_pole_mean') else 0.0,
-            'log_pole_std': self.log_pole_std if hasattr(self, 'log_pole_std') else 1.0,
-            'log_zero_mean': self.log_zero_mean if hasattr(self, 'log_zero_mean') else 0.0,
-            'log_zero_std': self.log_zero_std if hasattr(self, 'log_zero_std') else 1.0
-        }
-
-    @staticmethod
-    def denormalize_poles_zeros(
-        poles_zeros: np.ndarray,
-        log_mean: float,
-        log_std: float
-    ) -> np.ndarray:
-        """
-        Denormalize poles or zeros back to original scale.
-
-        Args:
-            poles_zeros: Normalized [real, imag] pairs [N, 2]
-            log_mean: Mean of log-magnitudes
-            log_std: Std of log-magnitudes
-
-        Returns:
-            Denormalized [real, imag] pairs [N, 2]
-        """
-        if len(poles_zeros) == 0:
-            return poles_zeros
-
-        # Get magnitude and phase
-        mags = np.sqrt((poles_zeros**2).sum(axis=-1))
-        phases = np.arctan2(poles_zeros[:, 1], poles_zeros[:, 0])
-
-        # Denormalize magnitude
-        # normalized_log_mag = (log_mag - mean) / std
-        # log_mag = normalized_log_mag * std + mean
-        # mag = exp(log_mag)
-
-        # Get log of normalized magnitude
-        log_norm_mags = np.log(mags + 1e-8)
-
-        # Denormalize in log-space
-        log_mags = log_norm_mags * log_std + log_mean
-
-        # Convert back to linear scale
-        denorm_mags = np.exp(log_mags)
-
-        # Reconstruct complex numbers
-        denormalized = np.stack([
-            denorm_mags * np.cos(phases),
-            denorm_mags * np.sin(phases)
-        ], axis=-1)
-
-        return denormalized
-
     def __len__(self) -> int:
         """Return number of circuits in dataset."""
         return len(self.circuits)

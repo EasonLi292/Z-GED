@@ -1,7 +1,7 @@
 """Neural network architectures for circuit generation."""
 
 # Core layers
-from .gnn_layers import ImpedanceConv, ImpedanceGNN, GlobalPooling, DeepSets
+from .gnn_layers import ImpedanceConv, ImpedanceGNN, GlobalPooling
 from .constants import FILTER_TYPES, CIRCUIT_TEMPLATES
 
 # Encoder
@@ -16,7 +16,6 @@ __all__ = [
     'ImpedanceConv',
     'ImpedanceGNN',
     'GlobalPooling',
-    'DeepSets',
     # Encoder
     'HierarchicalEncoder',
     # Decoder

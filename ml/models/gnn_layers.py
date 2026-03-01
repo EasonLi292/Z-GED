@@ -56,10 +56,22 @@ class ImpedanceConv(MessagePassing):
 
         # Component-type-specific message transformations
         # Each takes [x_j, component_value] as input (out_channels + 1)
-        # The value directly conditions the message
-        self.lin_R = nn.Linear(out_channels + 1, out_channels)
-        self.lin_C = nn.Linear(out_channels + 1, out_channels)
-        self.lin_L = nn.Linear(out_channels + 1, out_channels)
+        # MLP allows nonlinear value×feature interactions
+        self.lin_R = nn.Sequential(
+            nn.Linear(out_channels + 1, out_channels),
+            nn.ReLU(),
+            nn.Linear(out_channels, out_channels)
+        )
+        self.lin_C = nn.Sequential(
+            nn.Linear(out_channels + 1, out_channels),
+            nn.ReLU(),
+            nn.Linear(out_channels, out_channels)
+        )
+        self.lin_L = nn.Sequential(
+            nn.Linear(out_channels + 1, out_channels),
+            nn.ReLU(),
+            nn.Linear(out_channels, out_channels)
+        )
 
         # Attention for edge importance (based on node features only)
         self.att = nn.Sequential(
@@ -79,14 +91,12 @@ class ImpedanceConv(MessagePassing):
     def reset_parameters(self):
         """Initialize parameters."""
         self.lin_node.reset_parameters()
-        self.lin_R.reset_parameters()
-        self.lin_C.reset_parameters()
-        self.lin_L.reset_parameters()
 
-        # Initialize attention MLP
-        for layer in self.att:
-            if isinstance(layer, nn.Linear):
-                layer.reset_parameters()
+        # Reset component MLPs
+        for module in [self.lin_R, self.lin_C, self.lin_L, self.att]:
+            for layer in module:
+                if isinstance(layer, nn.Linear):
+                    layer.reset_parameters()
 
         if self.bias is not None:
             self.bias.data.zero_()
@@ -371,76 +381,4 @@ class GlobalPooling(nn.Module):
 
         # Concatenate different pooling types
         out = torch.cat(pooled, dim=-1)
-        return out
-
-
-class DeepSets(nn.Module):
-    """
-    DeepSets architecture for permutation-invariant encoding.
-
-    Used for encoding variable-length sets of poles/zeros.
-    Reference: Zaheer et al., "Deep Sets" (2017)
-
-    Args:
-        input_dim: Dimension of each element (2 for complex numbers as [real, imag])
-        hidden_dim: Hidden dimension for element encoding
-        output_dim: Output dimension for aggregated representation
-    """
-
-    def __init__(
-        self,
-        input_dim: int = 2,
-        hidden_dim: int = 32,
-        output_dim: int = 8
-    ):
-        super().__init__()
-
-        # Element-wise encoder (φ function)
-        self.phi = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU()
-        )
-
-        # Aggregated encoder (ρ function)
-        self.rho = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, output_dim)
-        )
-
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Encode a variable-length set.
-
-        Args:
-            x: Elements [N, input_dim] or [B, max_len, input_dim]
-            mask: Optional mask for padded elements [N] or [B, max_len]
-
-        Returns:
-            out: Aggregated representation [output_dim] or [B, output_dim]
-        """
-        # Encode each element
-        h = self.phi(x)  # [N, hidden_dim] or [B, max_len, hidden_dim]
-
-        # Apply mask if provided
-        if mask is not None:
-            h = h * mask.unsqueeze(-1)
-
-        # Aggregate (sum pooling for permutation invariance)
-        if h.dim() == 3:
-            # Batched input: [B, max_len, hidden_dim]
-            h_agg = h.sum(dim=1)  # [B, hidden_dim]
-            if mask is not None:
-                # Normalize by count
-                counts = mask.sum(dim=1, keepdim=True).clamp(min=1)
-                h_agg = h_agg / counts
-        else:
-            # Single set: [N, hidden_dim]
-            h_agg = h.mean(dim=0, keepdim=True)  # [1, hidden_dim]
-
-        # Aggregate encoding
-        out = self.rho(h_agg)
-
         return out
