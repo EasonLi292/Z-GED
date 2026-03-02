@@ -151,3 +151,141 @@ This forces the last 4 dimensions of the encoder's mean to match `[sigma_p, omeg
 "N/A" means zero variance for that dimension in the given filter type (nothing to predict).
 
 Overall val MSE: 0.001165, val/train ratio: 1.04x (no overfitting).
+
+## Generalization to Unseen Component Values
+
+The val set tests the model on **the same 8 topologies** with **randomly sampled component values not seen during training**. This section analyzes how robustly the model handles new R, C, L values.
+
+Script: `scripts/eval/eval_pz_component_generalization.py`
+
+### Overall Result
+
+The model generalizes very well to new component values:
+
+- **Val MSE: 0.001165** vs Train MSE: 0.001121 — a ratio of only **1.04x**
+- Near-perfect linear fits: sigma_p slope=0.981, omega_p slope=0.989, omega_z slope=1.003
+- Median per-sample MAE: 0.009, 95th percentile: 0.024
+
+### Predicted vs Actual (Val Set)
+
+| Dimension | R² | Pearson r | Best-fit slope | Target range | Pred range |
+|---|---|---|---|---|---|
+| sigma_p | 0.991 | 0.997 | 0.981 | [-0.96, 0.00] | [-0.92, 0.04] |
+| omega_p | 0.973 | 0.987 | 0.989 | [0.00, 0.91] | [-0.03, 0.90] |
+| sigma_z | N/A | N/A | N/A | constant 0 | mean=-0.0002 |
+| omega_z | 0.999 | 0.999 | 1.003 | [0.00, 0.90] | [-0.02, 0.92] |
+
+Slopes near 1.0 and intercepts near 0 confirm the model is not systematically biased.
+
+### Error Distribution by Filter Type
+
+| Filter | N | Mean MAE | Median MAE | P95 MAE | Max MAE |
+|---|---|---|---|---|---|
+| cl_highpass | 48 | 0.005 | 0.004 | 0.012 | 0.013 |
+| high_pass | 48 | 0.008 | 0.006 | 0.018 | 0.030 |
+| lc_lowpass | 48 | 0.009 | 0.009 | 0.016 | 0.017 |
+| low_pass | 48 | 0.010 | 0.010 | 0.015 | 0.018 |
+| rlc_series | 48 | 0.013 | 0.009 | 0.026 | 0.128 |
+| rlc_parallel | 48 | 0.015 | 0.014 | 0.027 | 0.041 |
+| band_pass | 48 | 0.016 | 0.007 | 0.021 | 0.175 |
+| band_stop | 48 | 0.020 | 0.015 | 0.041 | 0.150 |
+
+Simpler topologies (3-node: cl_highpass, high_pass, lc_lowpass, low_pass) have lower errors. More complex topologies (4-5 node: band_pass, band_stop, rlc_*) have slightly higher errors but still strong R² values.
+
+### Error vs Component Value Magnitude
+
+Does the model struggle with extreme component values? Correlations between mean log10 component value and prediction error:
+
+| Filter | Correlation | p-value | Interpretation |
+|---|---|---|---|
+| cl_highpass | r=-0.787 | <0.001 | Larger components (higher freq) are easier |
+| lc_lowpass | r=-0.539 | <0.001 | Same pattern |
+| high_pass | r=-0.593 | <0.001 | Same pattern |
+| low_pass | r=0.287 | 0.048 | Weak: larger components slightly harder |
+| rlc_series | r=-0.271 | 0.063 | Not significant |
+| band_stop | r=0.182 | 0.215 | Not significant |
+| band_pass | r=-0.061 | 0.681 | No correlation |
+| rlc_parallel | r=-0.060 | 0.686 | No correlation |
+
+For LC-only filters, smaller component values (lower frequencies, more extreme log10 values) are slightly harder to predict. For most types, there is no meaningful correlation — the model handles the full component range well.
+
+### Error vs Target Magnitude
+
+Prediction error scales modestly with target magnitude:
+
+- **sigma_p**: r=0.371 (larger damping values are harder), mean |error| ranges from 0.017 to 0.030 across quintiles
+- **omega_p**: r=0.074 (no meaningful correlation)
+- **omega_z**: r=0.625 (but sample is dominated by zeros, so mostly reflects band_stop)
+
+### Interpolation vs Extrapolation
+
+Nearly all val circuits have component values within the training range (random uniform sampling covers the range densely with 192 training samples per type). Only a handful of extrapolation cases exist:
+
+- **high_pass**: 1 extrapolation circuit, 4.0x higher MAE (single sample)
+- **rlc_series**: 4 extrapolation circuits, 1.37x higher MAE
+- **band_stop**: 9 extrapolation circuits, actually 0.66x *lower* MAE (not a real pattern with this sample size)
+
+With 240 circuits per type sampled uniformly over log10 ranges, and an 80/20 split, the val set almost entirely falls within the convex hull of training component values. The model is primarily interpolating, not extrapolating.
+
+### Summary
+
+The encoder handles unseen component values nearly as well as training values (1.04x MSE ratio). This is expected: once the GNN learns the functional relationship between component values and poles/zeros for a given topology, interpolation to new values within the same range is straightforward. The ImpedanceConv MLPs provide sufficient nonlinear capacity to capture relationships like `ω₀ = 1/√(LC)`.
+
+## Generalization to Unseen Topologies
+
+### Motivation
+
+The in-distribution results above test on val circuits that share the **same topologies** as training circuits — just different component values. Each of the 8 filter types has a single fixed topology with 240 randomized component values, and the train/val split stratifies so every type appears in both sets.
+
+This means the in-distribution eval does NOT test whether the encoder can predict poles/zeros for **topologies it has never seen**. That's the fundamental question for generalization: can the GNN learn the physics of pole/zero computation well enough to transfer to novel circuit structures?
+
+### Methodology: Leave-One-Topology-Out (LOTO) Cross-Validation
+
+For each of 8 filter types (folds):
+
+1. **Train split**: All circuits NOT of this type (7 types × 240 = 1680 circuits, 80% train / 20% val)
+2. **Test split**: All 240 circuits OF this type (unseen topology)
+3. Build fresh encoder + decoder (same architecture as production)
+4. Train end-to-end with same loss function and hyperparameters
+5. Evaluate encoder's `mu[:, 4:8]` vs `pz_target` on the held-out type
+6. Also evaluate on an in-distribution validation subset (baseline)
+
+Training config: Adam lr=1e-3, 80 epochs, batch size 32, early stopping (patience 20), same loss weights as production.
+
+Script: `scripts/eval/eval_pz_unseen_topology.py`
+
+### Results
+
+| Held-out Type | Unseen MSE | In-Dist MSE | R² sigma_p | R² omega_p | R² omega_z |
+|---|---|---|---|---|---|
+| low_pass | 0.1143 | 0.0101 | 0.419 | N/A | N/A |
+| high_pass | 0.0613 | 0.0033 | -0.501 | N/A | N/A |
+| band_pass | 0.0180 | 0.0041 | -0.410 | 0.589 | N/A |
+| band_stop | 0.2224 | 0.0028 | -15.025 | -0.615 | -114.263 |
+| rlc_series | 0.0254 | 0.0029 | 0.544 | 0.533 | N/A |
+| rlc_parallel | 0.1532 | 0.0038 | -2.806 | -94.527 | N/A |
+| lc_lowpass | 0.0974 | 0.0108 | N/A | -59.758 | N/A |
+| cl_highpass | 0.0243 | 0.0089 | N/A | -3.758 | N/A |
+| **Average** | **0.0895** | **0.0058** | | | |
+
+Unseen/In-distribution MSE ratio: **15.35x**
+
+"N/A" = zero variance in that dimension for the held-out type (nothing to predict).
+
+### Interpretation
+
+The LOTO results reveal that **pole/zero prediction does not generalize well to unseen topologies**. Key findings:
+
+1. **Large generalization gap**: Unseen topology MSE is 15x higher than in-distribution MSE on average. The model learns to predict poles/zeros well for known topologies but struggles to transfer this to novel circuit structures.
+
+2. **Positive transfer for structurally similar types**: The best unseen results are for rlc_series (R²=0.54/0.53) and band_pass (R²=0.59 for omega_p). These share structural similarity with other training types (both are series RLC variants), so the GNN can partially leverage learned relationships.
+
+3. **Negative R² is common**: Many unseen folds show negative R², meaning the model predictions are worse than simply predicting the mean. This is expected when the model encounters a topology with fundamentally different pole/zero relationships than anything in training.
+
+4. **Worst cases**: band_stop (omega_z R²=-114) and rlc_parallel (omega_p R²=-95) show extreme negative R². These types have unique structural features (notch zeros, parallel resonance) not represented in the remaining 7 training types.
+
+5. **This is not surprising**: Each filter type has a unique topology, and poles/zeros depend on the specific circuit structure. A GNN trained on 7 topologies has no basis for predicting the transfer function of a fundamentally different 8th topology without seeing at least some examples of it.
+
+**Conclusion**: The current encoder effectively learns a per-topology regression model. True topology-agnostic pole/zero prediction would require either (a) a much larger diversity of training topologies, or (b) explicit physics-informed inductive biases (e.g., impedance-based nodal analysis layers).
+
+Script: `scripts/eval/eval_pz_unseen_topology.py` | Raw results: `scripts/eval/loto_results.json`
