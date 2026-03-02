@@ -177,6 +177,61 @@ The model generalizes very well to new component values:
 
 Slopes near 1.0 and intercepts near 0 confirm the model is not systematically biased.
 
+### Concrete Examples (Best / Median / Worst Per Type)
+
+For each filter type, circuits are ranked by total prediction error. "Best" = lowest error, "worst" = highest.
+Values shown in both signed-log scale (what the model outputs) and raw physical units (Hz or rad/s).
+
+**low_pass** — 1 real pole, no zeros. Model predicts damping from RC.
+
+| Case | Components | Raw Pole | sigma_p target | sigma_p pred | Raw target | Raw pred |
+|---|---|---|---|---|---|---|
+| best | R=470, C=4.3e-7 | -4928 | -0.5275 | -0.5147 | -4928 | -4008 |
+| median | R=4419, C=4.0e-8 | -5601 | -0.5355 | -0.5030 | -5601 | -3316 |
+| worst | R=28061, C=2.7e-8 | -1306 | -0.4452 | -0.3980 | -1306 | -610 |
+
+The worst case (R=28kΩ) has a slow pole; the model underpredicts its magnitude but stays in the right ballpark. omega_p is correctly near zero for all (real poles).
+
+**band_pass** — 2 poles (real or conjugate), 1 zero at origin. Model must predict both damping and resonant frequency.
+
+| Case | Components | Raw Poles | Pred sigma_p | Pred omega_p | Actual sigma_p | Actual omega_p |
+|---|---|---|---|---|---|---|
+| best | R=7787, L=9.4e-4, C=6.6e-8 | -1936, -8.3M (real) | -0.4671 | -0.0004 | -0.4696 | 0.0 |
+| median | R=1690, L=3.9e-4, C=2.9e-7 | -2038, -4.4M (real) | -0.4511 | 0.0027 | -0.4728 | 0.0 |
+| worst | R=154, L=1.0e-3, C=1.1e-7 | -75367 ± 58355j | -0.6613 | 0.0177 | -0.6967 | 0.6809 |
+
+The worst case has conjugate poles (oscillatory), meaning it has a nonzero omega_p. The model predicts sigma_p reasonably (-0.66 vs -0.70) but misses omega_p entirely (0.02 vs 0.68) — it predicted real poles when the circuit actually resonates. This is the hardest band_pass case.
+
+**band_stop** — 2 conjugate poles + 2 imaginary zeros (notch). Model must predict the notch frequency omega_z.
+
+| Case | Components | Raw Poles | Raw Zeros | sigma_p pred/actual | omega_p pred/actual | omega_z pred/actual |
+|---|---|---|---|---|---|---|
+| best | R=83549, R=2920, C=1.4e-7, L=7.3e-4 | -99441 (real, repeated) | ±99441j | -0.721 / -0.714 | -0.002 / 0.0 | 0.714 / 0.714 |
+| median | R=40430, R=115, C=4.5e-8, L=3.3e-4 | -175159 ± 191398j | ±259449j | -0.723 / -0.749 | 0.742 / 0.755 | 0.800 / 0.773 |
+| worst | R=34961, R=102, C=6.0e-7, L=1.4e-3 | -34579 (real, repeated) | ±34579j | -0.580 / -0.648 | 0.469 / 0.0 | 0.584 / 0.648 |
+
+The best case nails the notch frequency (omega_z: 99441 vs 99152 in raw units). The worst case again involves repeated real poles where the model incorrectly predicts oscillation (omega_p=0.47 vs 0.0).
+
+**rlc_parallel** — 2 conjugate poles, 1 zero at origin. Complex topology with parallel resonance.
+
+| Case | Components | Raw Poles | sigma_p pred/actual | omega_p pred/actual | Raw sigma_p pred/actual | Raw omega_p pred/actual |
+|---|---|---|---|---|---|---|
+| best | R=1658, C=7.6e-7, L=3.4e-4, R=187 | -3939 ± 62086j | -0.512 / -0.514 | 0.682 / 0.685 | -3811 / -3939 | 59588 / 62086 |
+| median | R=2931, C=6.1e-8, L=1.6e-3, R=154 | -56126 ± 83346j | -0.637 / -0.679 | 0.712 / 0.703 | -28966 / -56126 | 96924 / 83346 |
+| worst | R=50617, C=1.4e-7, L=9.0e-3, R=142 | -25447 ± 12324j | -0.535 / -0.629 | 0.643 / 0.584 | -5531 / -25447 | 31801 / 12324 |
+
+Best case is near-perfect (3811 vs 3939 damping, 59588 vs 62086 resonant freq). Worst case: damping is off by ~5x in raw units but only 0.094 in log scale.
+
+**cl_highpass** — 2 purely imaginary poles (undamped). Model only needs to predict omega_p.
+
+| Case | Components | Raw Poles | omega_p pred/actual | Raw omega_p pred/actual |
+|---|---|---|---|---|
+| best | L=9.7e-4, C=1.8e-7 | ±75874j | 0.6972 / 0.6972 | 75918 / 75874 |
+| median | L=2.4e-3, C=9.1e-9 | ±213981j | 0.7649 / 0.7615 | 226014 / 213981 |
+| worst | L=1.3e-4, C=2.0e-9 | ±1978806j | 0.8912 / 0.8995 | 1731757 / 1978806 |
+
+Best case is essentially exact (75918 vs 75874). Even the worst case (highest frequency) is within 12% in raw units.
+
 ### Error Distribution by Filter Type
 
 | Filter | N | Mean MAE | Median MAE | P95 MAE | Max MAE |
