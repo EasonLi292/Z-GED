@@ -77,7 +77,6 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
     pbar = tqdm(dataloader, desc=f'Epoch {epoch}')
     for batch in pbar:
         graph = batch['graph'].to(device)
-        pz_target = batch['pz_target'].to(device)
 
         # Encode
         z, mu, logvar = encoder(
@@ -109,7 +108,6 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
         loss, metrics = loss_fn(
             predictions, targets,
             mu=mu, logvar=logvar,
-            pz_target=pz_target
         )
 
         # Backward
@@ -149,7 +147,6 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
     with torch.no_grad():
         for batch in dataloader:
             graph = batch['graph'].to(device)
-            pz_target = batch['pz_target'].to(device)
 
             z, mu, logvar = encoder(
                 graph.x, graph.edge_index, graph.edge_attr,
@@ -175,7 +172,6 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
             loss, metrics = loss_fn(
                 predictions, targets,
                 mu=mu, logvar=logvar,
-                pz_target=pz_target
             )
 
             total_loss += loss.item()
@@ -245,12 +241,12 @@ def main():
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size,
         sampler=train_sampler,
-        collate_fn=make_collate_fn(include_pz_target=True),
+        collate_fn=make_collate_fn(),
     )
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size,
         shuffle=False,
-        collate_fn=make_collate_fn(include_pz_target=True),
+        collate_fn=make_collate_fn(),
     )
 
     print(f"Train: {len(train_dataset)}, Val: {len(val_dataset)}")
@@ -269,7 +265,6 @@ def main():
         edge_component_weight=2.0,
         connectivity_weight=5.0,
         kl_weight=0.01,
-        pz_weight=5.0,
         use_connectivity_loss=True,
     )
 
@@ -297,12 +292,10 @@ def main():
 
         print(f"\nEpoch {epoch}")
         print(f"  Train - loss: {train_metrics['total_loss']:.4f}, "
-              f"pz: {train_metrics['loss_pz']:.4f}, "
               f"node_count: {train_metrics['node_count_acc']:.1f}%, "
               f"edge: {train_metrics['edge_exist_acc']:.1f}%, "
               f"comp: {train_metrics['component_type_acc']:.1f}%")
         print(f"  Val   - loss: {val_metrics['total_loss']:.4f}, "
-              f"pz: {val_metrics['loss_pz']:.4f}, "
               f"node_count: {val_metrics['node_count_acc']:.1f}%, "
               f"edge: {val_metrics['edge_exist_acc']:.1f}%, "
               f"comp: {val_metrics['component_type_acc']:.1f}%")

@@ -96,7 +96,6 @@ def train_one_fold(train_indices, val_in_dist_indices, device, dataset,
         edge_component_weight=2.0,
         connectivity_weight=5.0,
         kl_weight=0.01,
-        pz_weight=5.0,
         use_connectivity_loss=True,
     )
 
@@ -120,7 +119,6 @@ def train_one_fold(train_indices, val_in_dist_indices, device, dataset,
         decoder.train()
         for batch in train_loader:
             graph = batch['graph'].to(device)
-            pz_target = batch['pz_target'].to(device)
 
             z, mu, logvar = encoder(
                 graph.x, graph.edge_index, graph.edge_attr, graph.batch
@@ -146,7 +144,6 @@ def train_one_fold(train_indices, val_in_dist_indices, device, dataset,
             loss, _ = loss_fn(
                 predictions, targets,
                 mu=mu, logvar=logvar,
-                pz_target=pz_target,
             )
 
             optimizer.zero_grad()
@@ -165,7 +162,6 @@ def train_one_fold(train_indices, val_in_dist_indices, device, dataset,
         with torch.no_grad():
             for batch in val_loader:
                 graph = batch['graph'].to(device)
-                pz_target = batch['pz_target'].to(device)
 
                 z, mu, logvar = encoder(
                     graph.x, graph.edge_index, graph.edge_attr, graph.batch
@@ -188,7 +184,6 @@ def train_one_fold(train_indices, val_in_dist_indices, device, dataset,
                 loss, _ = loss_fn(
                     predictions, targets,
                     mu=mu, logvar=logvar,
-                    pz_target=pz_target,
                 )
                 val_loss_sum += loss.item()
                 val_batches += 1
