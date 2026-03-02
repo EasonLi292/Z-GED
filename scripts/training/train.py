@@ -14,27 +14,9 @@ from tqdm import tqdm
 from collections import Counter
 
 from ml.data.dataset import CircuitDataset
-from ml.models.encoder import HierarchicalEncoder
-from ml.models.decoder import SimplifiedCircuitDecoder
 from ml.losses.circuit_loss import CircuitLoss
 from ml.models.component_utils import masks_to_component_type
-from torch_geometric.data import Batch
-
-
-def collate_circuit_batch(batch_list):
-    """Custom collate function for circuit graphs."""
-    graphs = [item['graph'] for item in batch_list]
-    poles = [item['poles'] for item in batch_list]
-    zeros = [item['zeros'] for item in batch_list]
-    pz_target = torch.stack([item['pz_target'] for item in batch_list])
-    batched_graph = Batch.from_data_list(graphs)
-
-    return {
-        'graph': batched_graph,
-        'poles': poles,
-        'zeros': zeros,
-        'pz_target': pz_target,
-    }
+from ml.utils.runtime import build_decoder, build_encoder, make_collate_fn
 
 
 def graph_to_dense_format(graph, max_nodes=6):
@@ -95,14 +77,12 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
     pbar = tqdm(dataloader, desc=f'Epoch {epoch}')
     for batch in pbar:
         graph = batch['graph'].to(device)
-        poles_list = batch['poles']
-        zeros_list = batch['zeros']
         pz_target = batch['pz_target'].to(device)
 
         # Encode
         z, mu, logvar = encoder(
             graph.x, graph.edge_index, graph.edge_attr,
-            graph.batch, poles_list, zeros_list
+            graph.batch
         )
 
         # Sample latent
@@ -169,13 +149,11 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
     with torch.no_grad():
         for batch in dataloader:
             graph = batch['graph'].to(device)
-            poles_list = batch['poles']
-            zeros_list = batch['zeros']
             pz_target = batch['pz_target'].to(device)
 
             z, mu, logvar = encoder(
                 graph.x, graph.edge_index, graph.edge_attr,
-                graph.batch, poles_list, zeros_list
+                graph.batch
             )
 
             latent = mu  # Use mean for validation
@@ -266,36 +244,20 @@ def main():
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size,
-        sampler=train_sampler, collate_fn=collate_circuit_batch
+        sampler=train_sampler,
+        collate_fn=make_collate_fn(include_pz_target=True),
     )
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size,
-        shuffle=False, collate_fn=collate_circuit_batch
+        shuffle=False,
+        collate_fn=make_collate_fn(include_pz_target=True),
     )
 
     print(f"Train: {len(train_dataset)}, Val: {len(val_dataset)}")
 
     # Create models
-    encoder = HierarchicalEncoder(
-        node_feature_dim=4,
-        edge_feature_dim=3,
-        gnn_hidden_dim=64,
-        gnn_num_layers=3,
-        latent_dim=8,
-        topo_latent_dim=2,
-        values_latent_dim=2,
-        pz_latent_dim=4,
-        dropout=0.1
-    ).to(device)
-
-    decoder = SimplifiedCircuitDecoder(
-        latent_dim=8,
-        hidden_dim=256,
-        num_heads=8,
-        num_node_layers=4,
-        max_nodes=10,
-        dropout=0.1
-    ).to(device)
+    encoder = build_encoder(device=device)
+    decoder = build_decoder(device=device, max_nodes=10)
 
     print(f"Encoder params: {sum(p.numel() for p in encoder.parameters()):,}")
     print(f"Decoder params: {sum(p.numel() for p in decoder.parameters()):,}")
@@ -307,7 +269,7 @@ def main():
         edge_component_weight=2.0,
         connectivity_weight=5.0,
         kl_weight=0.01,
-        pz_weight=1.0,
+        pz_weight=5.0,
         use_connectivity_loss=True,
     )
 

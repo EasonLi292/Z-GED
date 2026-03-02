@@ -1,0 +1,15 @@
+# Core runtime dependencies for Z-GED
+numpy>=1.26
+scipy>=1.11
+networkx>=3.2
+tqdm>=4.66
+PyYAML>=6.0
+
+# ML stack
+torch>=2.3
+torch-geometric>=2.5
+
+# Analysis utilities used by scripts
+scikit-learn>=1.4
+matplotlib>=3.8
+seaborn>=0.13

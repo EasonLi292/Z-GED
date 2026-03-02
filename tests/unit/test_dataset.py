@@ -7,9 +7,10 @@ and data types.
 """
 
 import sys
-sys.path.insert(0, 'ml/data')
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from dataset import CircuitDataset, collate_circuit_batch
+from ml.data.dataset import CircuitDataset, collate_circuit_batch
 from torch.utils.data import DataLoader
 
 
@@ -22,7 +23,6 @@ def test_basic_loading():
     dataset = CircuitDataset(
         dataset_path='rlc_dataset/filter_dataset.pkl',
         normalize_features=True,
-        log_scale_impedance=True
     )
 
     print(f"\n✅ Loaded dataset with {len(dataset)} circuits")

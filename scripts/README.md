@@ -1,73 +1,57 @@
-# Scripts Organization
+# Scripts Overview
 
-This directory contains organized scripts for training, testing, generation, and analysis.
+This directory contains executable workflows grouped by purpose.
 
-## Directory Structure
+## Structure
 
-```
+```text
 scripts/
-├── training/       # Model training and validation
-├── testing/        # Test suites
-├── generation/     # Circuit generation
-└── analysis/       # Analysis and debugging
+├── training/
+├── generation/
+├── eval/
+└── testing/
 ```
 
-## Training
+## training/
 
-**Main Training:**
-- **train.py** - Main training script for the circuit generation model
-  - Trains encoder + decoder end-to-end
-  - Uses configuration from `configs/`
-  - Saves checkpoints to `checkpoints/`
+- `train.py`
+  - Main end-to-end training entry point.
+  - Uses `rlc_dataset/filter_dataset.pkl` + `rlc_dataset/stratified_split.pt`.
+  - Saves best checkpoint to `checkpoints/production/best.pt`.
+- `validate.py`
+  - Full validation pass using the production checkpoint.
+- `create_stratified_split.py`
+  - Rebuilds train/val split file from dataset filter-type distribution.
 
-**Data Preparation:**
-- **create_stratified_split.py** - Create stratified train/val/test splits
-  - Ensures balanced distribution of filter types
-  - Preserves specification diversity
+## generation/
 
-**Validation:**
-- **validate.py** - Comprehensive validation script
-  - Tests reconstruction quality
-  - Evaluates latent space properties
+- `generate_from_specs.py`
+  - **Primary generation script**.
+  - Pole/zero-driven decoder-only generation.
+  - Inputs: `--pole-real/--pole-imag/--zero-real/--zero-imag`.
+- `interpolate_filter_types.py`
+  - Builds per-filter latent centroids and interpolates between types.
+- `regenerate_all_results.py`
+  - Recomputes the major results sections used in repo reports.
 
-## Testing
+## eval/
 
-**Main Test Suite:**
-- **test_comprehensive_specs.py** - Full test suite (USE THIS)
-  - Tests various cutoff frequency and Q-factor combinations
-  - Validates generated circuits with SPICE simulation
-  - Comprehensive output with topology analysis
+- `eval_pz.py`
+  - Evaluates pole/zero latent prediction quality (`mu[:, 4:]` vs `pz_target`).
 
-**Specialized Tests:**
-- **test_single_spec.py** - Test single specification in detail
-  - Useful for debugging specific cases
+## testing/
 
-## Generation
+Exploratory analysis scripts for specification interpolation behavior.
 
-**Main Generation:**
-- **generate_from_specs.py** - Generate circuits from user specifications
-  - Input: cutoff frequency and Q-factor
-  - Output: Circuit with component values and netlist
-  - Uses K-NN interpolation in latent space
+- `test_single_spec.py`
+  - Single cutoff/Q interpolation case deep dive.
+- `test_comprehensive_specs.py`
+  - Batch cutoff/Q interpolation sweep and summary.
 
-**Interpolation:**
-- **interpolate_filter_types.py** - Interpolate between filter types in latent space
-  - Smooth transitions between topologies
-  - Useful for exploring latent space structure
+## Typical Commands
 
-## Usage Examples
-
-**Training:**
 ```bash
-python scripts/training/train.py
-```
-
-**Testing:**
-```bash
-python scripts/testing/test_comprehensive_specs.py
-```
-
-**Generation:**
-```bash
-python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
+.venv/bin/python scripts/training/train.py
+.venv/bin/python scripts/generation/generate_from_specs.py --pole-real -6283 --pole-imag 0 --num-samples 3
+.venv/bin/python scripts/eval/eval_pz.py
 ```

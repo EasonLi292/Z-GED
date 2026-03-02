@@ -18,9 +18,9 @@ Default total latent_dim=8 splits as 2D + 2D + 4D.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, List, Optional
+from typing import Tuple, Optional
 
-from .gnn_layers import ImpedanceGNN, GlobalPooling, DeepSets
+from .gnn_layers import ImpedanceGNN, GlobalPooling
 
 
 class HierarchicalEncoder(nn.Module):
@@ -35,7 +35,7 @@ class HierarchicalEncoder(nn.Module):
         Stage 2: Hierarchical latent encoding
             Branch 1 (Topology): Global pooling → MLP → μ_topo, log_σ_topo → z_topo [2D]
             Branch 2 (Structure): GND/VIN/VOUT node embeddings → MLP → μ_structure, log_σ_structure → z_structure [2D]
-            Branch 3 (Poles/Zeros): DeepSets → MLP → μ_pz, log_σ_pz → z_pz [4D]
+            Branch 3 (Poles/Zeros): GNN global pooling + terminals → MLP → μ_pz, log_σ_pz → z_pz [4D]
 
     Args:
         node_feature_dim: Input node feature dimension (default: 4)
@@ -142,29 +142,30 @@ class HierarchicalEncoder(nn.Module):
         self.values_mu = nn.Linear(gnn_hidden_dim // 2, self.values_latent_dim)
         self.values_logvar = nn.Linear(gnn_hidden_dim // 2, self.values_latent_dim)
 
-        # Branch 3: Poles/Zeros encoding (DeepSets for variable-length)
-        self.pz_encoder_poles = DeepSets(
-            input_dim=2,  # [real, imag]
-            hidden_dim=32,
-            output_dim=16
-        )
-
-        self.pz_encoder_zeros = DeepSets(
-            input_dim=2,
-            hidden_dim=32,
-            output_dim=16
-        )
-
-        # Combine poles and zeros encoding
-        pz_combined_dim = 16 + 16  # poles + zeros
-        self.pz_combine = nn.Sequential(
-            nn.Linear(pz_combined_dim, gnn_hidden_dim // 2),
+        # Branch 3: Poles/Zeros encoding (GNN-based)
+        # Uses global pooling + terminal node embeddings from the GNN
+        # Wider MLP to preserve the weak within-type component-value signal
+        # (within-type variance is ~4% of total embedding variance)
+        self.pz_pooling = GlobalPooling(pooling_types=['mean', 'max'])
+        # Input: mean+max pooling (2*gnn_hidden_dim) + GND/VIN/VOUT embeddings (3*gnn_hidden_dim)
+        pz_input_dim = gnn_hidden_dim * 2 + 3 * gnn_hidden_dim
+        pz_hidden = gnn_hidden_dim * 4   # 256 — gentle 1.25x compression from 320
+        pz_hidden2 = gnn_hidden_dim * 2  # 128
+        pz_drop = 0.2
+        self.pz_encoder = nn.Sequential(
+            nn.Linear(pz_input_dim, pz_hidden),
             nn.ReLU(),
-            nn.Dropout(dropout)
+            nn.Dropout(pz_drop),
+            nn.Linear(pz_hidden, pz_hidden2),
+            nn.ReLU(),
+            nn.Dropout(pz_drop),
+            nn.Linear(pz_hidden2, gnn_hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(pz_drop)
         )
 
-        self.pz_mu = nn.Linear(gnn_hidden_dim // 2, self.pz_latent_dim)
-        self.pz_logvar = nn.Linear(gnn_hidden_dim // 2, self.pz_latent_dim)
+        self.pz_mu = nn.Linear(gnn_hidden_dim, self.pz_latent_dim)
+        self.pz_logvar = nn.Linear(gnn_hidden_dim, self.pz_latent_dim)
 
     def forward(
         self,
@@ -172,8 +173,6 @@ class HierarchicalEncoder(nn.Module):
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
         batch: torch.Tensor,
-        poles_list: List[torch.Tensor],
-        zeros_list: List[torch.Tensor]
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Encode circuit graphs to hierarchical latent space.
@@ -183,8 +182,6 @@ class HierarchicalEncoder(nn.Module):
             edge_index: Edge indices [2, E]
             edge_attr: Edge features [E, edge_feature_dim]
             batch: Batch assignment for nodes [N]
-            poles_list: List of pole tensors [num_poles, 2] for each graph
-            zeros_list: List of zero tensors [num_zeros, 2] for each graph
 
         Returns:
             z: Sampled latent vector [B, latent_dim]
@@ -203,11 +200,9 @@ class HierarchicalEncoder(nn.Module):
         mu_topo = self.topo_mu(h_topo)         # [B, topo_latent_dim]
         logvar_topo = self.topo_logvar(h_topo) # [B, topo_latent_dim]
 
-        # Branch 2: Component values encoding (from GND, VIN, VOUT node embeddings)
-        # The GNN node embeddings already encode position-specific component info
-        # via message passing. Extract h_GND, h_VIN, h_VOUT directly.
+        # Branch 2 & 3: Extract GND/VIN/VOUT terminal embeddings (shared)
         # Node types: GND=0, VIN=1, VOUT=2
-        h_values_list = []
+        h_terminal_list = []
 
         for i in range(batch_size):
             node_mask = batch == i
@@ -229,42 +224,28 @@ class HierarchicalEncoder(nn.Module):
                 elif ntype == 2:  # VOUT
                     h_vout = graph_h[n_idx]
 
-            h_values_graph = torch.cat([h_gnd, h_vin, h_vout], dim=-1)
-            h_values_list.append(h_values_graph)
+            h_terminal_list.append((h_gnd, h_vin, h_vout))
 
+        # Branch 2: Component values encoding (from GND, VIN, VOUT node embeddings)
+        h_values_list = [torch.cat([h_gnd, h_vin, h_vout], dim=-1)
+                         for h_gnd, h_vin, h_vout in h_terminal_list]
         h_values = torch.stack(h_values_list)
         h_values = self.values_combine(h_values)
 
-        mu_values = self.values_mu(h_values)         # [B, 8]
-        logvar_values = self.values_logvar(h_values) # [B, 8]
+        mu_values = self.values_mu(h_values)         # [B, structure_latent_dim]
+        logvar_values = self.values_logvar(h_values)  # [B, structure_latent_dim]
 
-        # Branch 3: Poles/Zeros encoding (DeepSets)
-        h_poles_list = []
-        h_zeros_list = []
+        # Branch 3: Poles/Zeros encoding (GNN-based)
+        # Global pooling over all node embeddings
+        h_pz_global = self.pz_pooling(h_nodes, batch)  # [B, gnn_hidden_dim * 2]
+        # Concatenate with terminal embeddings for signal-path info
+        h_terminals = torch.stack([torch.cat([h_gnd, h_vin, h_vout], dim=-1)
+                                   for h_gnd, h_vin, h_vout in h_terminal_list])  # [B, 3*gnn_hidden_dim]
+        h_pz_input = torch.cat([h_pz_global, h_terminals], dim=-1)  # [B, 5*gnn_hidden_dim]
+        h_pz = self.pz_encoder(h_pz_input)  # [B, gnn_hidden_dim // 2]
 
-        for poles, zeros in zip(poles_list, zeros_list):
-            # Encode poles
-            if poles.size(0) > 0:
-                h_poles = self.pz_encoder_poles(poles).squeeze(0)  # [16]
-            else:
-                h_poles = torch.zeros(16, device=x.device)
-            h_poles_list.append(h_poles)
-
-            # Encode zeros
-            if zeros.size(0) > 0:
-                h_zeros = self.pz_encoder_zeros(zeros).squeeze(0)  # [16]
-            else:
-                h_zeros = torch.zeros(16, device=x.device)
-            h_zeros_list.append(h_zeros)
-
-        h_poles = torch.stack(h_poles_list)  # [B, 16]
-        h_zeros = torch.stack(h_zeros_list)  # [B, 16]
-
-        h_pz = torch.cat([h_poles, h_zeros], dim=-1)  # [B, 32]
-        h_pz = self.pz_combine(h_pz)                   # [B, gnn_hidden_dim // 2]
-
-        mu_pz = self.pz_mu(h_pz)                       # [B, 8]
-        logvar_pz = self.pz_logvar(h_pz)               # [B, 8]
+        mu_pz = self.pz_mu(h_pz)             # [B, pz_latent_dim]
+        logvar_pz = self.pz_logvar(h_pz)     # [B, pz_latent_dim]
 
         # Combine all branches
         mu = torch.cat([mu_topo, mu_values, mu_pz], dim=-1)        # [B, 24]
@@ -300,8 +281,6 @@ class HierarchicalEncoder(nn.Module):
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
         batch: torch.Tensor,
-        poles_list: List[torch.Tensor],
-        zeros_list: List[torch.Tensor]
     ) -> torch.Tensor:
         """
         Encode to latent space without sampling (deterministic).
@@ -314,7 +293,7 @@ class HierarchicalEncoder(nn.Module):
         Returns:
             mu: Mean latent vector [B, latent_dim]
         """
-        _, mu, _ = self.forward(x, edge_index, edge_attr, batch, poles_list, zeros_list)
+        _, mu, _ = self.forward(x, edge_index, edge_attr, batch)
         return mu
 
     def get_latent_split(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

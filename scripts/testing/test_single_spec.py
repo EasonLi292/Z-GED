@@ -12,32 +12,19 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import torch
 import numpy as np
 from ml.data.dataset import CircuitDataset
-from ml.models.encoder import HierarchicalEncoder
-from ml.models.decoder import LatentGuidedGraphGPTDecoder
+from ml.utils.circuit_ops import BASE_NODE_NAMES, COMPONENT_NAMES, is_valid_circuit
+from ml.utils.runtime import load_encoder_decoder, make_collate_fn
 from torch.utils.data import DataLoader
-from torch_geometric.data import Batch
-
-
-def collate_circuit_batch(batch_list):
-    """Custom collate function."""
-    graphs = [item['graph'] for item in batch_list]
-    poles = [item['poles'] for item in batch_list]
-    zeros = [item['zeros'] for item in batch_list]
-    specifications = torch.stack([item['specifications'] for item in batch_list])
-
-    batched_graph = Batch.from_data_list(graphs)
-    return {
-        'graph': batched_graph,
-        'poles': poles,
-        'zeros': zeros,
-        'specifications': specifications
-    }
 
 
 def build_specification_database(encoder, dataset, device='cpu'):
     """Build database of specifications → latent codes."""
     encoder.eval()
-    loader = DataLoader(dataset, batch_size=1, collate_fn=collate_circuit_batch)
+    loader = DataLoader(
+        dataset,
+        batch_size=1,
+        collate_fn=make_collate_fn(include_specifications=True),
+    )
 
     all_specs = []
     all_latents = []
@@ -45,16 +32,12 @@ def build_specification_database(encoder, dataset, device='cpu'):
     with torch.no_grad():
         for idx, batch in enumerate(loader):
             graph = batch['graph'].to(device)
-            poles = batch['poles']
-            zeros = batch['zeros']
 
-            z, mu, logvar = encoder(
+            _, mu, _ = encoder(
                 graph.x,
                 graph.edge_index,
                 graph.edge_attr,
-                graph.batch,
-                poles,
-                zeros
+                graph.batch
             )
 
             specs = batch['specifications'][0]
@@ -103,7 +86,6 @@ def analyze_circuit_structure(circuit):
     num_edges = (edge_exist > 0.5).sum().item() // 2
 
     # Analyze node types with sequential internal node numbering
-    BASE_NAMES = {0: 'GND', 1: 'VIN', 2: 'VOUT', 3: 'INT', 4: 'INT'}
     node_list = []
     int_counter = 1
     for i, nt_idx in enumerate(node_types):
@@ -112,11 +94,10 @@ def analyze_circuit_structure(circuit):
             name = f'INT{int_counter}'
             int_counter += 1
         else:
-            name = BASE_NAMES[nt]
+            name = BASE_NODE_NAMES[nt]
         node_list.append(f"Node {i}: {name}")
 
     # Analyze edges and components
-    component_names = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
     edges_list = []
 
     num_nodes = edge_exist.shape[0]  # Use actual number of nodes
@@ -126,7 +107,7 @@ def analyze_circuit_structure(circuit):
                 comp_type = component_types[i, j].item()
                 edges_list.append({
                     'nodes': (i, j),
-                    'component_type': component_names[comp_type]
+                    'component_type': COMPONENT_NAMES[comp_type]
                 })
 
     return {
@@ -156,32 +137,11 @@ def main():
 
     # Load models
     print("Loading models...")
-    encoder = HierarchicalEncoder(
-        node_feature_dim=4,
-        edge_feature_dim=3,
-        gnn_hidden_dim=64,
-        gnn_num_layers=3,
-        latent_dim=8,
-        topo_latent_dim=2,
-        values_latent_dim=2,
-        pz_latent_dim=4,
-        dropout=0.1
-    ).to(device)
-
-    decoder = LatentGuidedGraphGPTDecoder(
-        latent_dim=8,
-        hidden_dim=256,
-        num_heads=8,
-        num_node_layers=4,
-        max_nodes=50
-    ).to(device)
-
-    checkpoint = torch.load('checkpoints/production/best.pt', map_location=device)
-    encoder.load_state_dict(checkpoint['encoder_state_dict'])
-    decoder.load_state_dict(checkpoint['decoder_state_dict'])
-
-    encoder.eval()
-    decoder.eval()
+    encoder, decoder, _ = load_encoder_decoder(
+        checkpoint_path='checkpoints/production/best.pt',
+        device=device,
+        decoder_overrides={'max_nodes': 10},
+    )
 
     # Load dataset
     print("Loading dataset and building specification database...")
@@ -254,7 +214,7 @@ def main():
     edge_exist = circuit['edge_existence'][0]
     vin_connected = (edge_exist[1, :] > 0.5).any() or (edge_exist[:, 1] > 0.5).any()
     vout_connected = (edge_exist[2, :] > 0.5).any() or (edge_exist[:, 2] > 0.5).any()
-    valid = vin_connected and vout_connected
+    valid = is_valid_circuit(circuit)
 
     print(f"\nValidity check:")
     print(f"  VIN connected: {'✓' if vin_connected else '✗'}")

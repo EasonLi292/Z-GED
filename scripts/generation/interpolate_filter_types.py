@@ -18,29 +18,10 @@ import pickle
 import torch
 import numpy as np
 from ml.data.dataset import CircuitDataset
-from ml.models.encoder import HierarchicalEncoder
-from ml.models.decoder import SimplifiedCircuitDecoder
+from ml.models.constants import FILTER_TYPES
+from ml.utils.circuit_ops import circuit_to_string, is_valid_circuit
+from ml.utils.runtime import load_encoder_decoder, make_collate_fn
 from torch.utils.data import DataLoader
-from torch_geometric.data import Batch
-
-
-FILTER_TYPES = ['low_pass', 'high_pass', 'band_pass', 'band_stop', 'rlc_series', 'rlc_parallel']
-
-
-def collate_circuit_batch(batch_list):
-    """Custom collate function."""
-    graphs = [item['graph'] for item in batch_list]
-    poles = [item['poles'] for item in batch_list]
-    zeros = [item['zeros'] for item in batch_list]
-    specifications = torch.stack([item['specifications'] for item in batch_list])
-
-    batched_graph = Batch.from_data_list(graphs)
-    return {
-        'graph': batched_graph,
-        'poles': poles,
-        'zeros': zeros,
-        'specifications': specifications
-    }
 
 
 def build_filter_type_centroids(encoder, dataset, raw_dataset, device='cpu'):
@@ -58,7 +39,11 @@ def build_filter_type_centroids(encoder, dataset, raw_dataset, device='cpu'):
         all_latents: dict mapping filter_type -> list of all latent codes
     """
     encoder.eval()
-    loader = DataLoader(dataset, batch_size=1, collate_fn=collate_circuit_batch)
+    loader = DataLoader(
+        dataset,
+        batch_size=1,
+        collate_fn=make_collate_fn(include_specifications=True),
+    )
 
     # Group latents by filter type
     latents_by_type = {ft: [] for ft in FILTER_TYPES}
@@ -67,16 +52,12 @@ def build_filter_type_centroids(encoder, dataset, raw_dataset, device='cpu'):
     with torch.no_grad():
         for idx, batch in enumerate(loader):
             graph = batch['graph'].to(device)
-            poles = batch['poles']
-            zeros = batch['zeros']
 
-            z, mu, logvar = encoder(
+            _, mu, _ = encoder(
                 graph.x,
                 graph.edge_index,
                 graph.edge_attr,
-                graph.batch,
-                poles,
-                zeros
+                graph.batch
             )
 
             # Get filter type from raw dataset
@@ -94,47 +75,6 @@ def build_filter_type_centroids(encoder, dataset, raw_dataset, device='cpu'):
             print(f"  {ft}: no circuits found")
 
     return centroids, latents_by_type
-
-
-def circuit_to_string(circuit):
-    """Convert generated circuit to string representation."""
-    edge_exist = circuit['edge_existence'][0]
-    comp_types = circuit['component_types'][0]
-    node_types = circuit['node_types'][0]
-    num_nodes = node_types.shape[0]
-
-    BASE_NAMES = {0: 'GND', 1: 'VIN', 2: 'VOUT', 3: 'INT', 4: 'INT'}
-    COMP_NAMES = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
-
-    # Build unique names for each node (numbering internal nodes)
-    node_names = []
-    int_counter = 1
-    for idx in range(num_nodes):
-        nt = node_types[idx].item()
-        if nt >= 3:  # Internal node
-            node_names.append(f'INT{int_counter}')
-            int_counter += 1
-        else:
-            node_names.append(BASE_NAMES[nt])
-
-    edges = []
-    for ni in range(num_nodes):
-        for nj in range(ni):
-            if edge_exist[ni, nj] > 0.5:
-                n1 = node_names[nj]
-                n2 = node_names[ni]
-                comp = COMP_NAMES[comp_types[ni, nj].item()]
-                edges.append(f"{n1}--{comp}--{n2}")
-
-    return ', '.join(edges) if edges else '(no edges)'
-
-
-def check_validity(circuit):
-    """Check if circuit has VIN and VOUT connected."""
-    edge_exist = circuit['edge_existence'][0]
-    vin_connected = (edge_exist[1, :] > 0.5).any() or (edge_exist[:, 1] > 0.5).any()
-    vout_connected = (edge_exist[2, :] > 0.5).any() or (edge_exist[:, 2] > 0.5).any()
-    return vin_connected and vout_connected
 
 
 def interpolate_and_generate(decoder, z1, z2, alpha, device):
@@ -174,32 +114,11 @@ def main():
 
     # Load models
     print("\nLoading models...")
-    encoder = HierarchicalEncoder(
-        node_feature_dim=4,
-        edge_feature_dim=3,
-        gnn_hidden_dim=64,
-        gnn_num_layers=3,
-        latent_dim=8,
-        topo_latent_dim=2,
-        values_latent_dim=2,
-        pz_latent_dim=4,
-        dropout=0.1
-    ).to(device)
-
-    decoder = SimplifiedCircuitDecoder(
-        latent_dim=8,
-        hidden_dim=256,
-        num_heads=8,
-        num_node_layers=4,
-        max_nodes=10
-    ).to(device)
-
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    encoder.load_state_dict(checkpoint['encoder_state_dict'])
-    decoder.load_state_dict(checkpoint['decoder_state_dict'])
-
-    encoder.eval()
-    decoder.eval()
+    encoder, decoder, _ = load_encoder_decoder(
+        checkpoint_path=args.checkpoint,
+        device=str(device),
+        decoder_overrides={'max_nodes': 10},
+    )
 
     # Load dataset
     print("\nLoading dataset...")
@@ -209,7 +128,7 @@ def main():
 
     # Build centroids
     print()
-    centroids, all_latents = build_filter_type_centroids(encoder, dataset, raw_dataset, device)
+    centroids, _ = build_filter_type_centroids(encoder, dataset, raw_dataset, device)
 
     if args.show_centroids:
         print("\n" + "=" * 70)
@@ -250,7 +169,7 @@ def main():
     for alpha in alphas:
         circuit, z_interp = interpolate_and_generate(decoder, z1, z2, alpha, device)
         circuit_str = circuit_to_string(circuit)
-        valid = check_validity(circuit)
+        valid = is_valid_circuit(circuit)
 
         label = ""
         if alpha == 0:

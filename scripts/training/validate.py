@@ -5,19 +5,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import torch
 import numpy as np
-from ml.models.encoder import HierarchicalEncoder
-from ml.models.decoder import LatentGuidedGraphGPTDecoder
 from ml.data.dataset import CircuitDataset
 from torch.utils.data import DataLoader, Subset
-from torch_geometric.data import Batch
 from ml.models.component_utils import masks_to_component_type
-
-def collate_circuit_batch(batch_list):
-    graphs = [item['graph'] for item in batch_list]
-    poles = [item['poles'] for item in batch_list]
-    zeros = [item['zeros'] for item in batch_list]
-    batched_graph = Batch.from_data_list(graphs)
-    return {'graph': batched_graph, 'poles': poles, 'zeros': zeros}
+from ml.utils.runtime import load_encoder_decoder, make_collate_fn
 
 print("="*70)
 print("Circuit Generation Model Validation")
@@ -26,30 +17,11 @@ print("="*70)
 device = 'cpu'
 
 # Load models
-encoder = HierarchicalEncoder(
-    node_feature_dim=4,
-    edge_feature_dim=3,
-    gnn_hidden_dim=64,
-    gnn_num_layers=3,
-    latent_dim=8,
-    topo_latent_dim=2,
-    values_latent_dim=2,
-    pz_latent_dim=4,
-    dropout=0.1
-).to(device)
-
-decoder = LatentGuidedGraphGPTDecoder(
-    latent_dim=8,
-    hidden_dim=256,
-    num_heads=8,
-    num_node_layers=4,
-    max_nodes=50
-).to(device)
-
-# Load production checkpoint
-checkpoint = torch.load('checkpoints/production/best.pt', map_location=device)
-encoder.load_state_dict(checkpoint['encoder_state_dict'])
-decoder.load_state_dict(checkpoint['decoder_state_dict'])
+encoder, decoder, checkpoint = load_encoder_decoder(
+    checkpoint_path='checkpoints/production/best.pt',
+    device=device,
+    decoder_overrides={'max_nodes': 10},
+)
 
 print(f"\nLoaded checkpoint from epoch {checkpoint['epoch']}")
 print(f"Best validation loss: {checkpoint['val_loss']:.4f}")
@@ -67,7 +39,7 @@ val_loader = DataLoader(
     val_dataset,
     batch_size=1,
     shuffle=False,
-    collate_fn=collate_circuit_batch
+    collate_fn=make_collate_fn(),
 )
 
 print(f"\n{'='*70}")
@@ -87,20 +59,16 @@ type_total = {i: 0 for i in range(8)}
 
 for i, batch in enumerate(val_loader):
     graph = batch['graph'].to(device)
-    poles_list = batch['poles']
-    zeros_list = batch['zeros']
 
     # Get all ground truth component types from this circuit
     edge_attr = graph.edge_attr
 
     with torch.no_grad():
-        z, mu, logvar = encoder(
+        _, mu, _ = encoder(
             graph.x,
             graph.edge_index,
             graph.edge_attr,
-            graph.batch,
-            poles_list,
-            zeros_list
+            graph.batch
         )
 
         # Generate from latent (no conditions needed)
@@ -111,7 +79,12 @@ for i, batch in enumerate(val_loader):
 
         # Check all edges in this circuit
         for edge_idx in range(edge_attr.shape[0]):
-            true_masks = (edge_attr[edge_idx, 0:3].abs() > 0.01).float()
+            # Edge attr format: [log10(R), log10(C), log10(L)]
+            # masks_to_component_type expects: [mask_C, mask_G, mask_L]
+            is_R = (edge_attr[edge_idx, 0].abs() > 0.01).float()
+            is_C = (edge_attr[edge_idx, 1].abs() > 0.01).float()
+            is_L = (edge_attr[edge_idx, 2].abs() > 0.01).float()
+            true_masks = torch.stack([is_C, is_R, is_L])  # Reorder to [C, G, L]
             true_type = masks_to_component_type(true_masks.unsqueeze(0))[0].item()
 
             # Find corresponding edge in generated circuit

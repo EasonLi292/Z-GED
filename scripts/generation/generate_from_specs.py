@@ -19,12 +19,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import torch
 import numpy as np
-from ml.models.decoder import SimplifiedCircuitDecoder
 from ml.models.constants import PZ_LOG_SCALE
-
-
-COMP_NAMES = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
-BASE_NAMES = {0: 'GND', 1: 'VIN', 2: 'VOUT', 3: 'INT', 4: 'INT'}
+from ml.utils.circuit_ops import circuit_to_string, is_valid_circuit
+from ml.utils.runtime import load_decoder
 
 
 def signed_log_normalize(x: float, scale: float = PZ_LOG_SCALE) -> float:
@@ -53,40 +50,6 @@ def poles_zeros_to_latent_pz(pole_real, pole_imag, zero_real, zero_imag):
     sigma_z = signed_log_normalize(zero_real)
     omega_z = signed_log_normalize(abs(zero_imag))
     return torch.tensor([sigma_p, omega_p, sigma_z, omega_z], dtype=torch.float32)
-
-
-def circuit_to_string(circuit):
-    """Convert decoder output to human-readable string."""
-    edge_exist = circuit['edge_existence'][0]
-    comp_types = circuit['component_types'][0]
-    node_types = circuit['node_types'][0]
-    num_nodes = node_types.shape[0]
-
-    node_names = []
-    int_counter = 1
-    for idx in range(num_nodes):
-        nt = node_types[idx].item()
-        if nt >= 3:
-            node_names.append(f'INT{int_counter}')
-            int_counter += 1
-        else:
-            node_names.append(BASE_NAMES[nt])
-
-    edges = []
-    for ni in range(num_nodes):
-        for nj in range(ni):
-            if edge_exist[ni, nj] > 0.5:
-                comp = COMP_NAMES[comp_types[ni, nj].item()]
-                edges.append(f"{node_names[nj]}--{comp}--{node_names[ni]}")
-    return ', '.join(edges) if edges else '(no edges)'
-
-
-def check_validity(circuit):
-    """Check if generated circuit has VIN and VOUT connected."""
-    edge_exist = circuit['edge_existence'][0]
-    vin = (edge_exist[1, :] > 0.5).any() or (edge_exist[:, 1] > 0.5).any()
-    vout = (edge_exist[2, :] > 0.5).any() or (edge_exist[:, 2] > 0.5).any()
-    return bool(vin and vout)
 
 
 def main():
@@ -127,14 +90,11 @@ def main():
     device = torch.device(args.device)
 
     # Load decoder only
-    decoder = SimplifiedCircuitDecoder(
-        latent_dim=8, hidden_dim=256, num_heads=8,
-        num_node_layers=4, max_nodes=10
-    ).to(device)
-
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    decoder.load_state_dict(checkpoint['decoder_state_dict'])
-    decoder.eval()
+    decoder, _ = load_decoder(
+        checkpoint_path=args.checkpoint,
+        device=str(device),
+        decoder_overrides={'max_nodes': 10},
+    )
 
     # Generate circuits
     torch.manual_seed(args.seed)
@@ -151,7 +111,7 @@ def main():
             circuit = decoder.generate(z, verbose=False)
 
         cstr = circuit_to_string(circuit)
-        valid = check_validity(circuit)
+        valid = is_valid_circuit(circuit)
         if valid:
             valid_count += 1
 

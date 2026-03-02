@@ -1,156 +1,143 @@
-# Z-GED: Circuit Topology Generation via Graph VAE
+# Z-GED: Graph-VAE Circuit Topology Generation
 
-Automated RLC filter circuit synthesis using a VAE with component-aware GNN encoder. Generate circuit topologies by sampling/interpolating in an 8-dimensional latent space, or by specifying **cutoff frequency** and **Q-factor** via K-NN lookup.
+Z-GED generates RLC circuit topologies from an 8D latent space.
 
-## What It Does
+Current generation entry points:
+- **Pole/zero-driven generation** (decoder-only): `scripts/generation/generate_from_specs.py`
+- **Latent interpolation/exploration**: `scripts/generation/interpolate_filter_types.py`
+- **Result regeneration report**: `scripts/generation/regenerate_all_results.py`
 
-Z-GED generates RLC filter circuits from a learned latent space:
+## Current Repository Snapshot
 
-```bash
-# Generate from specifications (K-NN interpolation in latent space)
-python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
-# Output: GND--RCL--VOUT, VIN--R--VOUT
-```
+- Dataset file: `rlc_dataset/filter_dataset.pkl`
+- Included dataset size: **1920 circuits**
+- Filter types: `low_pass`, `high_pass`, `band_pass`, `band_stop`, `rlc_series`, `rlc_parallel`, `lc_lowpass`, `cl_highpass`
+- Stratified split file: `rlc_dataset/stratified_split.pt` (1536 train / 384 val)
+- Production checkpoint: `checkpoints/production/best.pt` (epoch 93, val_loss 0.983)
 
-**Supported filter types:** Low-pass, High-pass, Band-pass, Band-stop, RLC series, RLC parallel
+## Step-by-Step: Run the Project
 
-## Performance
+This sequence assumes you already have this repository checked out locally.
 
-| Metric | Validation |
-|--------|------------|
-| Node Count | 100% |
-| Edge Existence | 100% |
-| Component Type | 100% |
-
-**Dataset:** 360 circuits (60 per filter type)
-
-## Quick Start
-
-### Generate from Specifications
+### 1) Create environment
 
 ```bash
-# Standard Butterworth filter at 10kHz
-python scripts/generation/generate_from_specs.py --cutoff 10000 --q-factor 0.707
-
-# High-Q resonant at 5kHz
-python scripts/generation/generate_from_specs.py --cutoff 5000 --q-factor 5.0
-
-# Band-pass at 20kHz
-python scripts/generation/generate_from_specs.py --cutoff 20000 --q-factor 2.0
+./scripts/setup_venv.sh runtime
+source .venv/bin/activate
 ```
 
-### Example Results
-
-| Cutoff | Q | Generated Circuit |
-|--------|---|-------------------|
-| 1 kHz | 0.707 | `GND--R--VOUT, VIN--C--VOUT` (high-pass) |
-| 10 kHz | 0.707 | `GND--C--VOUT, VIN--R--VOUT` (low-pass) |
-| 10 kHz | 5.0 | `GND--RCL--VOUT, VIN--R--VOUT` (high-Q resonant) |
-| 100 kHz | 0.707 | `GND--R--VOUT, VIN--C--VOUT` (high-pass) |
-| 10 kHz | 0.01 | `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT2, INT1--L--INT2` (band-stop) |
-
-### Python API
-
-```python
-import torch
-from ml.models.decoder import SimplifiedCircuitDecoder
-
-decoder = SimplifiedCircuitDecoder(latent_dim=8, hidden_dim=256)
-checkpoint = torch.load('checkpoints/production/best.pt')
-decoder.load_state_dict(checkpoint['decoder_state_dict'])
-decoder.eval()
-
-# Generate from latent code
-z = torch.randn(1, 8)
-circuit = decoder.generate(z)
-
-print(f"Nodes: {circuit['node_types'].shape[1]}")
-print(f"Edges: {int(circuit['edge_existence'].sum().item() // 2)}")
-```
-
-### Train the Model
+Or with dev tools:
 
 ```bash
-python scripts/training/train.py
+./scripts/setup_venv.sh dev
+source .venv/bin/activate
 ```
 
-## Installation
+### 2) Verify dependencies
 
 ```bash
-pip install torch torch-geometric numpy scipy networkx pyyaml tqdm
+make doctor
 ```
+
+### 3) Verify required artifacts
+
+```bash
+ls checkpoints/production/best.pt
+ls rlc_dataset/filter_dataset.pkl
+ls rlc_dataset/stratified_split.pt
+```
+
+### 4) Run generation (primary workflow)
+
+```bash
+.venv/bin/python scripts/generation/generate_from_specs.py \
+  --pole-real -6283 \
+  --pole-imag 0 \
+  --num-samples 5
+```
+
+### 5) Run tests
+
+```bash
+make test
+```
+
+### 6) Train
+
+```bash
+.venv/bin/python scripts/training/train.py
+```
+
+### 7) Validate/evaluate
+
+```bash
+.venv/bin/python scripts/training/validate.py
+.venv/bin/python scripts/eval/eval_pz.py
+```
+
+### 8) Optional: latent exploration
+
+```bash
+.venv/bin/python scripts/generation/interpolate_filter_types.py --from low_pass --to high_pass --steps 7
+.venv/bin/python scripts/generation/regenerate_all_results.py
+```
+
+## One-Command Shortcuts
+
+```bash
+make setup       # runtime venv
+make setup-dev   # dev venv
+make doctor      # dependency health check
+make generate-pz # sample pole/zero generation
+make train
+make eval-pz
+make test
+```
+
+## Core Architecture
+
+- Encoder: `ml/models/encoder.py`
+  - 3-layer impedance-aware GNN
+  - Hierarchical latent split: `[z_topology(2) | z_values(2) | z_pz(4)]`
+- Decoder: `ml/models/decoder.py`
+  - Autoregressive node decoder
+  - Autoregressive edge-component decoder (8 classes: none/R/C/L/RC/RL/CL/RCL)
+- Loss: `ml/losses/circuit_loss.py`
+  - Node type/count, edge-component, connectivity, KL, and pole/zero supervision terms
 
 ## Project Structure
 
-```
+```text
 Z-GED/
 ├── ml/
-│   ├── models/          # Encoder and decoder architectures
-│   ├── losses/          # Training loss functions
 │   ├── data/            # Dataset loading
-│   └── utils/           # Utilities
+│   ├── losses/          # Training objectives
+│   ├── models/          # Encoder/decoder architecture
+│   └── utils/           # Shared runtime + generation helpers
 ├── scripts/
-│   ├── generation/      # Circuit generation scripts
-│   ├── training/        # Training and validation
-│   └── testing/         # Test scripts
-├── tools/               # Dataset generation utilities
-├── checkpoints/         # Trained models
-└── rlc_dataset/         # Training data (360 circuits)
-```
-
-## How It Works
-
-1. **Encoder** - 3-layer component-aware GNN (ImpedanceConv) encodes circuits into 8D latent space
-   - Edge features are 3D: `[log10(R), log10(C), log10(L)]` (0 means component absent)
-   - Component presence masks (`is_R/is_C/is_L`) are derived inside `ImpedanceConv`
-   - Branch 1 (Topology): Mean+max pooling of all node embeddings → z[0:2]
-   - Branch 2 (Values): GND/VIN/VOUT node embeddings → z[2:4]
-   - Branch 3 (Transfer Function): DeepSets on poles/zeros → z[4:8]
-2. **Latent Space** - Hierarchical structure: `[topology(2D) | values(2D) | transfer_function(4D)]`
-3. **Decoder** - Autoregressive transformer generates nodes; Transformer-based autoregressive edge decoder generates edges with component types (each edge conditioned on all previous edge decisions)
-
-### Latent Space Structure
-
-The 8D latent space is hierarchically organized:
-- `z[0:2]` - Topology encoding (graph structure, filter type, node count)
-- `z[2:4]` - Component values encoding (from GND/VIN/VOUT node embeddings)
-- `z[4:8]` - Transfer function encoding (poles/zeros via DeepSets)
-
-### Current Model Size
-
-- Encoder parameters: `83,411`
-- Decoder parameters: `7,698,901`
-
-## Example Outputs
-
-### By Filter Type
-
-| Filter Type | Example Circuit |
-|-------------|-----------------|
-| low_pass | `GND--C--VOUT, VIN--R--VOUT` |
-| high_pass | `GND--R--VOUT, VIN--C--VOUT` |
-| band_pass | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` |
-| band_stop | `GND--R--VOUT, VIN--R--INT1, VOUT--R--INT1, GND--C--INT1, INT1--L--INT2` |
-| rlc_series | `GND--R--VOUT, VIN--R--INT1, VOUT--C--INT1, INT1--L--INT1` |
-| rlc_parallel | `GND--RCL--VOUT, VIN--R--VOUT` |
-
-### Interpolation Example
-
-Low-pass to High-pass transition:
-```
-alpha=0.00: GND--C--VOUT, VIN--R--VOUT  (low-pass)
-alpha=0.25: GND--C--VOUT, VIN--R--VOUT
-alpha=0.50: GND--R--VOUT, VIN--C--VOUT  (transition)
-alpha=0.75: GND--R--VOUT, VIN--C--VOUT
-alpha=1.00: GND--R--VOUT, VIN--C--VOUT  (high-pass)
+│   ├── training/        # Training and validation scripts
+│   ├── generation/      # Generation and latent exploration
+│   ├── eval/            # Evaluation scripts
+│   └── testing/         # Spec-focused exploratory tests
+├── tests/               # Unit/spec test suite
+├── tools/               # Dataset and GED utilities
+├── checkpoints/         # Trained checkpoints
+└── rlc_dataset/         # Dataset artifacts
 ```
 
 ## Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Model architecture details
-- [USAGE.md](USAGE.md) - Detailed API reference
-- [GENERATION_RESULTS.md](GENERATION_RESULTS.md) - Examples and results
+- `ARCHITECTURE.md` - model and training design
+- `USAGE.md` - command reference and workflows
+- `GENERATION_RESULTS.md` - generated results and analysis
+- `NOVEL_TOPOLOGY_GENERATED.md` - novel-topology analysis
+- `docs/pole_zero_prediction.md` - pole/zero representation details
+
+## Notes
+
+- Older docs or scripts that mention only 6 filter types or `--cutoff/--q-factor` in `generate_from_specs.py` are outdated.
+- The current `generate_from_specs.py` interface is pole/zero based (`--pole-real`, `--pole-imag`, `--zero-real`, `--zero-imag`).
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
+MIT (see `LICENSE`)

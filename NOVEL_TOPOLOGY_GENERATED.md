@@ -231,6 +231,6 @@ z = torch.randn(500, 8)
 ## Files
 
 - **Model:** `checkpoints/production/best.pt`
-- **Dataset:** `rlc_dataset/filter_dataset.pkl` (480 circuits, 8 types)
+- **Dataset:** `rlc_dataset/filter_dataset.pkl` (1920 circuits, 8 types)
 - **Generation script:** `scripts/generation/generate_from_specs.py`
 - **Results script:** `scripts/generation/regenerate_all_results.py`

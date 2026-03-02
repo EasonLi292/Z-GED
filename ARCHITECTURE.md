@@ -5,7 +5,7 @@
 This model generates RLC filter circuit topologies from an 8-dimensional latent space.
 The decoder is latent-only: no external condition tensor is required at decode time.
 
-**Dataset:** 480 circuits across 8 filter types (60 each):
+**Dataset:** 1920 circuits across 8 filter types (240 each):
 `low_pass`, `high_pass`, `band_pass`, `band_stop`, `rlc_series`, `rlc_parallel`, `lc_lowpass`, `cl_highpass`
 
 Current production representation uses **3 edge features**:
@@ -146,7 +146,7 @@ total_loss = (
   + 2.0  * edge_component_loss
   + 5.0  * connectivity_loss
   + 0.01 * kl_loss
-  + 1.0  * pz_loss
+  + 5.0  * pz_loss
 )
 ```
 
@@ -178,18 +178,17 @@ Measured from current code/config (`edge_feature_dim=3`, `latent_dim=8`):
 
 ## 6) Current Training/Checkpoint Status
 
-From `checkpoints/production/best.pt` (100 epochs, with pz supervision):
+From `checkpoints/production/best.pt`:
 
-- Best epoch: **99**
-- Validation loss: **1.04** (includes pz_loss component)
-- Validation pz_loss: **0.006**
+- Best epoch: **93**
+- Validation loss: **0.983** (includes pz-related supervision)
 
 From current reported results (`GENERATION_RESULTS.md`):
 
 - Node count accuracy: 100%
 - Edge existence accuracy: 100%
 - Component type accuracy: 100%
-- Reconstruction validity: 480/480 (100%)
+- Reconstruction validity: 1920/1920 (100%)
 
 ---
 
@@ -247,5 +246,5 @@ python scripts/generation/generate_from_specs.py --pole-real -3142 --pole-imag 4
 ## Notes on Changes vs Older Docs
 
 - If you see references to 7D edge features (`[log(C), log(G), log(L_inv), is_R, is_C, is_L, is_parallel]`), those are outdated. The current architecture uses 3D `log10` component values with internally derived presence masks.
-- If you see 6 filter types or 360 circuits, those are outdated. The current dataset has 8 filter types and 480 circuits.
+- If you see 6 filter types or 360 circuits, those are outdated. The current dataset has 8 filter types and 1920 circuits.
 - If you see `generate_from_specs.py` with `--cutoff`/`--q-factor` args, that is outdated. It now uses `--pole-real`/`--pole-imag`/`--zero-real`/`--zero-imag`.

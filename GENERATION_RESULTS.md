@@ -1,6 +1,6 @@
 # Circuit Generation Results
 
-**Dataset:** 480 circuits (8 filter types, 60 each), 384 train, 96 validation
+**Dataset:** 1920 circuits (8 filter types, 240 each), 1536 train, 384 validation
 **Checkpoint:** `checkpoints/production/best.pt`
 **Edge features:** 3D log10 values `[log10(R), log10(C), log10(L)]`
 **Latent space:** 8D hierarchical `[z_topo(2) | z_values(2) | z_pz(4)]`
@@ -21,12 +21,15 @@
 
 ---
 
-## Specification-Based Generation
+## Specification-Based Generation (Interpolation Analysis)
 
-Generate circuits by specifying **cutoff frequency** and **Q-factor**:
+Exploratory scripts can still map **cutoff frequency** and **Q-factor** to latent codes using K-NN interpolation over encoded dataset points.
+For that path, use `scripts/testing/*.py` or `scripts/generation/regenerate_all_results.py`.
+
+For production generation entry point, use pole/zero inputs:
 
 ```bash
-python scripts/generation/generate_from_specs.py --pole-real -6283 --pole-imag 0 --num-samples 5
+.venv/bin/python scripts/generation/generate_from_specs.py --pole-real -6283 --pole-imag 0 --num-samples 5
 ```
 
 ### Standard Examples
@@ -91,7 +94,7 @@ The 8D latent space clusters by filter type. Generating from cluster centroids:
 | lc_lowpass | 60/60 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` |
 | cl_highpass | 60/60 | `GND--R--VOUT, VIN--L--INT1, VOUT--C--INT1` |
 
-**Total: 480/480 (100%) valid reconstructions**
+**Total: 1920/1920 (100%) valid reconstructions**
 
 ---
 
@@ -282,6 +285,6 @@ python scripts/generation/regenerate_all_results.py
 ## Files
 
 - **Model:** `checkpoints/production/best.pt`
-- **Dataset:** `rlc_dataset/filter_dataset.pkl` (480 circuits, 8 types)
+- **Dataset:** `rlc_dataset/filter_dataset.pkl` (1920 circuits, 8 types)
 - **Generation script:** `scripts/generation/generate_from_specs.py`
 - **Results script:** `scripts/generation/regenerate_all_results.py`

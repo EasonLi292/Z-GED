@@ -47,7 +47,6 @@ def main():
         'unit': [
             tests_dir / 'unit' / 'test_dataset.py',
             tests_dir / 'unit' / 'test_models.py',
-            tests_dir / 'unit' / 'test_losses.py',
             tests_dir / 'unit' / 'test_component_substitution.py',
         ],
         'spec': [

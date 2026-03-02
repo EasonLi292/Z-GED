@@ -22,7 +22,7 @@ warnings.filterwarnings('ignore')
 
 # Configuration
 DATASET_DIR = "rlc_dataset"
-NUM_SAMPLES_PER_FILTER = 60  # Generate 60 variations of each filter type (3x original)
+NUM_SAMPLES_PER_FILTER = 240  # Generate 240 variations of each filter type
 FILTER_TYPES = ['low_pass', 'high_pass', 'band_pass', 'band_stop', 'rlc_series', 'rlc_parallel', 'lc_lowpass', 'cl_highpass']
 
 class FilterGenerator:
