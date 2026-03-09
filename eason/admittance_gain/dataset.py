@@ -2,8 +2,9 @@
 Admittance dataset for gain prediction experiment.
 
 Each circuit has 100 frequency points. This dataset expands to
-(circuit, freq) pairs so each sample is a graph with |Y(jw)| edge
-weights at a specific frequency, targeting the gain |H(jw)| at that freq.
+(circuit, freq) pairs so each sample is a graph with complex admittance
+[Re(Y), Im(Y)] edge features at a specific frequency, targeting the
+gain |H(jw)| at that freq.
 """
 
 import pickle
@@ -20,7 +21,7 @@ class AdmittanceDataset(Dataset):
     Dataset of (circuit, frequency) pairs for gain prediction.
 
     Each item returns:
-        - PyG Data with node features [N, 4] and edge_attr [E, 1] = log10(|Y(jw)|)
+        - PyG Data with node features [N, 4] and edge_attr [E, 2] = [Re(Y), Im(Y)]
         - target: log10(|H(jw)|) clipped to [-10, 5]
         - filter_type_idx: integer filter type for analysis
     """
@@ -69,12 +70,10 @@ class AdmittanceDataset(Dataset):
                 # impedance_den = [C, G, L_inv]
                 C, G, L_inv = neighbor['impedance_den']
 
-                # |Y(jw)| = |G + j(wC - L_inv/w)|
+                # Y(jw) = G + j(wC - L_inv/w)
                 reactive = omega * C - L_inv / omega if omega > 0 else 0.0
-                Y_mag = np.sqrt(G**2 + reactive**2)
-                log_Y = np.log10(Y_mag + 1e-10)
 
-                edge_attrs.append([log_Y])
+                edge_attrs.append([G, reactive])
 
         edge_index = torch.tensor(edge_list, dtype=torch.long).t().contiguous()
         edge_attr = torch.tensor(edge_attrs, dtype=torch.float32)

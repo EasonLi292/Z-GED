@@ -1,9 +1,9 @@
 """
 Admittance-based GNN layers for gain prediction experiment.
 
-Instead of component-specific MLPs (lin_R, lin_C, lin_L), messages are
-simply x_j * |Y(jw)| — testing whether the GNN can aggregate local
-admittance info into a global frequency response prediction.
+Instead of component-specific MLPs (lin_R, lin_C, lin_L), messages use
+a single unified edge MLP on [x_j, Re(Y), Im(Y)] — testing whether the
+GNN can aggregate complex admittance into a global frequency response.
 """
 
 import torch
@@ -17,10 +17,10 @@ class AdmittanceConv(MessagePassing):
     """
     Admittance-weighted graph convolution.
 
-    Message: att_weight * (x_j * admittance)
-    where admittance = edge_attr[:, 0:1] (log10|Y(jw)|).
+    Message: att_weight * lin_edge([x_j, Re(Y), Im(Y)])
+    where edge_attr = [Re(Y), Im(Y)] (complex admittance components).
 
-    No component-specific MLPs — that's the whole point.
+    Single unified edge MLP — no component-specific paths.
     """
 
     def __init__(
@@ -39,6 +39,9 @@ class AdmittanceConv(MessagePassing):
         self.dropout = dropout
 
         self.lin_node = nn.Linear(in_channels, out_channels, bias=False)
+
+        # Edge MLP: [x_j, Re(Y), Im(Y)] -> out_channels
+        self.lin_edge = nn.Linear(out_channels + 2, out_channels, bias=False)
 
         # Attention on [x_i, x_j]
         self.att = nn.Sequential(
@@ -62,10 +65,10 @@ class AdmittanceConv(MessagePassing):
         return out
 
     def message(self, x_i, x_j, edge_attr):
-        admittance = edge_attr[:, 0:1]  # [E, 1]
+        msg_input = torch.cat([x_j, edge_attr], dim=-1)  # [E, out_channels + 2]
         att_input = torch.cat([x_i, x_j], dim=-1)
         att_weight = self.att(att_input)
-        return att_weight * (x_j * admittance)
+        return att_weight * self.lin_edge(msg_input)
 
 
 class AdmittanceGNN(nn.Module):
