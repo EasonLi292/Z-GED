@@ -7,6 +7,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset, WeightedRandomSampler
 import numpy as np
 import pickle
@@ -16,7 +17,11 @@ from collections import Counter
 from ml.data.dataset import CircuitDataset
 from ml.losses.circuit_loss import CircuitLoss
 from ml.models.component_utils import masks_to_component_type
-from ml.utils.runtime import build_decoder, build_encoder, make_collate_fn
+from ml.utils.runtime import (
+    build_classification_mlp, build_decoder, build_encoder,
+    build_regression_mlp, make_collate_fn,
+)
+from yubo.auxiliary_heads import ClassificationMLP, RegressionMLP
 
 
 def graph_to_dense_format(graph, max_nodes=6):
@@ -65,10 +70,12 @@ def graph_to_dense_format(graph, max_nodes=6):
     }
 
 
-def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch):
+def train_epoch(encoder, decoder, reg_mlp, cls_mlp, dataloader, loss_fn, optimizer, device, epoch):
     """Train for one epoch."""
     encoder.train()
     decoder.train()
+    reg_mlp.train()
+    cls_mlp.train()
 
     total_loss = 0
     metrics_sum = {}
@@ -77,6 +84,8 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
     pbar = tqdm(dataloader, desc=f'Epoch {epoch}')
     for batch in pbar:
         graph = batch['graph'].to(device)
+        pz_target = batch['pz_target'].to(device)           # [B, 4]
+        filter_labels = batch['filter_type_label'].to(device)  # [B]
 
         # Encode
         z, mu, logvar = encoder(
@@ -87,6 +96,13 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
         # Sample latent
         std = torch.exp(0.5 * logvar)
         latent = mu + torch.randn_like(std) * std
+
+        # Auxiliary heads — use sampled z during training
+        pole_pred = reg_mlp(latent)                          # [B, 2]
+        reg_loss = F.mse_loss(pole_pred, pz_target[:, :2])
+
+        cls_logits = cls_mlp(latent)                         # [B, 8]
+        cls_loss = F.cross_entropy(cls_logits, filter_labels)
 
         targets = graph_to_dense_format(graph)
 
@@ -109,12 +125,14 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
             predictions, targets,
             mu=mu, logvar=logvar,
         )
+        loss = loss + 0.1 * reg_loss + 0.1 * cls_loss
 
         # Backward
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(
-            list(encoder.parameters()) + list(decoder.parameters()),
+            list(encoder.parameters()) + list(decoder.parameters()) +
+            list(reg_mlp.parameters()) + list(cls_mlp.parameters()),
             max_norm=1.0
         )
         optimizer.step()
@@ -135,10 +153,12 @@ def train_epoch(encoder, decoder, dataloader, loss_fn, optimizer, device, epoch)
     return avg_metrics
 
 
-def validate(encoder, decoder, dataloader, loss_fn, device):
+def validate(encoder, decoder, reg_mlp, cls_mlp, dataloader, loss_fn, device):
     """Validate the model."""
     encoder.eval()
     decoder.eval()
+    reg_mlp.eval()
+    cls_mlp.eval()
 
     total_loss = 0
     metrics_sum = {}
@@ -147,6 +167,8 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
     with torch.no_grad():
         for batch in dataloader:
             graph = batch['graph'].to(device)
+            pz_target = batch['pz_target'].to(device)           # [B, 4]
+            filter_labels = batch['filter_type_label'].to(device)  # [B]
 
             z, mu, logvar = encoder(
                 graph.x, graph.edge_index, graph.edge_attr,
@@ -154,6 +176,14 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
             )
 
             latent = mu  # Use mean for validation
+
+            # Auxiliary heads — use mu for stable evaluation
+            pole_pred = reg_mlp(mu)                              # [B, 2]
+            reg_loss = F.mse_loss(pole_pred, pz_target[:, :2])
+
+            cls_logits = cls_mlp(mu)                             # [B, 8]
+            cls_loss = F.cross_entropy(cls_logits, filter_labels)
+
             targets = graph_to_dense_format(graph)
 
             # Unified edge-component target for teacher forcing (0=no edge, 1-7=type)
@@ -173,6 +203,7 @@ def validate(encoder, decoder, dataloader, loss_fn, device):
                 predictions, targets,
                 mu=mu, logvar=logvar,
             )
+            loss = loss + 0.1 * reg_loss + 0.1 * cls_loss
 
             total_loss += loss.item()
             for key, value in metrics.items():
@@ -241,12 +272,12 @@ def main():
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size,
         sampler=train_sampler,
-        collate_fn=make_collate_fn(),
+        collate_fn=make_collate_fn(include_pz_target=True, include_filter_type_label=True),
     )
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size,
         shuffle=False,
-        collate_fn=make_collate_fn(),
+        collate_fn=make_collate_fn(include_pz_target=True, include_filter_type_label=True),
     )
 
     print(f"Train: {len(train_dataset)}, Val: {len(val_dataset)}")
@@ -254,9 +285,13 @@ def main():
     # Create models
     encoder = build_encoder(device=device)
     decoder = build_decoder(device=device, max_nodes=10)
+    reg_mlp = build_regression_mlp(device=device)
+    cls_mlp = build_classification_mlp(device=device)
 
     print(f"Encoder params: {sum(p.numel() for p in encoder.parameters()):,}")
     print(f"Decoder params: {sum(p.numel() for p in decoder.parameters()):,}")
+    print(f"Regression MLP params: {sum(p.numel() for p in reg_mlp.parameters()):,}")
+    print(f"Classification MLP params: {sum(p.numel() for p in cls_mlp.parameters()):,}")
 
     # Loss function
     loss_fn = CircuitLoss(
@@ -269,7 +304,8 @@ def main():
     )
 
     optimizer = torch.optim.Adam(
-        list(encoder.parameters()) + list(decoder.parameters()),
+        list(encoder.parameters()) + list(decoder.parameters()) +
+        list(reg_mlp.parameters()) + list(cls_mlp.parameters()),
         lr=learning_rate
     )
 
@@ -287,8 +323,8 @@ def main():
         target_kl_weight = 0.01
         loss_fn.kl_weight = min(target_kl_weight, target_kl_weight * epoch / 20)
 
-        train_metrics = train_epoch(encoder, decoder, train_loader, loss_fn, optimizer, device, epoch)
-        val_metrics = validate(encoder, decoder, val_loader, loss_fn, device)
+        train_metrics = train_epoch(encoder, decoder, reg_mlp, cls_mlp, train_loader, loss_fn, optimizer, device, epoch)
+        val_metrics = validate(encoder, decoder, reg_mlp, cls_mlp, val_loader, loss_fn, device)
 
         print(f"\nEpoch {epoch}")
         print(f"  Train - loss: {train_metrics['total_loss']:.4f}, "
@@ -306,6 +342,8 @@ def main():
                 'epoch': epoch,
                 'encoder_state_dict': encoder.state_dict(),
                 'decoder_state_dict': decoder.state_dict(),
+                'regression_mlp_state_dict': reg_mlp.state_dict(),
+                'classification_mlp_state_dict': cls_mlp.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_loss': best_val_loss,
             }
