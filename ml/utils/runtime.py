@@ -8,6 +8,7 @@ from torch_geometric.data import Batch
 
 from ml.models.decoder import SimplifiedCircuitDecoder
 from ml.models.encoder import HierarchicalEncoder
+from yubo.auxiliary_heads import ClassificationMLP, RegressionMLP
 
 DEFAULT_ENCODER_CONFIG: Dict[str, Any] = {
     'node_feature_dim': 4,
@@ -30,6 +31,15 @@ DEFAULT_DECODER_CONFIG: Dict[str, Any] = {
     'dropout': 0.1,
 }
 
+DEFAULT_REGRESSION_MLP_CONFIG: Dict[str, Any] = {
+    'latent_dim': 8,
+}
+
+DEFAULT_CLASSIFICATION_MLP_CONFIG: Dict[str, Any] = {
+    'latent_dim': 8,
+    'num_classes': 8,
+}
+
 
 def build_encoder(device: str = 'cpu', **overrides: Any) -> HierarchicalEncoder:
     """Build an encoder with repository defaults."""
@@ -43,6 +53,20 @@ def build_decoder(device: str = 'cpu', **overrides: Any) -> SimplifiedCircuitDec
     config = dict(DEFAULT_DECODER_CONFIG)
     config.update(overrides)
     return SimplifiedCircuitDecoder(**config).to(device)
+
+
+def build_regression_mlp(device: str = 'cpu', **overrides: Any) -> RegressionMLP:
+    """Build a RegressionMLP with repository defaults."""
+    config = dict(DEFAULT_REGRESSION_MLP_CONFIG)
+    config.update(overrides)
+    return RegressionMLP(**config).to(device)
+
+
+def build_classification_mlp(device: str = 'cpu', **overrides: Any) -> ClassificationMLP:
+    """Build a ClassificationMLP with repository defaults."""
+    config = dict(DEFAULT_CLASSIFICATION_MLP_CONFIG)
+    config.update(overrides)
+    return ClassificationMLP(**config).to(device)
 
 
 def load_encoder_decoder(
@@ -82,6 +106,7 @@ def collate_circuit_batch(
     include_specifications: bool = False,
     include_pz_target: bool = False,
     include_indices: bool = False,
+    include_filter_type_label: bool = False,
 ) -> Dict[str, Any]:
     """Collate circuit dataset samples into a PyG batch."""
     graphs = [item['graph'] for item in batch_list]
@@ -103,6 +128,11 @@ def collate_circuit_batch(
     if include_indices:
         output['indices'] = [item['idx'] for item in batch_list]
 
+    if include_filter_type_label:
+        output['filter_type_label'] = torch.stack(
+            [item['filter_type'].argmax().long() for item in batch_list]
+        )
+
     return output
 
 
@@ -110,6 +140,7 @@ def make_collate_fn(
     include_specifications: bool = False,
     include_pz_target: bool = False,
     include_indices: bool = False,
+    include_filter_type_label: bool = False,
 ):
     """Create a partial collate function for DataLoader."""
     return partial(
@@ -117,4 +148,5 @@ def make_collate_fn(
         include_specifications=include_specifications,
         include_pz_target=include_pz_target,
         include_indices=include_indices,
+        include_filter_type_label=include_filter_type_label,
     )
