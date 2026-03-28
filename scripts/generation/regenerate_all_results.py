@@ -11,8 +11,11 @@ import torch
 import numpy as np
 from ml.data.dataset import CircuitDataset
 from ml.models.constants import FILTER_TYPES, PZ_LOG_SCALE
-from ml.utils.circuit_ops import circuit_to_string, is_valid_circuit
+from ml.utils.circuit_ops import walk_to_string, is_valid_walk, generate_walk
 from ml.utils.runtime import load_encoder_decoder, make_collate_fn
+from ml.utils.evaluate import (
+    sequence_to_topology_key, get_training_topology_keys,
+)
 from torch.utils.data import DataLoader
 
 
@@ -21,10 +24,9 @@ def main():
 
     # Load models
     print("Loading models...")
-    encoder, decoder, _ = load_encoder_decoder(
+    encoder, decoder, vocab, _ = load_encoder_decoder(
         checkpoint_path='checkpoints/production/best.pt',
         device=device,
-        decoder_overrides={'max_nodes': 10},
     )
 
     # Load dataset
@@ -69,9 +71,9 @@ def main():
         return (latents_db[top_k] * w.unsqueeze(1)).sum(0)
 
     # Helper: generate from latent
-    def generate(z_vec):
-        with torch.no_grad():
-            return decoder.generate(z_vec.unsqueeze(0).float(), verbose=False)
+    def gen(z_vec):
+        tokens = generate_walk(decoder, z_vec, vocab)
+        return tokens
 
     # =========================================================================
     # 1. SPEC-BASED GENERATION
@@ -96,9 +98,9 @@ def main():
 
     for cutoff, q, category in spec_tests:
         z = get_latent_for_specs(cutoff, q)
-        circuit = generate(z)
-        cstr = circuit_to_string(circuit)
-        valid = is_valid_circuit(circuit)
+        tokens = gen(z)
+        cstr = walk_to_string(tokens, vocab)
+        valid = is_valid_walk(tokens, vocab)
         print(f"  {cutoff:>10.0f} Hz, Q={q:<6.3f} -> `{cstr}` [{category}, {'Valid' if valid else 'INVALID'}]")
 
     # =========================================================================
@@ -110,8 +112,8 @@ def main():
 
     for ft in FILTER_TYPES:
         z = centroids[ft]
-        circuit = generate(z)
-        cstr = circuit_to_string(circuit)
+        tokens = gen(z)
+        cstr = walk_to_string(tokens, vocab)
         z_vals = z.numpy()
         print(f"  {ft:<15} z[0:4]=[{z_vals[0]:+.2f}, {z_vals[1]:+.2f}, {z_vals[2]:+.2f}, {z_vals[3]:+.2f}]  ->  `{cstr}`")
 
@@ -132,8 +134,8 @@ def main():
         z1, z2 = centroids[from_ft], centroids[to_ft]
         for alpha in [0.0, 0.25, 0.5, 0.75, 1.0]:
             z_interp = (1 - alpha) * z1 + alpha * z2
-            circuit = generate(z_interp)
-            cstr = circuit_to_string(circuit)
+            tokens = gen(z_interp)
+            cstr = walk_to_string(tokens, vocab)
             label = f" ({from_ft})" if alpha == 0 else f" ({to_ft})" if alpha == 1 else " (transition)" if alpha == 0.5 else ""
             print(f"    alpha={alpha:.2f}  `{cstr}`{label}")
 
@@ -154,18 +156,16 @@ def main():
             graph = item['graph']
             ft = raw_data[idx]['filter_type']
 
-            # Encode
             batch_idx = torch.zeros(graph.x.shape[0], dtype=torch.long)
             _, mu, _ = encoder(graph.x, graph.edge_index, graph.edge_attr, batch_idx)
 
-            # Generate
-            circuit = generate(mu[0])
-            valid = is_valid_circuit(circuit)
+            tokens = gen(mu[0])
+            valid = is_valid_walk(tokens, vocab)
             type_total[ft] += 1
             if valid:
                 type_correct[ft] += 1
             if ft not in type_examples:
-                type_examples[ft] = circuit_to_string(circuit)
+                type_examples[ft] = walk_to_string(tokens, vocab)
 
     total_correct = sum(type_correct.values())
     total_total = sum(type_total.values())
@@ -181,20 +181,10 @@ def main():
     print("="*70)
 
     # Get training topologies
-    training_topos = set()
-    for idx in range(len(dataset)):
-        item = dataset[idx]
-        graph = item['graph']
-        batch_idx = torch.zeros(graph.x.shape[0], dtype=torch.long)
-
-        with torch.no_grad():
-            _, mu, _ = encoder(graph.x, graph.edge_index, graph.edge_attr, batch_idx)
-            circuit = generate(mu[0])
-        training_topos.add(circuit_to_string(circuit))
-
-    print(f"\n  Training topologies ({len(training_topos)}):")
-    for t in sorted(training_topos):
-        print(f"    `{t}`")
+    training_keys = get_training_topology_keys('rlc_dataset/filter_dataset.pkl', vocab)
+    print(f"\n  Training topology keys ({len(training_keys)}):")
+    for k in sorted(training_keys):
+        print(f"    `{k}`")
 
     # Random sampling
     torch.manual_seed(42)
@@ -208,17 +198,16 @@ def main():
     print(f"\n  Sampling 500 random latent codes...")
     with torch.no_grad():
         for i in range(500):
-            circuit = generate(z_random[i])
-            cstr = circuit_to_string(circuit)
-            valid = is_valid_circuit(circuit)
+            tokens = gen(z_random[i])
+            key = sequence_to_topology_key(tokens, vocab)
 
-            if not valid:
+            if key is None:
                 invalid_count += 1
-            elif cstr in training_topos:
+            elif key in training_keys:
                 known_count += 1
-                known_topo_counts[cstr] = known_topo_counts.get(cstr, 0) + 1
+                known_topo_counts[key] = known_topo_counts.get(key, 0) + 1
             else:
-                novel_valid[cstr] = novel_valid.get(cstr, 0) + 1
+                novel_valid[key] = novel_valid.get(key, 0) + 1
 
     novel_total = sum(novel_valid.values())
     print(f"\n  Results:")
@@ -229,27 +218,11 @@ def main():
 
     print(f"\n  Known topology breakdown:")
     for topo, count in sorted(known_topo_counts.items(), key=lambda x: -x[1]):
-        # Find which filter type this is
-        ft_match = "?"
-        for ft in FILTER_TYPES:
-            if topo == type_examples.get(ft, ''):
-                ft_match = ft
-                break
-        print(f"    `{topo}` -> {count} samples ({ft_match})")
+        print(f"    `{topo}` -> {count} samples")
 
     print(f"\n  Novel topologies:")
     for topo, count in sorted(novel_valid.items(), key=lambda x: -x[1]):
-        # Analyze
-        num_nodes = len(set(n for edge in topo.split(', ') for n in [edge.split('--')[0], edge.split('--')[2]]))
-        comps = set()
-        for edge in topo.split(', '):
-            parts = edge.split('--')
-            if len(parts) == 3:
-                comp = parts[1]
-                for c in ['R', 'C', 'L']:
-                    if c in comp:
-                        comps.add(c)
-        print(f"    `{topo}` -> {count} samples ({num_nodes} nodes, components: {', '.join(sorted(comps))})")
+        print(f"    `{topo}` -> {count} samples")
 
     # =========================================================================
     # 6. POLE/ZERO-DRIVEN GENERATION
@@ -273,7 +246,6 @@ def main():
         ], dtype=torch.float32)
 
     pz_tests = [
-        # (pole_real, pole_imag, zero_real, zero_imag, description)
         (-6283, 0, 0, 0,       "RC low-pass ~1kHz (real pole, no zero)"),
         (-62832, 0, 0, 0,      "RC low-pass ~10kHz"),
         (-628318, 0, 0, 0,     "RC low-pass ~100kHz"),
@@ -292,15 +264,12 @@ def main():
         print(f"    Pole: {pole_r:+.0f} + {pole_i:.0f}j, Zero: {zero_r:+.0f} + {zero_i:.0f}j")
         print(f"    z[4:8] = [{pz_latent[0]:+.3f}, {pz_latent[1]:+.3f}, {pz_latent[2]:+.3f}, {pz_latent[3]:+.3f}]")
 
-        # Generate 3 samples per test case
-        results = []
         for s in range(3):
             z_topo = torch.randn(4)
             z = torch.cat([z_topo, pz_latent])
-            circuit = generate(z)
-            cstr = circuit_to_string(circuit)
-            valid = is_valid_circuit(circuit)
-            results.append((cstr, valid))
+            tokens = gen(z)
+            cstr = walk_to_string(tokens, vocab)
+            valid = is_valid_walk(tokens, vocab)
             print(f"    Sample {s+1}: `{cstr}` [{'Valid' if valid else 'INVALID'}]")
 
     print("\n" + "="*70)

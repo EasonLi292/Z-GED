@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from torch_geometric.data import Batch
 
-from ml.models.decoder import SimplifiedCircuitDecoder
+from ml.models.decoder import SequenceDecoder
+from ml.models.vocabulary import CircuitVocabulary
 from ml.models.encoder import HierarchicalEncoder
 from yubo.auxiliary_heads import ClassificationMLP, RegressionMLP
 
@@ -23,12 +24,14 @@ DEFAULT_ENCODER_CONFIG: Dict[str, Any] = {
 }
 
 DEFAULT_DECODER_CONFIG: Dict[str, Any] = {
+    'vocab_size': 86,  # CircuitVocabulary defaults
     'latent_dim': 8,
-    'hidden_dim': 256,
-    'num_heads': 8,
-    'num_node_layers': 4,
-    'max_nodes': 10,
+    'd_model': 256,
+    'n_heads': 4,
+    'n_layers': 4,
+    'max_seq_len': 33,  # 32 + 1 for latent prefix
     'dropout': 0.1,
+    'pad_id': 0,
 }
 
 DEFAULT_REGRESSION_MLP_CONFIG: Dict[str, Any] = {
@@ -48,11 +51,18 @@ def build_encoder(device: str = 'cpu', **overrides: Any) -> HierarchicalEncoder:
     return HierarchicalEncoder(**config).to(device)
 
 
-def build_decoder(device: str = 'cpu', **overrides: Any) -> SimplifiedCircuitDecoder:
-    """Build a decoder with repository defaults."""
+def build_vocab(**overrides: Any) -> CircuitVocabulary:
+    """Build vocabulary with defaults matching DEFAULT_DECODER_CONFIG."""
+    max_internal = overrides.get('max_internal', 10)
+    max_components = overrides.get('max_components', 10)
+    return CircuitVocabulary(max_internal=max_internal, max_components=max_components)
+
+
+def build_decoder(device: str = 'cpu', **overrides: Any) -> SequenceDecoder:
+    """Build a sequence decoder with repository defaults."""
     config = dict(DEFAULT_DECODER_CONFIG)
     config.update(overrides)
-    return SimplifiedCircuitDecoder(**config).to(device)
+    return SequenceDecoder(**config).to(device)
 
 
 def build_regression_mlp(device: str = 'cpu', **overrides: Any) -> RegressionMLP:
@@ -74,31 +84,55 @@ def load_encoder_decoder(
     device: str = 'cpu',
     encoder_overrides: Optional[Dict[str, Any]] = None,
     decoder_overrides: Optional[Dict[str, Any]] = None,
-) -> Tuple[HierarchicalEncoder, SimplifiedCircuitDecoder, Dict[str, Any]]:
-    """Load encoder and decoder weights from a checkpoint."""
-    encoder = build_encoder(device=device, **(encoder_overrides or {}))
-    decoder = build_decoder(device=device, **(decoder_overrides or {}))
+) -> Tuple[HierarchicalEncoder, SequenceDecoder, CircuitVocabulary, Dict[str, Any]]:
+    """Load encoder and decoder weights from a checkpoint.
 
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    Returns (encoder, decoder, vocab, checkpoint).
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+    # Build vocab from checkpoint config if available
+    vocab_cfg = checkpoint.get('vocab_config', {})
+    vocab = build_vocab(**vocab_cfg)
+
+    encoder = build_encoder(device=device, **(encoder_overrides or {}))
+
+    # Merge decoder overrides with vocab-derived settings
+    dec_cfg = dict(decoder_overrides or {})
+    dec_cfg.setdefault('vocab_size', vocab.vocab_size)
+    dec_cfg.setdefault('pad_id', vocab.pad_id)
+    decoder = build_decoder(device=device, **dec_cfg)
+
     encoder.load_state_dict(checkpoint['encoder_state_dict'])
     decoder.load_state_dict(checkpoint['decoder_state_dict'])
 
     encoder.eval()
     decoder.eval()
-    return encoder, decoder, checkpoint
+    return encoder, decoder, vocab, checkpoint
 
 
 def load_decoder(
     checkpoint_path: str,
     device: str = 'cpu',
     decoder_overrides: Optional[Dict[str, Any]] = None,
-) -> Tuple[SimplifiedCircuitDecoder, Dict[str, Any]]:
-    """Load decoder weights from a checkpoint."""
-    decoder = build_decoder(device=device, **(decoder_overrides or {}))
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+) -> Tuple[SequenceDecoder, CircuitVocabulary, Dict[str, Any]]:
+    """Load decoder weights from a checkpoint.
+
+    Returns (decoder, vocab, checkpoint).
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+    vocab_cfg = checkpoint.get('vocab_config', {})
+    vocab = build_vocab(**vocab_cfg)
+
+    dec_cfg = dict(decoder_overrides or {})
+    dec_cfg.setdefault('vocab_size', vocab.vocab_size)
+    dec_cfg.setdefault('pad_id', vocab.pad_id)
+    decoder = build_decoder(device=device, **dec_cfg)
+
     decoder.load_state_dict(checkpoint['decoder_state_dict'])
     decoder.eval()
-    return decoder, checkpoint
+    return decoder, vocab, checkpoint
 
 
 def collate_circuit_batch(

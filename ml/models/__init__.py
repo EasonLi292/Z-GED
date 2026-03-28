@@ -7,9 +7,9 @@ from .constants import FILTER_TYPES, CIRCUIT_TEMPLATES
 # Encoder
 from .encoder import HierarchicalEncoder
 
-# Decoder (simplified architecture)
-from .decoder import SimplifiedCircuitDecoder, LatentGuidedGraphGPTDecoder
-from .decoder_components import LatentGuidedEdgeDecoder
+# Decoder (sequence-based)
+from .decoder import SequenceDecoder
+from .vocabulary import CircuitVocabulary
 
 __all__ = [
     # Layers
@@ -19,9 +19,8 @@ __all__ = [
     # Encoder
     'HierarchicalEncoder',
     # Decoder
-    'SimplifiedCircuitDecoder',
-    'LatentGuidedGraphGPTDecoder',  # Alias for backward compatibility
-    'LatentGuidedEdgeDecoder',
+    'SequenceDecoder',
+    'CircuitVocabulary',
     # Constants
     'FILTER_TYPES',
     'CIRCUIT_TEMPLATES',

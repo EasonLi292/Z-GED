@@ -12,13 +12,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import torch
 import numpy as np
 from ml.data.dataset import CircuitDataset
-from ml.utils.circuit_ops import is_valid_circuit
+from ml.utils.circuit_ops import walk_to_string, is_valid_walk, generate_walk
 from ml.utils.runtime import load_encoder_decoder, make_collate_fn
 from torch.utils.data import DataLoader
 
 
 def build_specification_database(encoder, dataset, device='cpu'):
-    """Build database of specifications → latent codes."""
+    """Build database of specifications -> latent codes."""
     encoder.eval()
     loader = DataLoader(
         dataset,
@@ -75,57 +75,14 @@ def interpolate_latents(target_cutoff, target_q, specs_db, latents_db, k=5):
     return interpolated, info
 
 
-def analyze_topology(circuit):
-    """Analyze generated circuit topology."""
-    edge_exist = circuit['edge_existence'][0]
-    component_types = circuit['component_types'][0]
-    node_types = circuit['node_types'][0]
-
-    num_edges = (edge_exist > 0.5).sum().item() // 2
-
-    # Component type names: 0=None, 1=R, 2=C, 3=L, 4=RC, 5=RL, 6=CL, 7=RCL
-    component_names = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
-
-    # Analyze components
-    has_R = False
-    has_L = False
-    has_C = False
-
-    num_nodes = edge_exist.shape[0]
-    for i in range(num_nodes):
-        for j in range(i+1, num_nodes):
-            if edge_exist[i, j] > 0.5:
-                comp_type = component_types[i, j].item()
-                if comp_type in [1, 4, 5, 7]:  # R, RC, RL, RCL
-                    has_R = True
-                if comp_type in [2, 4, 6, 7]:  # C, RC, CL, RCL
-                    has_C = True
-                if comp_type in [3, 5, 6, 7]:  # L, RL, CL, RCL
-                    has_L = True
-
-    components = []
-    if has_R:
-        components.append('R')
-    if has_L:
-        components.append('L')
-    if has_C:
-        components.append('C')
-
-    return {
-        'num_edges': num_edges,
-        'components': '+'.join(components) if components else 'None'
-    }
-
-
 def main():
     device = 'cpu'
 
     # Load models
     print("Loading models...", flush=True)
-    encoder, decoder, _ = load_encoder_decoder(
+    encoder, decoder, vocab, _ = load_encoder_decoder(
         checkpoint_path='checkpoints/production/best.pt',
         device=device,
-        decoder_overrides={'max_nodes': 10},
     )
 
     # Load dataset
@@ -134,12 +91,12 @@ def main():
 
     # Test specifications
     test_cases = [
-        # Low-pass filters (Q ≈ 0.707)
+        # Low-pass filters (Q ~ 0.707)
         (100, 0.707, "100 Hz, Q=0.707"),
         (10000, 0.707, "10 kHz, Q=0.707"),
         (100000, 0.707, "100 kHz, Q=0.707"),
 
-        # High-pass filters (Q ≈ 0.707, but should differ by frequency)
+        # High-pass filters
         (500, 0.707, "500 Hz, Q=0.707"),
         (50000, 0.707, "50 kHz, Q=0.707"),
 
@@ -179,77 +136,84 @@ def main():
         # K-NN interpolation to find latent code
         latent, info = interpolate_latents(target_cutoff, target_q, specs_db, latents_db, k=5)
 
-        # Generate circuit from latent (no conditions)
-        latent = latent.unsqueeze(0).to(device).float()
+        # Generate circuit from latent
+        tokens = generate_walk(decoder, latent.to(device), vocab)
+        circuit_str = walk_to_string(tokens, vocab)
+        valid = is_valid_walk(tokens, vocab)
 
-        with torch.no_grad():
-            circuit = decoder.generate(latent, verbose=False)
+        # Analyze components
+        components = set()
+        for t in tokens:
+            ctype = vocab.component_type(t)
+            if ctype:
+                for c in ['R', 'C', 'L']:
+                    if c in ctype:
+                        components.add(c)
 
-        # Analyze topology
-        topo = analyze_topology(circuit)
+        num_comps = sum(1 for t in tokens if vocab.token_type(t) == 'component')
+        comp_str = '+'.join(sorted(components)) if components else 'None'
 
-        # Check validity
-        valid = is_valid_circuit(circuit)
-
-        print(f"  Generated: {topo['num_edges']} edges, {topo['components']}, valid={valid}", flush=True)
+        print(f"  Generated: `{circuit_str}` ({comp_str}), valid={valid}", flush=True)
         print(f"  Nearest neighbor: {info['neighbor_specs'][0][0]:.1f} Hz, Q={info['neighbor_specs'][0][1]:.3f}\n", flush=True)
 
         results.append({
             'description': description,
             'target_cutoff': target_cutoff,
             'target_q': target_q,
-            'topology': topo,
+            'circuit': circuit_str,
+            'components': comp_str,
+            'num_components': num_comps,
             'valid': valid,
             'nearest_neighbor': info['neighbor_specs'][0]
         })
 
     # Generate summary report
     print("\n" + "="*80)
-    print("RESULTS SUMMARY (Topology-Only)")
+    print("RESULTS SUMMARY")
     print("="*80)
 
-    print("\n📊 Overall Statistics:")
+    print("\nOverall Statistics:")
     valid_count = sum(1 for r in results if r['valid'])
     print(f"  Valid circuits: {valid_count}/{len(results)} ({100*valid_count/len(results):.1f}%)")
 
     # Topology distribution
-    print("\n🔧 Topology Distribution:")
+    print("\nTopology Distribution:")
     topo_counts = {}
     for r in results:
-        key = f"{r['topology']['num_edges']} edges ({r['topology']['components']})"
+        key = r['circuit']
         topo_counts[key] = topo_counts.get(key, 0) + 1
 
-    for topo, count in sorted(topo_counts.items()):
-        print(f"  {topo}: {count} circuits")
+    for topo, count in sorted(topo_counts.items(), key=lambda x: -x[1]):
+        print(f"  `{topo}`: {count} circuits")
 
     # Validity by category
     categories = {
-        'Low-pass (Q≈0.707)': [r for r in results if 0.5 < r['target_q'] < 1.0 and r['target_cutoff'] < 150000],
+        'Low-pass (Q~0.707)': [r for r in results if 0.5 < r['target_q'] < 1.0 and r['target_cutoff'] < 150000],
         'Band-pass (1<Q<5)': [r for r in results if 1.0 < r['target_q'] < 5.0],
-        'High-Q (Q≥5)': [r for r in results if r['target_q'] >= 5.0],
+        'High-Q (Q>=5)': [r for r in results if r['target_q'] >= 5.0],
         'Overdamped (Q<0.5)': [r for r in results if r['target_q'] < 0.5],
     }
 
-    print("\n📈 Validity by Category:")
+    print("\nValidity by Category:")
     for cat_name, cat_results in categories.items():
         valid_in_cat = sum(1 for r in cat_results if r['valid'])
         if cat_results:
             print(f"  {cat_name}: {valid_in_cat}/{len(cat_results)} valid ({100*valid_in_cat/len(cat_results):.1f}%)")
 
     # Save detailed results
-    print("\n💾 Saving detailed results...")
+    print("\nSaving detailed results...")
     os.makedirs('docs', exist_ok=True)
     with open('docs/GENERATION_TEST_RESULTS.txt', 'w') as f:
         f.write("="*80 + "\n")
-        f.write("Comprehensive Topology Generation Test Results\n")
+        f.write("Comprehensive Topology Generation Test Results (Sequence Decoder)\n")
         f.write("="*80 + "\n\n")
-        f.write("Note: This is topology-only generation (no component values).\n\n")
 
         for r in results:
             f.write(f"\n{r['description']}\n")
             f.write("-" * 80 + "\n")
             f.write(f"Target: {r['target_cutoff']:.1f} Hz, Q={r['target_q']:.3f}\n")
-            f.write(f"Topology: {r['topology']['num_edges']} edges, {r['topology']['components']}\n")
+            f.write(f"Circuit: {r['circuit']}\n")
+            f.write(f"Components: {r['components']}\n")
             f.write(f"Valid: {'Yes' if r['valid'] else 'No'}\n")
             f.write(f"Nearest neighbor: {r['nearest_neighbor'][0]:.1f} Hz, Q={r['nearest_neighbor'][1]:.3f}\n")
 

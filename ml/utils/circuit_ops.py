@@ -1,49 +1,82 @@
-"""Circuit formatting and validation helpers for generated graphs."""
+"""Circuit formatting and validation helpers for generated walks."""
 
-from typing import Dict
+from collections import defaultdict
+from typing import Dict, List, Optional
 
 import torch
+
+from ml.models.vocabulary import CircuitVocabulary
 
 COMPONENT_NAMES = ['None', 'R', 'C', 'L', 'RC', 'RL', 'CL', 'RCL']
 BASE_NODE_NAMES = {0: 'GND', 1: 'VIN', 2: 'VOUT', 3: 'INT', 4: 'INT'}
 
 
-def _first_batch(tensor: torch.Tensor) -> torch.Tensor:
-    """Normalize generated outputs that may include a batch dimension."""
-    return tensor[0] if tensor.dim() >= 3 else tensor
+def walk_to_string(walk_tokens: List[str], vocab: CircuitVocabulary) -> str:
+    """Convert walk token strings to a compact edge-list description.
 
+    Example output: "VSS--R--VIN, VIN--C--VOUT"
+    """
+    comp_nets: Dict[str, set] = defaultdict(set)
+    for i, tok in enumerate(walk_tokens):
+        if vocab.token_type(tok) == 'component':
+            if i > 0 and vocab.token_type(walk_tokens[i - 1]) == 'net':
+                comp_nets[tok].add(walk_tokens[i - 1])
+            if i < len(walk_tokens) - 1 and vocab.token_type(walk_tokens[i + 1]) == 'net':
+                comp_nets[tok].add(walk_tokens[i + 1])
 
-def circuit_to_string(circuit: Dict[str, torch.Tensor]) -> str:
-    """Convert decoder output to a compact edge-list string."""
-    edge_exist = _first_batch(circuit['edge_existence'])
-    comp_types = _first_batch(circuit['component_types'])
-    node_types = circuit['node_types'][0] if circuit['node_types'].dim() > 1 else circuit['node_types']
+    if not comp_nets:
+        return '(no components)'
 
-    num_nodes = node_types.shape[0]
-
-    node_names = []
-    int_counter = 1
-    for idx in range(num_nodes):
-        node_type = int(node_types[idx].item())
-        if node_type >= 3:
-            node_names.append(f'INT{int_counter}')
-            int_counter += 1
+    parts = []
+    for comp in sorted(comp_nets.keys()):
+        nets = sorted(comp_nets[comp])
+        ctype = vocab.component_type(comp)
+        if len(nets) == 2:
+            parts.append(f"{nets[0]}--{ctype}--{nets[1]}")
+        elif len(nets) == 1:
+            parts.append(f"{nets[0]}--{ctype}--{nets[0]}")
         else:
-            node_names.append(BASE_NODE_NAMES[node_type])
-
-    edges = []
-    for ni in range(num_nodes):
-        for nj in range(ni):
-            if edge_exist[ni, nj] > 0.5:
-                comp = COMPONENT_NAMES[int(comp_types[ni, nj].item())]
-                edges.append(f"{node_names[nj]}--{comp}--{node_names[ni]}")
-
-    return ', '.join(edges) if edges else '(no edges)'
+            parts.append(f"{ctype}({','.join(nets)})")
+    return ', '.join(parts)
 
 
-def is_valid_circuit(circuit: Dict[str, torch.Tensor]) -> bool:
-    """Check basic validity: VIN and VOUT are both connected."""
-    edge_exist = _first_batch(circuit['edge_existence'])
-    vin_connected = bool((edge_exist[1, :] > 0.5).any() or (edge_exist[:, 1] > 0.5).any())
-    vout_connected = bool((edge_exist[2, :] > 0.5).any() or (edge_exist[:, 2] > 0.5).any())
-    return vin_connected and vout_connected
+def is_valid_walk(walk_tokens: List[str], vocab: Optional[CircuitVocabulary] = None) -> bool:
+    """Check that a walk starts and ends at VSS and contains at least one component."""
+    if not walk_tokens:
+        return False
+    if walk_tokens[0] != 'VSS' or walk_tokens[-1] != 'VSS':
+        return False
+    if vocab is not None:
+        has_comp = any(vocab.token_type(t) == 'component' for t in walk_tokens)
+    else:
+        has_comp = len(walk_tokens) >= 3
+    return has_comp
+
+
+def generate_walk(
+    decoder,
+    latent: torch.Tensor,
+    vocab: CircuitVocabulary,
+    max_length: int = 32,
+    greedy: bool = True,
+) -> List[str]:
+    """Convenience: latent vector -> decoded walk token strings.
+
+    Args:
+        decoder: SequenceDecoder instance (eval mode).
+        latent: [latent_dim] or [1, latent_dim] tensor.
+        vocab: CircuitVocabulary for decoding.
+        max_length: Maximum walk tokens to generate.
+        greedy: Greedy (argmax) vs sampling.
+
+    Returns:
+        List of token strings (e.g. ['VSS', 'R1', 'VIN', ...]).
+    """
+    if latent.dim() == 1:
+        latent = latent.unsqueeze(0)
+    latent = latent.float()
+    with torch.no_grad():
+        generated = decoder.generate(
+            latent, max_length=max_length, greedy=greedy, eos_id=vocab.eos_id,
+        )
+    return vocab.decode(generated[0])

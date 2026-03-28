@@ -19,7 +19,7 @@ import torch
 import numpy as np
 from ml.data.dataset import CircuitDataset
 from ml.models.constants import FILTER_TYPES
-from ml.utils.circuit_ops import circuit_to_string, is_valid_circuit
+from ml.utils.circuit_ops import walk_to_string, is_valid_walk, generate_walk
 from ml.utils.runtime import load_encoder_decoder, make_collate_fn
 from torch.utils.data import DataLoader
 
@@ -60,7 +60,6 @@ def build_filter_type_centroids(encoder, dataset, raw_dataset, device='cpu'):
                 graph.batch
             )
 
-            # Get filter type from raw dataset
             filter_type = raw_dataset[idx]['filter_type']
             latents_by_type[filter_type].append(mu[0])
 
@@ -75,17 +74,6 @@ def build_filter_type_centroids(encoder, dataset, raw_dataset, device='cpu'):
             print(f"  {ft}: no circuits found")
 
     return centroids, latents_by_type
-
-
-def interpolate_and_generate(decoder, z1, z2, alpha, device):
-    """Interpolate between two latent codes and generate circuit."""
-    z_interp = (1 - alpha) * z1 + alpha * z2
-    z_interp = z_interp.unsqueeze(0).to(device).float()
-
-    with torch.no_grad():
-        circuit = decoder.generate(z_interp, verbose=False)
-
-    return circuit, z_interp[0]
 
 
 def main():
@@ -114,10 +102,9 @@ def main():
 
     # Load models
     print("\nLoading models...")
-    encoder, decoder, _ = load_encoder_decoder(
+    encoder, decoder, vocab, _ = load_encoder_decoder(
         checkpoint_path=args.checkpoint,
         device=str(device),
-        decoder_overrides={'max_nodes': 10},
     )
 
     # Load dataset
@@ -167,9 +154,10 @@ def main():
 
     results = []
     for alpha in alphas:
-        circuit, z_interp = interpolate_and_generate(decoder, z1, z2, alpha, device)
-        circuit_str = circuit_to_string(circuit)
-        valid = is_valid_circuit(circuit)
+        z_interp = (1 - alpha) * z1 + alpha * z2
+        tokens = generate_walk(decoder, z_interp.to(device), vocab)
+        circuit_str = walk_to_string(tokens, vocab)
+        valid = is_valid_walk(tokens, vocab)
 
         label = ""
         if alpha == 0:

@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import torch
 import numpy as np
 from ml.models.constants import PZ_LOG_SCALE
-from ml.utils.circuit_ops import circuit_to_string, is_valid_circuit
+from ml.utils.circuit_ops import walk_to_string, is_valid_walk, generate_walk
 from ml.utils.runtime import load_decoder
 
 
@@ -90,10 +90,9 @@ def main():
     device = torch.device(args.device)
 
     # Load decoder only
-    decoder, _ = load_decoder(
+    decoder, vocab, _ = load_decoder(
         checkpoint_path=args.checkpoint,
         device=str(device),
-        decoder_overrides={'max_nodes': 10},
     )
 
     # Generate circuits
@@ -105,13 +104,11 @@ def main():
     for i in range(args.num_samples):
         # Sample z[0:4] from prior, fix z[4:8] from poles/zeros
         z_topo = torch.randn(4)
-        z = torch.cat([z_topo, pz_latent]).unsqueeze(0).to(device)
+        z = torch.cat([z_topo, pz_latent]).to(device)
 
-        with torch.no_grad():
-            circuit = decoder.generate(z, verbose=False)
-
-        cstr = circuit_to_string(circuit)
-        valid = is_valid_circuit(circuit)
+        tokens = generate_walk(decoder, z, vocab)
+        cstr = walk_to_string(tokens, vocab)
+        valid = is_valid_walk(tokens, vocab)
         if valid:
             valid_count += 1
 
