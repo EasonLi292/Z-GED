@@ -138,19 +138,14 @@ Encoder:
   Branch 2: GND/VIN/VOUT node embeddings → z[2:4] (values)
   Branch 3: DeepSets(poles, zeros) → z[4:8] (transfer function)
 
-Decoder:
-  z (all 8D) → node count prediction (provides gradient to z[4:8])
-  z (all 8D) → context encoder → node/edge generation
+Decoder (sequence decoder):
+  z (all 8D) → latent prefix token → autoregressive walk generation
 
 Loss:
-  ✓ Node type loss (cross-entropy)
-  ✓ Edge-component loss (8-way classification)
-  ✓ Connectivity loss
+  ✓ CE loss (next-token prediction on walk sequence)
   ✓ KL divergence (pushes toward N(0,1))
-  ~ Node count predictor uses full 8D (weak gradient to z[4:8])
-
-  ✗ NO reconstruction loss for poles/zeros
-  ✗ NO auxiliary task specifically targeting z[4:8]
+  ✓ Auxiliary regression MLP (pole prediction from latent)
+  ✓ Auxiliary classification MLP (filter type from latent)
 ```
 
 ### Impact
@@ -256,5 +251,5 @@ loss_contrastive = contrastive_loss(z_pz, cutoff_q_labels)
 
 - **Interpolation script:** `scripts/generation/interpolate_filter_types.py`
 - **Encoder:** `ml/models/encoder.py`
-- **Loss function:** `ml/losses/circuit_loss.py`
+- **Decoder:** `ml/models/decoder.py` (sequence decoder)
 - **This analysis:** `docs/LATENT_SPACE_ANALYSIS.md`

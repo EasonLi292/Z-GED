@@ -108,16 +108,14 @@ Run subsets:
 ```python
 import torch
 from ml.utils.runtime import load_decoder
-from ml.utils.circuit_ops import circuit_to_string, is_valid_circuit
+from ml.utils.circuit_ops import walk_to_string, is_valid_walk, generate_walk
 
-decoder, _ = load_decoder('checkpoints/production/best.pt', device='cpu')
+decoder, vocab, _ = load_decoder('checkpoints/production/best.pt', device='cpu')
 z = torch.randn(1, 8)
 
-with torch.no_grad():
-    circuit = decoder.generate(z)
-
-print(circuit_to_string(circuit))
-print('valid:', is_valid_circuit(circuit))
+walk = generate_walk(decoder, z, vocab)
+print(walk_to_string(walk, vocab))
+print('valid:', is_valid_walk(walk))
 ```
 
 ## 8) Common Make Targets

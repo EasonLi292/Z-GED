@@ -24,8 +24,8 @@ with `0` meaning the component is absent on that edge.
 Circuit graph + poles/zeros
   -> HierarchicalEncoder (VAE)
   -> z in R^8
-  -> SimplifiedCircuitDecoder (autoregressive nodes + edges)
-  -> node_types, edge_existence, component_types
+  -> SequenceDecoder (GPT-style autoregressive transformer)
+  -> Eulerian walk token sequence (e.g. VSS, RCL1, VOUT, L1, VIN, L1, VOUT, RCL1, VSS)
 ```
 
 ---
@@ -101,37 +101,34 @@ VAE outputs:
 
 ---
 
-## 3) Decoder (`SimplifiedCircuitDecoder`)
+## 3) Decoder (`SequenceDecoder`)
 
-### Node count prediction
+The decoder represents circuits as **bipartite Eulerian walks** — alternating sequences of net tokens (VSS, VIN, VOUT, INTERNAL_N) and component tokens (R1, C1, L1, RCL1, etc.). Each walk starts and ends at VSS.
 
-- Predicts node count class for nodes in `[3, ..., max_nodes]`
-- Production `max_nodes = 10`
+### Circuit representation
 
-### Node generation
+A circuit is converted to a bipartite graph where nets and components are both nodes, connected by edges. An Eulerian circuit through this graph produces a token sequence that fully describes the topology.
 
-- `AutoregressiveNodeDecoder` (Transformer decoder)
-- Generates node types sequentially
-- First 3 nodes are fixed semantic terminals: `GND, VIN, VOUT`
+Example (RC low-pass): `VSS, C1, VOUT, R1, VIN, R1, VOUT, C1, VSS`
 
-### Edge/component generation
+### Vocabulary (`CircuitVocabulary`)
 
-- `LatentGuidedEdgeDecoder` (Transformer encoder with causal mask)
-- Predicts 8-way joint class per edge pair:
+86 tokens total:
+- Special: `PAD`, `EOS`
+- Net tokens: `VSS`, `VIN`, `VOUT`, `VDD`, `INTERNAL_1`..`INTERNAL_10`
+- Component tokens: `R1`..`R10`, `C1`..`C10`, `L1`..`L10`, `RC1`..`RC10`, `RL1`..`RL10`, `CL1`..`CL10`, `RCL1`..`RCL10`
 
-```text
-0: no edge
-1: R
-2: C
-3: L
-4: RC
-5: RL
-6: CL
-7: RCL
-```
+### Architecture
 
-Training uses teacher forcing on prior edge tokens.
-Inference feeds back predicted edge tokens autoregressively.
+- GPT-style transformer encoder with causal masking
+- Latent prefix conditioning: z is projected to a prefix token prepended to the sequence
+- 4 layers, 4 attention heads, d_model=256, max_seq_len=33
+- Training: teacher forcing with cross-entropy next-token prediction
+- Inference: greedy autoregressive generation
+
+### Data augmentation
+
+Each circuit has multiple valid Eulerian walks (different starting edges, different traversal orders). During training, a random valid walk is sampled each epoch, providing natural data augmentation.
 
 ---
 
@@ -140,39 +137,25 @@ Inference feeds back predicted edge tokens autoregressively.
 Total loss:
 
 ```python
-total_loss = (
-    1.0  * node_type_loss
-  + 5.0  * node_count_loss
-  + 2.0  * edge_component_loss
-  + 5.0  * connectivity_loss
-  + 0.01 * kl_loss
-  + 5.0  * pz_loss
-)
+total_loss = ce_loss + kl_weight * kl_loss
 ```
 
-Connectivity loss penalizes:
+- **CE loss**: Cross-entropy next-token prediction on the walk sequence (teacher forcing)
+- **KL loss**: KL divergence between encoder posterior and N(0,I) prior
+- **kl_weight**: 0.01 (with linear warmup over first 20 epochs)
 
-- disconnected VIN
-- disconnected VOUT
-- weak global connectivity
-- isolated non-mask nodes
+Optimizer: AdamW, lr=3e-4, with ReduceLROnPlateau scheduler (factor=0.5, patience=10).
 
-**Pole/zero supervision loss** (`pz_loss`):
-
-- `F.mse_loss(mu[:, 4:], pz_target)` — forces z[4:8] to encode specific pole/zero values
-- `pz_target` is computed from raw complex poles/zeros using signed-log normalization
-- Converges from ~0.22 to ~0.006 (val) over 100 epochs without degrading other metrics
-
-KL warmup is applied over the first 20 epochs.
+Auxiliary heads (trained jointly):
+- Regression MLP: predicts dominant pole from latent (MSE loss, weight 0.1)
+- Classification MLP: predicts filter type from latent (CE loss, weight 0.1)
 
 ---
 
 ## 5) Current Model Scale
 
-Measured from current code/config (`edge_feature_dim=3`, `latent_dim=8`):
-
-- Encoder parameters: **83,411**
-- Decoder parameters: **7,698,901**
+- Encoder parameters: **237,907**
+- Decoder parameters: **3,280,726**
 
 ---
 
@@ -180,30 +163,30 @@ Measured from current code/config (`edge_feature_dim=3`, `latent_dim=8`):
 
 From `checkpoints/production/best.pt`:
 
-- Best epoch: **93**
-- Validation loss: **0.983** (includes pz-related supervision)
+- Best epoch: **21**
+- Validation loss: **0.0229**
+- Token accuracy: **98.6%**
 
 From current reported results (`GENERATION_RESULTS.md`):
 
-- Node count accuracy: 100%
-- Edge existence accuracy: 100%
-- Component type accuracy: 100%
+- Topology match: 100% (384/384 validation circuits)
+- Valid walk rate: 100%
 - Reconstruction validity: 1920/1920 (100%)
 
 ---
 
 ## 7) Generation Modes
 
-1. **Random sampling:** `z ~ N(0, I)` — 89.2% valid rate
-2. **Reconstruction:** encode circuit → decode `mu`
+1. **Random sampling:** `z ~ N(0, I)` — 99.8% valid rate
+2. **Reconstruction:** encode circuit → decode `mu` → Eulerian walk
 3. **Centroid generation:** average latent per filter type → decode
 4. **Latent interpolation:** linear blend between two latent codes
-5. **Pole/zero-driven generation** (new, decoder-only):
+5. **Pole/zero-driven generation** (decoder-only):
    - User specifies dominant pole/zero (real + imag parts)
    - `z[4:8]` is set via signed-log normalization of those values
    - `z[0:4]` is sampled from N(0, I) (random topology)
-   - Decoder generates circuit — no encoder or dataset needed
-   - 83% valid rate across test cases
+   - Decoder generates Eulerian walk — no encoder or dataset needed
+   - 100% valid rate across test cases
 
 ```bash
 # Example: RC low-pass with pole at -6283 rad/s (~1kHz)
@@ -219,32 +202,34 @@ python scripts/generation/generate_from_specs.py --pole-real -3142 --pole-imag 4
 
 ### Models
 
-- `ml/models/encoder.py`
-- `ml/models/gnn_layers.py`
-- `ml/models/decoder.py`
-- `ml/models/decoder_components.py`
-- `ml/models/node_decoder.py`
-
-### Constants
-
+- `ml/models/encoder.py` — `HierarchicalEncoder` (impedance-aware GNN + hierarchical latent)
+- `ml/models/gnn_layers.py` — `ImpedanceConv`, `ImpedanceGNN`, pooling/deepsets
+- `ml/models/decoder.py` — `SequenceDecoder` (GPT-style autoregressive walk generator)
+- `ml/models/vocabulary.py` — `CircuitVocabulary` (86-token vocabulary for Eulerian walks)
 - `ml/models/constants.py` — `PZ_LOG_SCALE`, `FILTER_TYPES`, `CIRCUIT_TEMPLATES`
 
-### Data and loss
+### Data
 
-- `ml/data/dataset.py` — dataset with `pz_target` computation
-- `ml/losses/circuit_loss.py` — includes `pz_loss` term
-- `ml/losses/connectivity_loss.py`
+- `ml/data/dataset.py` — `CircuitDataset` (graph-based, used by encoder)
+- `ml/data/sequence_dataset.py` — `SequenceDataset` (walk-based, used by decoder training)
+- `ml/data/bipartite_graph.py` — `BipartiteCircuitGraph`, `from_pickle_circuit`
+- `ml/data/traversal.py` — Hierholzer's algorithm, Euler walk enumeration
+
+### Utilities
+
+- `ml/utils/runtime.py` — model construction and checkpoint loading
+- `ml/utils/circuit_ops.py` — `walk_to_string`, `is_valid_walk`, `generate_walk`
+- `ml/utils/evaluate.py` — `sequence_to_topology_key`, `evaluate_reconstruction`
+
+### Archived (old adjacency decoder)
+
+- `ml/models/archive/decoder_adjacency.py` — `SimplifiedCircuitDecoder`
+- `ml/models/archive/node_decoder.py` — `AutoregressiveNodeDecoder`
+- `ml/models/archive/decoder_components.py` — `LatentGuidedEdgeDecoder`
+- `ml/models/archive/circuit_loss.py` — adjacency-based loss function
 
 ### Training and generation
 
 - `scripts/training/train.py`
 - `scripts/generation/generate_from_specs.py` — pole/zero-driven generation (decoder-only)
-- `scripts/generation/regenerate_all_results.py` — all 6 result sections
-
----
-
-## Notes on Changes vs Older Docs
-
-- If you see references to 7D edge features (`[log(C), log(G), log(L_inv), is_R, is_C, is_L, is_parallel]`), those are outdated. The current architecture uses 3D `log10` component values with internally derived presence masks.
-- If you see 6 filter types or 360 circuits, those are outdated. The current dataset has 8 filter types and 1920 circuits.
-- If you see `generate_from_specs.py` with `--cutoff`/`--q-factor` args, that is outdated. It now uses `--pole-real`/`--pole-imag`/`--zero-real`/`--zero-imag`.
+- `scripts/generation/regenerate_all_results.py` — all result sections

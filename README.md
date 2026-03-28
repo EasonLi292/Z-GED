@@ -13,7 +13,7 @@ Current generation entry points:
 - Included dataset size: **1920 circuits**
 - Filter types: `low_pass`, `high_pass`, `band_pass`, `band_stop`, `rlc_series`, `rlc_parallel`, `lc_lowpass`, `cl_highpass`
 - Stratified split file: `rlc_dataset/stratified_split.pt` (1536 train / 384 val)
-- Production checkpoint: `checkpoints/production/best.pt` (epoch 93, val_loss 0.983)
+- Production checkpoint: `checkpoints/production/best.pt` (epoch 21, val_loss 0.023)
 
 ## Step-by-Step: Run the Project
 
@@ -100,20 +100,19 @@ make test
   - 3-layer impedance-aware GNN
   - Hierarchical latent split: `[z_topology(2) | z_values(2) | z_pz(4)]`
 - Decoder: `ml/models/decoder.py`
-  - Autoregressive node decoder
-  - Autoregressive edge-component decoder (8 classes: none/R/C/L/RC/RL/CL/RCL)
-- Loss: `ml/losses/circuit_loss.py`
-  - Node type/count, edge-component, connectivity, KL, and pole/zero supervision terms
+  - GPT-style autoregressive transformer (sequence decoder)
+  - Generates circuits as Eulerian walk token sequences over a bipartite graph
+  - 86-token vocabulary (nets + components), latent prefix conditioning
+- Loss: CE (next-token prediction) + KL divergence
 
 ## Project Structure
 
 ```text
 Z-GED/
 ├── ml/
-│   ├── data/            # Dataset loading
-│   ├── losses/          # Training objectives
-│   ├── models/          # Encoder/decoder architecture
-│   └── utils/           # Shared runtime + generation helpers
+│   ├── data/            # Dataset loading, bipartite graph, traversal
+│   ├── models/          # Encoder, sequence decoder, vocabulary
+│   └── utils/           # Runtime, circuit ops, evaluation helpers
 ├── scripts/
 │   ├── training/        # Training and validation scripts
 │   ├── generation/      # Generation and latent exploration
@@ -130,12 +129,11 @@ Z-GED/
 - `ARCHITECTURE.md` - model and training design
 - `USAGE.md` - command reference and workflows
 - `GENERATION_RESULTS.md` - generated results and analysis
-- `NOVEL_TOPOLOGY_GENERATED.md` - novel-topology analysis
 - `docs/pole_zero_prediction.md` - pole/zero representation details
 
 ## Notes
 
-- Older docs or scripts that mention only 6 filter types or `--cutoff/--q-factor` in `generate_from_specs.py` are outdated.
+- The decoder generates Eulerian walk token sequences (not adjacency matrices). See `ARCHITECTURE.md` for details.
 - The current `generate_from_specs.py` interface is pole/zero based (`--pole-real`, `--pole-imag`, `--zero-real`, `--zero-imag`).
 
 ## License

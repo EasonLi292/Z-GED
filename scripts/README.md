@@ -19,7 +19,7 @@ scripts/
   - Uses `rlc_dataset/filter_dataset.pkl` + `rlc_dataset/stratified_split.pt`.
   - Saves best checkpoint to `checkpoints/production/best.pt`.
 - `validate.py`
-  - Full validation pass using the production checkpoint.
+  - Encodes validation set, generates walks, reports topology match rate and valid walk rate.
 - `create_stratified_split.py`
   - Rebuilds train/val split file from dataset filter-type distribution.
 

@@ -21,9 +21,10 @@ These files are kept for reference/experiments and are not the primary source of
 
 - Latent dim: 8 (`2 + 2 + 4` split)
 - Encoder hidden dim: 64
-- Decoder hidden dim: 256
-- Decoder max nodes: 10
-- Loss weights: node=1.0, count=5.0, edge_component=2.0, connectivity=5.0, KL=0.01, pz=5.0
-- Optimizer: Adam, lr=1e-4
+- Decoder: sequence decoder (GPT-style), d_model=256, 4 heads, 4 layers, max_seq_len=33
+- Vocabulary: 86 tokens (nets + components)
+- Loss: CE (next-token) + 0.01 * KL (with warmup)
+- Optimizer: AdamW, lr=3e-4
+- Scheduler: ReduceLROnPlateau (factor=0.5, patience=10)
 - Epochs: 100
-- Batch size: 16
+- Batch size: 32
