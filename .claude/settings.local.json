@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/c/Users/Lenovo/AppData/Local/Programs/Python/Python313/python.exe yubo/eval_encoder.py)",
+      "Bash(/c/Users/Lenovo/AppData/Local/Programs/Python/Python313/python.exe -c ':*)",
+      "Bash(claude auth:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(python:*)"
+    ]
+  }
+}

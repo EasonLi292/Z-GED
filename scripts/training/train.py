@@ -213,8 +213,17 @@ def main():
     encoder_ckpt_path = 'checkpoints/production/best_adjacency.pt'
     if os.path.exists(encoder_ckpt_path):
         ckpt = torch.load(encoder_ckpt_path, map_location=device, weights_only=False)
-        encoder.load_state_dict(ckpt['encoder_state_dict'])
+        # Filter out keys whose shapes don't match (pz_encoder was resized)
+        current = encoder.state_dict()
+        ckpt_enc = {
+            k: v for k, v in ckpt['encoder_state_dict'].items()
+            if k in current and v.shape == current[k].shape
+        }
+        missing, unexpected = encoder.load_state_dict(ckpt_enc, strict=False)
         print(f"Loaded pretrained encoder from {encoder_ckpt_path}")
+        print(f"  Transferred {len(ckpt_enc)} / {len(current)} param tensors")
+        if missing:
+            print(f"  Random init: {missing}")
 
     # Sequence decoder
     decoder = SequenceDecoder(
