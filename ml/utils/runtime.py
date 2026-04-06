@@ -9,7 +9,6 @@ from torch_geometric.data import Batch
 from ml.models.decoder import SequenceDecoder
 from ml.models.vocabulary import CircuitVocabulary
 from ml.models.encoder import HierarchicalEncoder
-from yubo.auxiliary_heads import ClassificationMLP, RegressionMLP
 
 DEFAULT_ENCODER_CONFIG: Dict[str, Any] = {
     'node_feature_dim': 4,
@@ -34,16 +33,6 @@ DEFAULT_DECODER_CONFIG: Dict[str, Any] = {
     'pad_id': 0,
 }
 
-DEFAULT_REGRESSION_MLP_CONFIG: Dict[str, Any] = {
-    'latent_dim': 8,
-}
-
-DEFAULT_CLASSIFICATION_MLP_CONFIG: Dict[str, Any] = {
-    'latent_dim': 8,
-    'num_classes': 8,
-}
-
-
 def build_encoder(device: str = 'cpu', **overrides: Any) -> HierarchicalEncoder:
     """Build an encoder with repository defaults."""
     config = dict(DEFAULT_ENCODER_CONFIG)
@@ -63,20 +52,6 @@ def build_decoder(device: str = 'cpu', **overrides: Any) -> SequenceDecoder:
     config = dict(DEFAULT_DECODER_CONFIG)
     config.update(overrides)
     return SequenceDecoder(**config).to(device)
-
-
-def build_regression_mlp(device: str = 'cpu', **overrides: Any) -> RegressionMLP:
-    """Build a RegressionMLP with repository defaults."""
-    config = dict(DEFAULT_REGRESSION_MLP_CONFIG)
-    config.update(overrides)
-    return RegressionMLP(**config).to(device)
-
-
-def build_classification_mlp(device: str = 'cpu', **overrides: Any) -> ClassificationMLP:
-    """Build a ClassificationMLP with repository defaults."""
-    config = dict(DEFAULT_CLASSIFICATION_MLP_CONFIG)
-    config.update(overrides)
-    return ClassificationMLP(**config).to(device)
 
 
 def load_encoder_decoder(

@@ -35,7 +35,8 @@ class HierarchicalEncoder(nn.Module):
         Stage 2: Hierarchical latent encoding
             Branch 1 (Topology): Global pooling → MLP → μ_topo, log_σ_topo → z_topo [2D]
             Branch 2 (Structure): GND/VIN/VOUT node embeddings → MLP → μ_structure, log_σ_structure → z_structure [2D]
-            Branch 3 (Poles/Zeros): GNN global pooling + terminals → MLP → μ_pz, log_σ_pz → z_pz [4D]
+            Branch 3 (Poles/Zeros): Vin'-MLP attention pooling + terminals → MLP → μ_pz, log_σ_pz → z_pz [4D]
+                                    Built-in pole_head: μ_pz → (σ_p, ω_p) for auxiliary supervision
 
     Args:
         node_feature_dim: Input node feature dimension (default: 4)
@@ -142,30 +143,36 @@ class HierarchicalEncoder(nn.Module):
         self.values_mu = nn.Linear(gnn_hidden_dim // 2, self.values_latent_dim)
         self.values_logvar = nn.Linear(gnn_hidden_dim // 2, self.values_latent_dim)
 
-        # Branch 3: Poles/Zeros encoding (GNN-based)
-        # Uses global pooling + terminal node embeddings from the GNN
-        # Wider MLP to preserve the weak within-type component-value signal
-        # (within-type variance is ~4% of total embedding variance)
-        self.pz_pooling = GlobalPooling(pooling_types=['mean', 'max'])
-        # Input: mean+max pooling (2*gnn_hidden_dim) + GND/VIN/VOUT embeddings (3*gnn_hidden_dim)
-        pz_input_dim = gnn_hidden_dim * 2 + 3 * gnn_hidden_dim
-        pz_hidden = gnn_hidden_dim * 4   # 256 — gentle 1.25x compression from 320
-        pz_hidden2 = gnn_hidden_dim * 2  # 128
+        # Branch 3: Poles/Zeros encoding — Vin'-MLP attention pooling
+        # Computes VIN-conditioned attention weights over all nodes to pool
+        # a signal-path-aware representation for the pz branch.
+        self.vin_pool_attn = nn.Sequential(
+            nn.Linear(gnn_hidden_dim * 2, gnn_hidden_dim),
+            nn.Tanh(),
+            nn.Linear(gnn_hidden_dim, 1)
+        )
+        # Input: h_vin_prime [D] + GND/VIN/VOUT embeddings [3D] = 4D
+        pz_input_dim = gnn_hidden_dim * 4
+        pz_hidden = gnn_hidden_dim * 2   # 128
         pz_drop = 0.2
         self.pz_encoder = nn.Sequential(
             nn.Linear(pz_input_dim, pz_hidden),
             nn.ReLU(),
             nn.Dropout(pz_drop),
-            nn.Linear(pz_hidden, pz_hidden2),
-            nn.ReLU(),
-            nn.Dropout(pz_drop),
-            nn.Linear(pz_hidden2, gnn_hidden_dim),
+            nn.Linear(pz_hidden, gnn_hidden_dim),
             nn.ReLU(),
             nn.Dropout(pz_drop)
         )
 
         self.pz_mu = nn.Linear(gnn_hidden_dim, self.pz_latent_dim)
         self.pz_logvar = nn.Linear(gnn_hidden_dim, self.pz_latent_dim)
+
+        # Built-in pole prediction head: mu_pz -> (sigma_p, omega_p)
+        self.pole_head = nn.Sequential(
+            nn.Linear(self.pz_latent_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, 2)
+        )
 
     def forward(
         self,
@@ -235,14 +242,25 @@ class HierarchicalEncoder(nn.Module):
         mu_values = self.values_mu(h_values)         # [B, structure_latent_dim]
         logvar_values = self.values_logvar(h_values)  # [B, structure_latent_dim]
 
-        # Branch 3: Poles/Zeros encoding (GNN-based)
-        # Global pooling over all node embeddings
-        h_pz_global = self.pz_pooling(h_nodes, batch)  # [B, gnn_hidden_dim * 2]
-        # Concatenate with terminal embeddings for signal-path info
+        # Branch 3: Poles/Zeros encoding — Vin'-MLP attention pooling
+        # Pool all nodes using VIN-conditioned attention to capture signal path
+        h_vin_prime_list = []
+        for i in range(batch_size):
+            node_mask = batch == i
+            graph_h = h_nodes[node_mask]                                          # [n, D]
+            h_vin_i = h_terminal_list[i][1]                                       # [D]
+            h_vin_exp = h_vin_i.unsqueeze(0).expand(graph_h.size(0), -1)         # [n, D]
+            attn_in = torch.cat([graph_h, h_vin_exp], dim=-1)                    # [n, 2D]
+            attn_w = torch.softmax(
+                self.vin_pool_attn(attn_in).squeeze(-1), dim=0
+            )                                                                      # [n]
+            h_vin_prime_list.append((attn_w.unsqueeze(-1) * graph_h).sum(0))     # [D]
+        h_vin_prime = torch.stack(h_vin_prime_list)  # [B, D]
+
         h_terminals = torch.stack([torch.cat([h_gnd, h_vin, h_vout], dim=-1)
-                                   for h_gnd, h_vin, h_vout in h_terminal_list])  # [B, 3*gnn_hidden_dim]
-        h_pz_input = torch.cat([h_pz_global, h_terminals], dim=-1)  # [B, 5*gnn_hidden_dim]
-        h_pz = self.pz_encoder(h_pz_input)  # [B, gnn_hidden_dim // 2]
+                                   for h_gnd, h_vin, h_vout in h_terminal_list])  # [B, 3*D]
+        h_pz_input = torch.cat([h_vin_prime, h_terminals], dim=-1)               # [B, 4*D]
+        h_pz = self.pz_encoder(h_pz_input)                                        # [B, D]
 
         mu_pz = self.pz_mu(h_pz)             # [B, pz_latent_dim]
         logvar_pz = self.pz_logvar(h_pz)     # [B, pz_latent_dim]
@@ -314,3 +332,16 @@ class HierarchicalEncoder(nn.Module):
         z_values = z[:, topo_end:values_end]
         z_pz = z[:, values_end:]
         return z_topo, z_values, z_pz
+
+    def predict_poles(self, mu: torch.Tensor) -> torch.Tensor:
+        """
+        Predict dominant pole (sigma_p, omega_p) from latent mean.
+
+        Args:
+            mu: Latent mean [B, latent_dim]
+
+        Returns:
+            pole_pred: Predicted (signed-log sigma_p, signed-log omega_p) [B, 2]
+        """
+        mu_pz = mu[:, self.topo_latent_dim + self.structure_latent_dim:]
+        return self.pole_head(mu_pz)

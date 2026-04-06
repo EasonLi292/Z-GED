@@ -20,6 +20,36 @@ from ml.data.bipartite_graph import from_pickle_circuit
 from ml.data.traversal import enumerate_euler_circuits, hierholzer
 from ml.models.vocabulary import CircuitVocabulary
 
+_PZ_LOG_SCALE = 6.0  # matches CircuitDataset.PZ_LOG_SCALE
+
+
+def _signed_log(x: float) -> float:
+    if abs(x) < 1e-30:
+        return 0.0
+    sign = 1.0 if x >= 0 else -1.0
+    return sign * np.log10(abs(x) + 1.0) / _PZ_LOG_SCALE
+
+
+def _compute_pz_target(poles: list, zeros: list) -> torch.Tensor:
+    """Compute 4D [sigma_p, omega_p, sigma_z, omega_z] target in signed-log scale."""
+    if poles:
+        unique = [p if isinstance(p, complex) else complex(p) for p in poles]
+        unique = [p for p in unique if p.imag >= 0] or unique
+        dom = min(unique, key=abs)
+        sigma_p, omega_p = _signed_log(dom.real), _signed_log(abs(dom.imag))
+    else:
+        sigma_p = omega_p = 0.0
+
+    if zeros:
+        unique = [z if isinstance(z, complex) else complex(z) for z in zeros]
+        unique = [z for z in unique if z.imag >= 0] or unique
+        dom = min(unique, key=abs)
+        sigma_z, omega_z = _signed_log(dom.real), _signed_log(abs(dom.imag))
+    else:
+        sigma_z = omega_z = 0.0
+
+    return torch.tensor([sigma_p, omega_p, sigma_z, omega_z], dtype=torch.float32)
+
 
 class SequenceDataset(Dataset):
     """
@@ -61,10 +91,11 @@ class SequenceDataset(Dataset):
         self.augment = augment
         self.max_seq_len = max_seq_len
 
-        # Pre-build bipartite graphs, PyG graphs, and exhaustive walks
+        # Pre-build bipartite graphs, PyG graphs, exhaustive walks, and pz targets
         self.bipartite_graphs = []
         self.pyg_graphs = []
         self.all_walks: List[List[List[str]]] = []  # per-circuit list of walks
+        self.pz_targets: List[torch.Tensor] = []
 
         total_walks = 0
         for idx in circuit_indices:
@@ -72,6 +103,9 @@ class SequenceDataset(Dataset):
             bg = from_pickle_circuit(circuit)
             self.bipartite_graphs.append(bg)
             self.pyg_graphs.append(self._build_pyg_graph(circuit))
+            self.pz_targets.append(_compute_pz_target(
+                circuit['label']['poles'], circuit['label']['zeros']
+            ))
 
             if augment:
                 walks = enumerate_euler_circuits(bg, max_circuits=max_walks_per_circuit)
@@ -145,8 +179,9 @@ class SequenceDataset(Dataset):
 
         return {
             'graph': pyg_graph,
-            'seq': seq,           # [max_seq_len]
-            'seq_len': seq_len,   # int (un-padded length)
+            'seq': seq,                          # [max_seq_len]
+            'seq_len': seq_len,                  # int (un-padded length)
+            'pz_target': self.pz_targets[idx],   # [4]
         }
 
 
@@ -168,9 +203,11 @@ def collate_sequence_batch(
 
     seq = torch.stack([item['seq'] for item in batch])
     seq_len = torch.tensor([item['seq_len'] for item in batch], dtype=torch.long)
+    pz_target = torch.stack([item['pz_target'] for item in batch])
 
     return {
         'graph': batched_graph,
         'seq': seq,
         'seq_len': seq_len,
+        'pz_target': pz_target,  # [B, 4]
     }

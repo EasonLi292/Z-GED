@@ -7,6 +7,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -22,13 +23,15 @@ def kl_divergence(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
     return -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
 
-def train_epoch(encoder, decoder, dataloader, optimizer, device, epoch, kl_weight=0.01):
+def train_epoch(encoder, decoder, dataloader, optimizer, device, epoch,
+                kl_weight=0.01, pole_weight=1.0):
     """Train for one epoch."""
     encoder.train()
     decoder.train()
 
     total_ce = 0.0
     total_kl = 0.0
+    total_pole = 0.0
     total_loss = 0.0
     total_correct = 0
     total_tokens = 0
@@ -39,6 +42,7 @@ def train_epoch(encoder, decoder, dataloader, optimizer, device, epoch, kl_weigh
         graph = batch['graph'].to(device)
         seq = batch['seq'].to(device)
         seq_len = batch['seq_len'].to(device)
+        pz_target = batch['pz_target'].to(device)  # [B, 4]
 
         # Encode
         z, mu, logvar = encoder(
@@ -55,7 +59,9 @@ def train_epoch(encoder, decoder, dataloader, optimizer, device, epoch, kl_weigh
         # Losses
         ce_loss = decoder.compute_loss(logits, seq, seq_len)
         kl_loss = kl_divergence(mu, logvar)
-        loss = ce_loss + kl_weight * kl_loss
+        pole_pred = encoder.predict_poles(mu)
+        pole_loss = F.mse_loss(pole_pred, pz_target[:, :2])
+        loss = ce_loss + kl_weight * kl_loss + pole_weight * pole_loss
 
         # Backward
         optimizer.zero_grad()
@@ -75,6 +81,7 @@ def train_epoch(encoder, decoder, dataloader, optimizer, device, epoch, kl_weigh
 
         total_ce += ce_loss.item()
         total_kl += kl_loss.item()
+        total_pole += pole_loss.item()
         total_loss += loss.item()
         total_correct += correct
         total_tokens += total_tok
@@ -84,25 +91,28 @@ def train_epoch(encoder, decoder, dataloader, optimizer, device, epoch, kl_weigh
         pbar.set_postfix({
             'CE': f'{ce_loss.item():.3f}',
             'KL': f'{kl_loss.item():.3f}',
+            'pole': f'{pole_loss.item():.3f}',
             'acc': f'{acc:.1f}%',
         })
 
     return {
         'ce_loss': total_ce / num_batches,
         'kl_loss': total_kl / num_batches,
+        'pole_loss': total_pole / num_batches,
         'total_loss': total_loss / num_batches,
         'accuracy': total_correct / max(total_tokens, 1) * 100,
     }
 
 
 @torch.no_grad()
-def validate(encoder, decoder, dataloader, device, kl_weight=0.01):
+def validate(encoder, decoder, dataloader, device, kl_weight=0.01, pole_weight=1.0):
     """Validate the model."""
     encoder.eval()
     decoder.eval()
 
     total_ce = 0.0
     total_kl = 0.0
+    total_pole = 0.0
     total_loss = 0.0
     total_correct = 0
     total_tokens = 0
@@ -112,6 +122,7 @@ def validate(encoder, decoder, dataloader, device, kl_weight=0.01):
         graph = batch['graph'].to(device)
         seq = batch['seq'].to(device)
         seq_len = batch['seq_len'].to(device)
+        pz_target = batch['pz_target'].to(device)  # [B, 4]
 
         z, mu, logvar = encoder(
             graph.x, graph.edge_index, graph.edge_attr, graph.batch
@@ -121,7 +132,9 @@ def validate(encoder, decoder, dataloader, device, kl_weight=0.01):
         logits = decoder(latent, seq, seq_len)
         ce_loss = decoder.compute_loss(logits, seq, seq_len)
         kl_loss = kl_divergence(mu, logvar)
-        loss = ce_loss + kl_weight * kl_loss
+        pole_pred = encoder.predict_poles(mu)
+        pole_loss = F.mse_loss(pole_pred, pz_target[:, :2])
+        loss = ce_loss + kl_weight * kl_loss + pole_weight * pole_loss
 
         B, L, V = logits.shape
         preds = logits.argmax(dim=-1)
@@ -131,6 +144,7 @@ def validate(encoder, decoder, dataloader, device, kl_weight=0.01):
 
         total_ce += ce_loss.item()
         total_kl += kl_loss.item()
+        total_pole += pole_loss.item()
         total_loss += loss.item()
         total_correct += correct
         total_tokens += total_tok
@@ -139,6 +153,7 @@ def validate(encoder, decoder, dataloader, device, kl_weight=0.01):
     return {
         'ce_loss': total_ce / num_batches,
         'kl_loss': total_kl / num_batches,
+        'pole_loss': total_pole / num_batches,
         'total_loss': total_loss / num_batches,
         'accuracy': total_correct / max(total_tokens, 1) * 100,
     }
@@ -154,6 +169,7 @@ def main():
     learning_rate = 3e-4
     num_epochs = 100
     kl_weight = 0.01
+    pole_weight = 1.0
     max_seq_len = 32
 
     print("=" * 60)
@@ -241,10 +257,11 @@ def main():
 
         train_metrics = train_epoch(
             encoder, decoder, train_loader, optimizer, device, epoch,
-            kl_weight=current_kl,
+            kl_weight=current_kl, pole_weight=pole_weight,
         )
         val_metrics = validate(
-            encoder, decoder, val_loader, device, kl_weight=current_kl,
+            encoder, decoder, val_loader, device,
+            kl_weight=current_kl, pole_weight=pole_weight,
         )
 
         scheduler.step(val_metrics['total_loss'])
@@ -252,9 +269,11 @@ def main():
         print(f"\nEpoch {epoch}")
         print(f"  Train - CE: {train_metrics['ce_loss']:.4f}, "
               f"KL: {train_metrics['kl_loss']:.4f}, "
+              f"pole: {train_metrics['pole_loss']:.4f}, "
               f"acc: {train_metrics['accuracy']:.1f}%")
         print(f"  Val   - CE: {val_metrics['ce_loss']:.4f}, "
               f"KL: {val_metrics['kl_loss']:.4f}, "
+              f"pole: {val_metrics['pole_loss']:.4f}, "
               f"acc: {val_metrics['accuracy']:.1f}%")
 
         if val_metrics['total_loss'] < best_val_loss:
