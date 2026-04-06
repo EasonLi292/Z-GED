@@ -64,3 +64,37 @@ KL weight: 0 → 0.01 over first 20 epochs. Train uses sampled z; val uses mu.
 | Metric | Val |
 |--------|-----|
 | Total loss | 0.9865 |
+
+---
+
+# yubo — Dev Log (2026-04-06)
+
+## 3. Encoder improvements on branch `yubo-encoder-improvement`
+
+### Change 1 — z_pz branch: VIN-guided attention pooling (`ml/models/encoder.py`)
+
+- Replaced old mean/max pooling + terminal embeddings with `vin_pool_attn` MLP
+- VIN node embedding is used as attention query to do guided pooling over all nodes
+- Gives `z_pz` a "Vin-centric" view of the circuit, better inductive bias for pole/zero encoding
+
+### Change 2 — `pole_head`: direct pole supervision (`ml/models/encoder.py`, `scripts/training/train.py`)
+
+- Added auxiliary head `Linear(4→32→2)` on `z_pz`'s μ
+- Predicts `[pole_real, pole_imag]` with MSE loss (weight ×1.0) during training
+- `ml/data/sequence_dataset.py`: added `pz_target` field to each sample
+- Gives encoder an explicit gradient for frequency info instead of relying solely on decoder reconstruction loss
+- Head is auxiliary — not used at inference time
+
+### Other changes
+
+- `ml/utils/runtime.py`: removed old MLP builder utilities
+- Param count: 237,907 → 258,741 (+8.7%)
+
+### Baseline metrics (primary target)
+
+| Metric | Val |
+|--------|-----|
+| Val Loss | 0.02294 |
+| Val Accuracy | 99.04% |
+| pole_real R² | 0.843 |
+| pole_imag R² | 0.642 |
