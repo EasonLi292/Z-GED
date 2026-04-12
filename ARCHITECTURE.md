@@ -221,6 +221,49 @@ python scripts/generation/generate_from_specs.py --pole-real -3142 --pole-imag 4
 - `ml/utils/circuit_ops.py` — `walk_to_string`, `is_valid_walk`, `generate_walk`
 - `ml/utils/evaluate.py` — `sequence_to_topology_key`, `evaluate_reconstruction`
 
+---
+
+## v2: Admittance-Polynomial Encoder (Inverse Design)
+
+The v2 model adds a second encoder path optimized for **spec-driven inverse design**. The v1 model above remains the production topology generator; v2 focuses on generating circuits that match target electrical specifications.
+
+See [`docs/inverse_design.md`](docs/inverse_design.md) for full details.
+
+### Key differences from v1
+
+| | v1 (HierarchicalEncoder) | v2 (AdmittanceEncoder) |
+|---|---|---|
+| Encoder params | 237,907 | 84,828 |
+| Decoder params | 3,280,726 | 440,662 |
+| Latent dim | 8D | 5D |
+| Edge features | log10 values | Admittance polynomials (G/G_REF, C/C_REF, L_inv/L_INV_REF) |
+| Physics prior | Presence masks | Parallel additivity + learned coefficient scaling |
+| Dataset | 1920 circuits, 8 types | 2400 circuits, 10 types |
+
+### AdmittanceEncoder
+
+- **Edge features**: `[G/G_REF, C/C_REF, L_inv/L_INV_REF]` — admittance quantities that add in parallel
+- **AdmittanceConv**: Separate MLP channels per component type with learnable `alpha*x + beta*log1p(x)` scaling
+- **5D latent**: `[z_topo(2) | z_VIN(1) | z_VOUT(1) | z_GND(1)]`
+- **Attribute heads**: FreqHead (log10 fc), GainHead (|H(1kHz)|), TypeHead (10-way classification) — all predict from mu
+
+### Generation pipeline
+
+1. **K-NN interpolation** in latent space using target attributes
+2. **Gradient descent** on mu through frozen attribute heads
+3. **Decode** walks from optimized mu
+
+### v2 files
+
+- `ml/models/admittance_encoder.py` — AdmittanceConv + AdmittanceEncoder
+- `ml/models/attribute_heads.py` — FreqHead, GainHead, TypeHead
+- `ml/data/cross_topo_dataset.py` — CrossTopoSequenceDataset (2400 circuits, 10 types)
+- `scripts/generation/generate_inverse_design.py` — Spec-driven generation CLI
+- `scripts/training/train_inverse_design.py` — v2 training script
+- `checkpoints/production/best_v2.pt` — Trained v2 checkpoint
+
+---
+
 ### Archived (old adjacency decoder)
 
 - `ml/models/archive/decoder_adjacency.py` — `SimplifiedCircuitDecoder`
