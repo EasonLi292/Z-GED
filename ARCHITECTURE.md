@@ -194,6 +194,25 @@ At initialization, coefficient scaling is identity. This is deliberate: the
 model starts from the linear admittance-additivity prior and learns deviations
 only if training supports them.
 
+In the current trained checkpoint, `checkpoints/production/best_v2.pt`, these
+scalars remain close to the identity-linear prior:
+
+| Layer | Channel | `alpha` | `beta` | `beta / alpha` |
+|---:|---|---:|---:|---:|
+| 0 | G | +0.964260 | +0.035122 | +0.036424 |
+| 0 | C | +1.162337 | +0.223847 | +0.192583 |
+| 0 | L | +0.851117 | -0.068078 | -0.079987 |
+| 1 | G | +1.058064 | +0.105133 | +0.099364 |
+| 1 | C | +0.853974 | -0.002924 | -0.003424 |
+| 1 | L | +1.132479 | +0.202166 | +0.178516 |
+| 2 | G | +1.032769 | +0.063506 | +0.061491 |
+| 2 | C | +1.005208 | +0.107835 | +0.107276 |
+| 2 | L | +1.118448 | +0.144108 | +0.128846 |
+
+This means V2 does use the logarithmic correction, but modestly. The largest
+relative log terms are layer-0 capacitance and layer-1 inductance; layer-1
+capacitance essentially keeps the log term off.
+
 Each `phi_*` transform is:
 
 ```text
