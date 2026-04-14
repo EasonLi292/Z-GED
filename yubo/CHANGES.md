@@ -101,40 +101,40 @@ KL weight: 0 → 0.01 over first 20 epochs. Train uses sampled z; val uses mu.
 
 ---
 
-## Change 3 — z_pz branch: replaced attention pooling with mean/max + terminal embeddings (Eason's suggestion)
+# yubo — Dev Log (2026-04-13)
 
-**Date:** April 2026
+## 4. z_pz branch: replaced attention pooling with mean/max + terminal embeddings (Eason's suggestion)
 
-### What changed (`ml/models/encoder.py`)
-
+**Modified `ml/models/encoder.py`:**
 - Removed `vin_pool_attn` MLP entirely
 - Replaced z_pz pooling with mean/max pooling over all nodes + `concat(h_VIN, h_VOUT, h_GND)`, same style as z_topo and z_struct
 - `pole_head` kept unchanged (`Linear 4→32→2`, predicts σ_p and ω_p from μ_pz)
-- Encoder param count: 258,741 → 164,149
+- Param count: 258,741 → 164,149
 
-### Loss design
+**Architecture:**
+```
+HierarchicalEncoder  z [B, 8]
+    ├── z_topo    [2D]: mean+max pool → MLP → μ, σ
+    ├── z_struct  [2D]: concat(h_GND, h_VIN, h_VOUT) → MLP → μ, σ
+    └── z_pz      [4D]: mean+max pool + concat(h_GND, h_VIN, h_VOUT) → MLP → μ, σ
+                        └── pole_head: μ_pz → (σ_p, ω_p)
+```
+Params: encoder 164,149
 
-- `parameter_loss` (MSE from `pole_head`) → applied to z_pz [4D] only
-- `reconstruction_loss` (CE from decoder) → applied to full 8D Z
+**Loss:**
+```
+L = CE(decoder, full z [8D])
+  + 0.01 · KL(q(z|x) ‖ N(0,I))
+  + 1.0  · MSE(pole_head(μ_pz), pole_target[:2])
+```
+KL weight: 0 → 0.01 over first 20 epochs. Train uses sampled z; val uses μ.
 
-### 2-epoch smoke test results
+**Results** (best checkpoint, epoch 38):
 
-| Epoch | Split | CE loss | KL loss | Pole loss | Total loss |
-|-------|-------|---------|---------|-----------|------------|
-| 1 | Train | 1.0146 | 0.7844 | 0.1780 | 1.1930 |
-| 1 | Val | 0.2998 | 1.3105 | 0.0539 | 0.3543 |
-| 2 | Train | 0.2238 | 1.8132 | 0.0617 | 0.2873 |
-| 2 | Val | 0.1015 | 2.5171 | 0.0366 | 0.1406 |
-
-### Full training results
-
-Best checkpoint: epoch 38 (val total loss: 0.0259)
-
-| Metric | Value |
-|--------|-------|
+| Metric | Val |
+|--------|-----|
 | Val CE loss | 0.0147 |
 | Val accuracy | 98.1% |
-| Val pole loss (MSE) | 0.0020 |
 | pole_real R² | 0.9875 |
 | pole_imag R² | 0.9867 |
 
@@ -145,3 +145,5 @@ Per filter-type MAE (signed-log scale, full dataset probe):
 | band_stop | 0.0303 | 0.0571 |
 | rlc_series | 0.0332 | 0.0503 |
 | band_pass | 0.0327 | 0.0370 |
+
+vs. baseline (Change 1+2): pole_real R² 0.843 → 0.988, pole_imag R² 0.642 → 0.987
