@@ -73,6 +73,46 @@ class FilterGenerator:
         self._build_graph()
         return fc
 
+    def generate_rl_lowpass_filter(self):
+        """RL Low-pass filter: Vin --L-- Vout --R-- GND"""
+        self.filter_type = 'rl_lowpass'
+        self.components = []
+        self.graph.clear()
+
+        R = 10 ** random.uniform(2, 5)   # 100 Ohm to 100 kOhm
+        L = 10 ** random.uniform(-4, -2)  # 0.1mH to 10mH
+
+        # Cutoff frequency: fc = R / (2*pi*L)
+        fc = R / (2 * np.pi * L)
+
+        self.components = [
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 1, 'node2': 2},
+            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 2, 'node2': 0}
+        ]
+
+        self._build_graph()
+        return fc
+
+    def generate_rl_highpass_filter(self):
+        """RL High-pass filter: Vin --R-- Vout --L-- GND"""
+        self.filter_type = 'rl_highpass'
+        self.components = []
+        self.graph.clear()
+
+        R = 10 ** random.uniform(2, 5)
+        L = 10 ** random.uniform(-4, -2)
+
+        # Cutoff frequency: fc = R / (2*pi*L)
+        fc = R / (2 * np.pi * L)
+
+        self.components = [
+            {'name': 'R1', 'type': 'R', 'value': R, 'node1': 1, 'node2': 2},
+            {'name': 'L1', 'type': 'L', 'value': L, 'node1': 2, 'node2': 0}
+        ]
+
+        self._build_graph()
+        return fc
+
     def generate_band_pass_filter(self):
         """RLC Band-pass filter (series RLC, measure across R)"""
         self.filter_type = 'band_pass'
@@ -977,6 +1017,30 @@ def extract_poles_zeros_gain_analytical(filter_type, components):
             # H(s) = K·s/((s-p1)(s-p2)) = K·s/(s² - (p1+p2)s + p1·p2)
             # From circuit analysis, K should normalize to voltage divider at resonance
             gain = R / (R + R_source) if R > 0 else 0.5
+
+    elif filter_type == 'rl_lowpass':
+        # RL Low-pass: Vin(1) --L1-- Vout(2) --R1-- GND(0)
+        # H(s) = R / (sL + R) = 1 / (sL/R + 1)
+        # Pole: s = -R/L, gain = 1 (DC gain)
+        R = comp_dict.get('R1', 0)
+        L = comp_dict.get('L1', 0)
+        if R > 0 and L > 0:
+            pole = -R / L
+            poles = [pole]
+            zeros = []
+            gain = -pole  # = R/L
+
+    elif filter_type == 'rl_highpass':
+        # RL High-pass: Vin(1) --R1-- Vout(2) --L1-- GND(0)
+        # H(s) = sL / (R + sL) = s / (s + R/L)
+        # Pole: s = -R/L, Zero: s = 0, gain = 1
+        R = comp_dict.get('R1', 0)
+        L = comp_dict.get('L1', 0)
+        if R > 0 and L > 0:
+            pole = -R / L
+            poles = [pole]
+            zeros = [0.0]
+            gain = 1.0
 
     elif filter_type == 'lc_lowpass':
         # LC Low-pass: Vin(1) --L1-- Vout(2) --C1-- GND(0)

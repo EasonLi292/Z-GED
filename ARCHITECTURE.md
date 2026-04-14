@@ -1,235 +1,546 @@
-# Circuit Generation Model Architecture
+# Z-GED V2 Architecture
 
-## Overview
+This document describes the maintained V2 inverse-design path under `ml/` and
+`scripts/`. It intentionally excludes older exploratory and archived paths.
 
-This model generates RLC filter circuit topologies from an 8-dimensional latent space.
-The decoder is latent-only: no external condition tensor is required at decode time.
+V2 generates passive RLC filter topologies from target attributes:
 
-**Dataset:** 1920 circuits across 8 filter types (240 each):
-`low_pass`, `high_pass`, `band_pass`, `band_stop`, `rlc_series`, `rlc_parallel`, `lc_lowpass`, `cl_highpass`
+- filter type
+- characteristic frequency `fc`
+- gain magnitude at 1 kHz, `|H(1kHz)|`
 
-Current production representation uses **3 edge features**:
+The model does not generate component values directly. It generates topology as
+an Eulerian walk over a bipartite net/component graph.
+
+---
+
+## Source Of Truth
+
+The active V2 code path is:
+
+| Area | File |
+|---|---|
+| Encoder | `ml/models/admittance_encoder.py` |
+| Attribute heads | `ml/models/attribute_heads.py` |
+| Sequence decoder | `ml/models/decoder.py` |
+| Vocabulary | `ml/models/vocabulary.py` |
+| V2 constants | `ml/models/constants.py` |
+| Dataset | `ml/data/cross_topo_dataset.py` |
+| Runtime loaders/builders | `ml/utils/runtime.py` |
+| Training | `scripts/training/train_inverse_design.py` |
+| Spec-driven generation | `scripts/generation/generate_inverse_design.py` |
+| Latent analysis | `scripts/analysis/analyze_latent.py` |
+| Checkpoint | `checkpoints/production/best_v2.pt` |
+
+When this document discusses architecture-level implementation, it follows the
+code above. Hyperparameters such as dropout rates and loss weights are training
+choices unless changing them would alter the model interface or latent contract.
+
+---
+
+## End-To-End Pipeline
 
 ```text
-edge_attr = [log10(R), log10(C), log10(L)]
+Circuit topology + component values
+  -> CrossTopoSequenceDataset
+  -> PyG net graph with admittance-polynomial edge features
+  -> AdmittanceEncoder
+  -> 5D VAE latent z, mu, logvar
+  -> Attribute heads trained on mu
+  -> SequenceDecoder trained to reconstruct Eulerian walk tokens
+
+At generation time:
+
+Target attributes (type, fc, gain)
+  -> KNN initialization from encoded training latents
+  -> gradient descent on mu through frozen attribute heads
+  -> SequenceDecoder samples topology walks
+  -> graph-signature validation and reporting
 ```
 
-with `0` meaning the component is absent on that edge.
+The encoder and attribute heads are used during training and for KNN reference
+encoding. The decoder is the final topology generator.
 
 ---
 
-## End-to-End Pipeline
+## Dataset And Representation
+
+V2 trains on 2,400 circuits across 10 filter types:
+
+- `rlc_dataset/filter_dataset.pkl`: 1,920 circuits, 8 types, 240 each
+- `rlc_dataset/rl_dataset.pkl`: 480 circuits, 2 RL types, 240 each
+
+The type set is defined by `FILTER_TYPES_V2` in `ml/models/constants.py`:
 
 ```text
-Circuit graph + poles/zeros
-  -> HierarchicalEncoder (VAE)
-  -> z in R^8
-  -> SequenceDecoder (GPT-style autoregressive transformer)
-  -> Eulerian walk token sequence (e.g. VSS, RCL1, VOUT, L1, VIN, L1, VOUT, RCL1, VSS)
+band_pass, band_stop, cl_highpass, high_pass, lc_lowpass,
+low_pass, rl_highpass, rl_lowpass, rlc_parallel, rlc_series
 ```
 
----
+### Node Features
 
-## 1) Data Representation
-
-### Node features
-
-- 4D one-hot: `[is_GND, is_VIN, is_VOUT, is_INTERNAL]`
-
-### Edge features
-
-- 3D values: `[log10(R), log10(C), log10(L)]`
-- `0` means absent component
-- Nonzero means present component
-
-### Pole/zero features
-
-- Variable-length lists of `[real, imag]`
-- Log-scale magnitude normalization is applied for the DeepSets encoder input
-- A separate **pz_target** `[4]` is computed per circuit for supervised loss on z[4:8]:
-  - `sigma_p = signed_log(real(dominant_pole))`
-  - `omega_p = signed_log(|imag(dominant_pole)|)`
-  - `sigma_z = signed_log(real(dominant_zero))`
-  - `omega_z = signed_log(|imag(dominant_zero)|)`
-  - `signed_log(x) = sign(x) * log10(|x| + 1) / 7.0` (normalizes to ~[-1, 1])
-  - Dominant = pole/zero with positive imag part (from conjugate pair) closest to origin
-  - No poles/zeros → 0.0 (unambiguous since signed_log never produces exact 0 for nonzero input)
-
-### Important preprocessing change
-
-- Edge feature normalization/clipping used in older versions is removed.
-- Edge features are now raw `log10` values.
-
----
-
-## 2) Encoder (`HierarchicalEncoder`)
-
-### Stage A: Impedance-aware GNN (3 layers)
-
-- Module: `ImpedanceGNN` using `ImpedanceConv`
-- Input: node 4D + edge 3D
-- Hidden size: 64
-
-`ImpedanceConv` behavior:
-
-1. Extracts `val_R`, `val_C`, `val_L` from edge features
-2. Derives masks internally:
-   - `is_R = |val_R| > 0.01`
-   - `is_C = |val_C| > 0.01`
-   - `is_L = |val_L| > 0.01`
-3. Applies value-conditioned transforms:
-   - `lin_R([x_j, val_R])`
-   - `lin_C([x_j, val_C])`
-   - `lin_L([x_j, val_L])`
-4. Combines by masks, then applies attention weighting
-
-### Stage B: Hierarchical latent branches
-
-The encoder outputs 8D latent split as:
+Each circuit graph is represented as a PyTorch Geometric graph over electrical
+nets. Node features are 4D one-hot vectors:
 
 ```text
-z = [z_topology(2) | z_structure(2) | z_pz(4)]
+[is_GND, is_VIN, is_VOUT, is_INTERNAL]
 ```
 
-- Branch 1 (`z[0:2]`): topology from global mean+max pooling
-- Branch 2 (`z[2:4]`): structure/values from GND/VIN/VOUT node embeddings
-- Branch 3 (`z[4:8]`): transfer-function descriptors from DeepSets poles/zeros
+The encoder reads the GND, VIN, and VOUT terminal embeddings explicitly, so the
+terminal node roles are part of the latent contract.
 
-VAE outputs:
+### Edge Features
 
-- `mu`, `logvar`, and sampled `z`
+V2 uses admittance-polynomial edge features:
+
+```text
+edge_attr = [G / G_REF, C / C_REF, L_inv / L_INV_REF]
+```
+
+where:
+
+- `G = 1 / R`
+- `C = capacitance`
+- `L_inv = 1 / L`
+- `G_REF = 1e-3`
+- `C_REF = 10 ** -7.5`
+- `L_INV_REF = 1e3`
+
+These coefficients correspond to:
+
+```text
+Y(s) = G + sC + L_inv / s
+```
+
+This representation is an architecture choice: admittance coefficients add in
+parallel, so sum aggregation in message passing can preserve a useful circuit
+prior. Normalization keeps typical values near order 1.
+
+### Sequence Targets
+
+The decoder target is an Eulerian walk through a bipartite graph where:
+
+- net nodes are tokens such as `VSS`, `VIN`, `VOUT`, `INTERNAL_1`
+- component nodes are tokens such as `R1`, `C1`, `L1`, `RC1`, `RCL1`
+- each walk is terminated with `EOS`
+- sequences are padded to `max_seq_len = 32` walk tokens during training
+
+The vocabulary is deterministic:
+
+- `PAD`, `EOS`
+- fixed nets: `VSS`, `VIN`, `VOUT`, `VDD`
+- `INTERNAL_1` through `INTERNAL_10`
+- 10 tokens each for `R`, `C`, `L`, `RC`, `RL`, `CL`, and `RCL`
+
+With default `max_internal=10` and `max_components=10`, the vocabulary size is
+86.
 
 ---
 
-## 3) Decoder (`SequenceDecoder`)
+## AdmittanceEncoder
 
-The decoder represents circuits as **bipartite Eulerian walks** — alternating sequences of net tokens (VSS, VIN, VOUT, INTERNAL_N) and component tokens (R1, C1, L1, RCL1, etc.). Each walk starts and ends at VSS.
+`AdmittanceEncoder` is a physics-informed GNN with an optional VAE bottleneck.
+The production V2 path uses `vae=True`.
 
-### Circuit representation
-
-A circuit is converted to a bipartite graph where nets and components are both nodes, connected by edges. An Eulerian circuit through this graph produces a token sequence that fully describes the topology.
-
-Example (RC low-pass): `VSS, C1, VOUT, R1, VIN, R1, VOUT, C1, VSS`
-
-### Vocabulary (`CircuitVocabulary`)
-
-86 tokens total:
-- Special: `PAD`, `EOS`
-- Net tokens: `VSS`, `VIN`, `VOUT`, `VDD`, `INTERNAL_1`..`INTERNAL_10`
-- Component tokens: `R1`..`R10`, `C1`..`C10`, `L1`..`L10`, `RC1`..`RC10`, `RL1`..`RL10`, `CL1`..`CL10`, `RCL1`..`RCL10`
-
-### Architecture
-
-- GPT-style transformer encoder with causal masking
-- Latent prefix conditioning: z is projected to a prefix token prepended to the sequence
-- 4 layers, 4 attention heads, d_model=256, max_seq_len=33
-- Training: teacher forcing with cross-entropy next-token prediction
-- Inference: greedy autoregressive generation
-
-### Data augmentation
-
-Each circuit has multiple valid Eulerian walks (different starting edges, different traversal orders). During training, a random valid walk is sampled each epoch, providing natural data augmentation.
-
----
-
-## 4) Training Objective
-
-Total loss:
+Default training construction:
 
 ```python
-total_loss = ce_loss + kl_weight * kl_loss
+AdmittanceEncoder(
+    node_feature_dim=4,
+    hidden_dim=64,
+    latent_dim=5,
+    num_layers=3,
+    dropout=0.1,
+    vae=True,
+)
 ```
 
-- **CE loss**: Cross-entropy next-token prediction on the walk sequence (teacher forcing)
-- **KL loss**: KL divergence between encoder posterior and N(0,I) prior
-- **kl_weight**: 0.01 (with linear warmup over first 20 epochs)
+The encoder has 84,828 parameters with these settings.
 
-Optimizer: AdamW, lr=3e-4, with ReduceLROnPlateau scheduler (factor=0.5, patience=10).
+### AdmittanceConv
 
-Auxiliary heads (trained jointly):
-- Regression MLP: predicts dominant pole from latent (MSE loss, weight 0.1)
-- Classification MLP: predicts filter type from latent (CE loss, weight 0.1)
+Each `AdmittanceConv` layer:
+
+1. Projects node features into the layer hidden width.
+2. Reads normalized edge coefficients `g_raw`, `c_raw`, and `l_raw`.
+3. Applies learned coefficient scaling:
+
+   ```text
+   g_eff = alpha_G * g_raw + beta_G * log1p(g_raw)
+   c_eff = alpha_C * c_raw + beta_C * log1p(c_raw)
+   l_eff = alpha_L * l_raw + beta_L * log1p(l_raw)
+   ```
+
+4. Applies separate neighbor transforms:
+
+   ```text
+   phi_G(x_j), phi_C(x_j), phi_L(x_j)
+   ```
+
+5. Sums the channel messages:
+
+   ```text
+   msg = g_eff * phi_G(x_j)
+       + c_eff * phi_C(x_j)
+       + l_eff * phi_L(x_j)
+   ```
+
+6. Aggregates messages with sum aggregation.
+7. Applies bias, dropout, layer norm, ReLU, and residual projection in the
+   surrounding `AdmittanceEncoder` stack.
+
+The `alpha` parameters initialize to 1 and `beta` parameters initialize to 0.
+At initialization, coefficient scaling is identity. This is deliberate: the
+model starts from the linear admittance-additivity prior and learns deviations
+only if training supports them.
+
+Each `phi_*` transform is:
+
+```text
+Linear(hidden_dim, hidden_dim)
+ReLU
+Linear(hidden_dim, hidden_dim, bias=False)
+```
+
+The final `bias=False` keeps a zero coefficient from contributing through that
+channel.
+
+### Structured 5D Latent
+
+After the 3 GNN layers, the encoder extracts terminal embeddings:
+
+```text
+h_VIN, h_VOUT, h_GND
+```
+
+The 5D posterior mean is:
+
+```text
+mu = [z_topo(2) | z_VIN(1) | z_VOUT(1) | z_GND(1)]
+```
+
+where:
+
+- `z_topo`: linear readout from `concat(h_VIN, h_VOUT, h_GND)`
+- `z_VIN`: linear readout from `h_VIN`
+- `z_VOUT`: linear readout from `h_VOUT`
+- `z_GND`: linear readout from `h_GND`
+
+The encoder also predicts matching `logvar` values. In training mode:
+
+```text
+z = mu + eps * exp(0.5 * logvar)
+```
+
+In eval mode, `z = mu`.
+
+The initial log-variance bias is `-2.0`, so the initial posterior standard
+deviation is approximately 0.37.
 
 ---
 
-## 5) Current Model Scale
+## SequenceDecoder
 
-- Encoder parameters: **237,907**
-- Decoder parameters: **3,280,726**
+The decoder is a GPT-style causal transformer conditioned only on the latent
+vector.
+
+Default V2 training construction:
+
+```python
+SequenceDecoder(
+    vocab_size=vocab.vocab_size,
+    latent_dim=5,
+    d_model=128,
+    n_heads=4,
+    n_layers=2,
+    max_seq_len=33,
+    dropout=0.15,
+    pad_id=vocab.pad_id,
+)
+```
+
+The decoder has 440,662 parameters with these settings.
+
+### Latent Prefix Conditioning
+
+The latent vector is projected into a transformer prefix token:
+
+```text
+position 0: latent_proj(z)
+position 1..L: shifted walk token embeddings
+```
+
+During teacher forcing, the input is:
+
+```text
+[latent_prefix, seq[0], seq[1], ..., seq[L-2]]
+```
+
+The target is:
+
+```text
+[seq[0], seq[1], ..., seq[L-1]]
+```
+
+The transformer uses a causal mask, and loss ignores padded positions.
+
+### Generation
+
+During generation, the decoder starts with only the latent prefix and samples
+tokens autoregressively until `EOS` or `max_length`.
+
+`generate_inverse_design.py` uses stochastic sampling:
+
+```python
+decoder.generate(
+    latents,
+    max_length=32,
+    temperature=temperature,
+    greedy=False,
+    eos_id=vocab.eos_id,
+)
+```
+
+The default CLI temperature is `0.1`, which is close to greedy but still samples.
 
 ---
 
-## 6) Current Training/Checkpoint Status
+## Attribute Heads
 
-From `checkpoints/production/best.pt`:
+Attribute heads predict target circuit properties from `mu`, not sampled `z`.
+This keeps attribute predictions deterministic and avoids training the heads on
+VAE sampling noise.
 
-- Best epoch: **21**
-- Validation loss: **0.0229**
-- Token accuracy: **98.6%**
+| Head | Architecture | Output | Parameters |
+|---|---|---|---|
+| `FreqHead` | `Linear(5,64) -> ReLU -> Dropout -> Linear(64,1)` | `log10(fc)` | 449 |
+| `GainHead` | `Linear(5,64) -> ReLU -> Dropout -> Linear(64,64) -> ReLU -> Dropout -> Linear(64,1)` | `|H(1kHz)|` | 4,609 |
+| `TypeHead` | `Linear(5,10)` | filter-type logits | 60 |
 
-From current reported results (`GENERATION_RESULTS.md`):
+Total attribute-head parameters: 5,118.
 
-- Topology match: 100% (384/384 validation circuits)
-- Valid walk rate: 100%
-- Reconstruction validity: 1920/1920 (100%)
+These heads are architecture-level because generation optimizes `mu` through
+them. Their loss weights are training choices.
 
 ---
 
-## 7) Generation Modes
+## Training
 
-1. **Random sampling:** `z ~ N(0, I)` — 99.8% valid rate
-2. **Reconstruction:** encode circuit → decode `mu` → Eulerian walk
-3. **Centroid generation:** average latent per filter type → decode
-4. **Latent interpolation:** linear blend between two latent codes
-5. **Pole/zero-driven generation** (decoder-only):
-   - User specifies dominant pole/zero (real + imag parts)
-   - `z[4:8]` is set via signed-log normalization of those values
-   - `z[0:4]` is sampled from N(0, I) (random topology)
-   - Decoder generates Eulerian walk — no encoder or dataset needed
-   - 100% valid rate across test cases
+The maintained V2 training entry point is:
 
 ```bash
-# Example: RC low-pass with pole at -6283 rad/s (~1kHz)
-python scripts/generation/generate_from_specs.py --pole-real -6283 --pole-imag 0 --num-samples 5
-
-# Resonant circuit with conjugate pole pair
-python scripts/generation/generate_from_specs.py --pole-real -3142 --pole-imag 49348 --num-samples 5
+.venv/bin/python scripts/training/train_inverse_design.py
 ```
+
+The script trains encoder, decoder, and attribute heads jointly.
+
+### Training Hyperparameters
+
+Current script values:
+
+| Parameter | Value |
+|---|---|
+| epochs | 80 |
+| batch size | 64 |
+| optimizer | AdamW |
+| learning rate | 3e-4 |
+| scheduler | ReduceLROnPlateau |
+| scheduler factor | 0.5 |
+| scheduler patience | 8 |
+| max walk tokens | 32 |
+| augmentation walks | 32 |
+| encoder dropout | 0.1 |
+| decoder dropout | 0.15 |
+
+The runtime V2 builders in `ml/utils/runtime.py` use `dropout=0.0` defaults.
+That is a construction default for loading/evaluation convenience, not a change
+to the architecture contract. The trained checkpoint stores weights, and modules
+are put in eval mode when loaded.
+
+### Loss
+
+For each batch:
+
+```text
+loss = CE_walk
+     + beta_topo * KL(mu[:, :2], logvar[:, :2])
+     + beta_term * KL(mu[:, 2:], logvar[:, 2:])
+     + alpha_freq * MSE(freq_head(mu), log10_fc)
+     + alpha_gain * MSE(gain_head(mu), |H(1kHz)|)
+     + alpha_type * CE(type_head(mu), type_id)
+```
+
+Current script values:
+
+| Weight | Value |
+|---|---|
+| `beta_topo` | 0.1 |
+| `beta_term` | 0.02 |
+| `beta_warmup` | 20 epochs |
+| `alpha_freq` | 0.5 |
+| `alpha_gain` | 0.5 |
+| `alpha_type` | 0.5 |
+
+The KL terms are warmed up with:
+
+```text
+ramp = min(1.0, epoch / beta_warmup)
+cur_beta_topo = beta_topo * ramp
+cur_beta_term = beta_term * ramp
+```
+
+The topology and terminal KL terms are weighted separately because the latent is
+structured. This is an architecture-informed training choice: it lets the 2D
+topology branch and 3D terminal branch be regularized with different strength.
+
+### Checkpoint
+
+The maintained checkpoint path is:
+
+```text
+checkpoints/production/best_v2.pt
+```
+
+Current checkpoint metadata:
+
+| Field | Value |
+|---|---|
+| epoch | 64 |
+| validation CE | 0.013788633512376691 |
+| latent dim | 5 |
+| vocab config | `max_internal=10`, `max_components=10` |
 
 ---
 
-## Core Files
+## Spec-Driven Generation
 
-### Models
+The main user-facing V2 generation entry point is:
 
-- `ml/models/encoder.py` — `HierarchicalEncoder` (impedance-aware GNN + hierarchical latent)
-- `ml/models/gnn_layers.py` — `ImpedanceConv`, `ImpedanceGNN`, pooling/deepsets
-- `ml/models/decoder.py` — `SequenceDecoder` (GPT-style autoregressive walk generator)
-- `ml/models/vocabulary.py` — `CircuitVocabulary` (86-token vocabulary for Eulerian walks)
-- `ml/models/constants.py` — `PZ_LOG_SCALE`, `FILTER_TYPES`, `CIRCUIT_TEMPLATES`
+```bash
+.venv/bin/python scripts/generation/generate_inverse_design.py \
+  --type band_pass --fc 10000 --gain 0.5
+```
 
-### Data
+At least one target must be specified:
 
-- `ml/data/dataset.py` — `CircuitDataset` (graph-based, used by encoder)
-- `ml/data/sequence_dataset.py` — `SequenceDataset` (walk-based, used by decoder training)
-- `ml/data/bipartite_graph.py` — `BipartiteCircuitGraph`, `from_pickle_circuit`
-- `ml/data/traversal.py` — Hierholzer's algorithm, Euler walk enumeration
+- `--type`
+- `--fc`
+- `--gain`
 
-### Utilities
+### Step 1: Build Reference Latents
 
-- `ml/utils/runtime.py` — model construction and checkpoint loading
-- `ml/utils/circuit_ops.py` — `walk_to_string`, `is_valid_walk`, `generate_walk`
-- `ml/utils/evaluate.py` — `sequence_to_topology_key`, `evaluate_reconstruction`
+The script loads the V2 checkpoint, builds the 2,400-circuit V2 dataset, and
+encodes every circuit:
 
-### Archived (old adjacency decoder)
+```text
+training circuit -> AdmittanceEncoder -> mu
+```
 
-- `ml/models/archive/decoder_adjacency.py` — `SimplifiedCircuitDecoder`
-- `ml/models/archive/node_decoder.py` — `AutoregressiveNodeDecoder`
-- `ml/models/archive/decoder_components.py` — `LatentGuidedEdgeDecoder`
-- `ml/models/archive/circuit_loss.py` — adjacency-based loss function
+It stores:
 
-### Training and generation
+- `mu`
+- `log10(fc)`
+- `|H(1kHz)|`
+- filter type
 
-- `scripts/training/train.py`
-- `scripts/generation/generate_from_specs.py` — pole/zero-driven generation (decoder-only)
-- `scripts/generation/regenerate_all_results.py` — all result sections
+### Step 2: KNN Initialization
+
+Given target attributes, the script computes an attribute-space distance to all
+reference circuits:
+
+- normalized squared distance in `log10(fc)` when `--fc` is present
+- normalized squared distance in gain when `--gain` is present
+- large type-mismatch penalty when `--type` is present
+
+It picks the top `k` neighbors and computes an inverse-distance weighted average:
+
+```text
+mu_init = sum(w_i * mu_i)
+```
+
+This keeps generation initialized near the training manifold.
+
+### Step 3: Optimize mu
+
+Starting from `mu_init`, the script runs Adam on `mu` through frozen attribute
+heads:
+
+```text
+loss = w_freq * (freq_head(mu) - target_log_fc)^2
+     + w_gain * (gain_head(mu) - target_gain)^2
+     + w_type * CE(type_head(mu), target_type)
+     + w_prior * ||mu||^2
+```
+
+Default values:
+
+| Parameter | Value |
+|---|---|
+| optimization steps | 200 |
+| optimization lr | 0.05 |
+| KNN k | 10 |
+| prior weight | 0.01 |
+
+The prior term is a generation-time design choice to discourage optimized
+latents from moving too far away from the VAE prior.
+
+### Step 4: Decode And Validate
+
+The optimized `mu` is expanded to the requested sample count and decoded into
+walks. Generated walks are checked with graph-signature utilities for:
+
+- well-formedness
+- electrical validity
+- unique topology signatures
+
+The CLI reports predicted attributes at the optimized `mu`, generated validity,
+and a netlist-style summary of the top generated topologies.
+
+---
+
+## Analysis And Exploratory Tools
+
+`scripts/analysis/analyze_latent.py` is the maintained latent-analysis script
+for the V2 path. It loads `checkpoints/production/best_v2.pt` and analyzes:
+
+- per-type centroids
+- latent dimension separation
+- attribute-head behavior
+- interpolation behavior
+- centroid generation
+- perturbation behavior
+- topology signature census
+
+`scripts/generation/inverse_design.py` is best understood as an exploratory
+sampling harness rather than the main product CLI. It samples from supplied
+latent targets, centroid blends, and perturbations to probe how the decoder
+responds to latent-space behavior.
+
+---
+
+## Current Scope And Limitations
+
+V2 is a topology generator, not a complete circuit synthesizer.
+
+Important limitations:
+
+- It generates topology only, not numerical component values.
+- It is scoped to passive RLC filters in the 10 known V2 filter types.
+- The decoder is conservative at low temperature and strongly favors known
+  training topologies.
+- Novel topologies require higher-temperature sampling or latent perturbation,
+  which lowers validity.
+- The gain target is `|H(1kHz)|`, not a full transfer-function specification.
+
+---
+
+## Implementation Notes
+
+- The architecture identity is the 5D admittance VAE encoder plus latent-prefix
+  sequence decoder.
+- Dropout rates, loss weights, KNN `k`, optimization steps, and sampling
+  temperature are tunable choices. They should be documented with current script
+  defaults, but they are not separate architectures.
+- If future code changes alter the latent split, edge feature semantics,
+  attribute-head targets, or decoder token contract, this document should be
+  updated as an architecture change.

@@ -9,6 +9,10 @@ from torch_geometric.data import Batch
 from ml.models.decoder import SequenceDecoder
 from ml.models.vocabulary import CircuitVocabulary
 from ml.models.encoder import HierarchicalEncoder
+from ml.models.admittance_encoder import AdmittanceEncoder
+from ml.models.attribute_heads import FreqHead, GainHead, TypeHead
+from ml.models.constants import FILTER_TYPES_V2, TYPE_TO_IDX
+from yubo.auxiliary_heads import ClassificationMLP, RegressionMLP
 
 DEFAULT_ENCODER_CONFIG: Dict[str, Any] = {
     'node_feature_dim': 4,
@@ -159,3 +163,85 @@ def make_collate_fn(
         include_indices=include_indices,
         include_filter_type_label=include_filter_type_label,
     )
+
+
+# ── v2 Admittance Encoder builders ──────────────────────────────
+
+DEFAULT_V2_ENCODER_CONFIG: Dict[str, Any] = {
+    'node_feature_dim': 4,
+    'hidden_dim': 64,
+    'latent_dim': 5,
+    'num_layers': 3,
+    'dropout': 0.0,
+    'vae': True,
+}
+
+DEFAULT_V2_DECODER_CONFIG: Dict[str, Any] = {
+    'vocab_size': 86,
+    'latent_dim': 5,
+    'd_model': 128,
+    'n_heads': 4,
+    'n_layers': 2,
+    'max_seq_len': 33,
+    'dropout': 0.0,
+    'pad_id': 0,
+}
+
+
+def build_v2_encoder(device: str = 'cpu', **overrides: Any) -> AdmittanceEncoder:
+    """Build a v2 AdmittanceEncoder with repository defaults."""
+    config = dict(DEFAULT_V2_ENCODER_CONFIG)
+    config.update(overrides)
+    return AdmittanceEncoder(**config).to(device)
+
+
+def build_v2_decoder(device: str = 'cpu', **overrides: Any) -> SequenceDecoder:
+    """Build a v2 SequenceDecoder with repository defaults."""
+    config = dict(DEFAULT_V2_DECODER_CONFIG)
+    config.update(overrides)
+    return SequenceDecoder(**config).to(device)
+
+
+def build_attribute_heads(
+    latent_dim: int = 5,
+    n_types: int = 10,
+    device: str = 'cpu',
+) -> Dict[str, Any]:
+    """Build attribute prediction heads for the v2 model."""
+    return {
+        'freq': FreqHead(latent_dim).to(device),
+        'gain': GainHead(latent_dim).to(device),
+        'type': TypeHead(latent_dim, n_types).to(device),
+    }
+
+
+def load_v2_model(
+    checkpoint_path: str,
+    device: str = 'cpu',
+) -> Tuple[AdmittanceEncoder, SequenceDecoder, CircuitVocabulary,
+           Dict[str, Any], Dict[str, Any]]:
+    """Load v2 model from checkpoint.
+
+    Returns (encoder, decoder, vocab, heads_dict, checkpoint).
+    heads_dict has keys 'freq', 'gain', 'type'.
+    """
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    vocab = build_vocab()
+    latent_dim = ckpt.get('latent_dim', 5)
+
+    encoder = build_v2_encoder(device=device, latent_dim=latent_dim)
+    decoder = build_v2_decoder(device=device, latent_dim=latent_dim,
+                               vocab_size=vocab.vocab_size, pad_id=vocab.pad_id)
+    encoder.load_state_dict(ckpt['encoder_state_dict'])
+    decoder.load_state_dict(ckpt['decoder_state_dict'])
+    encoder.eval()
+    decoder.eval()
+
+    heads = build_attribute_heads(latent_dim=latent_dim, device=device)
+    heads['freq'].load_state_dict(ckpt['freq_head_state_dict'])
+    heads['gain'].load_state_dict(ckpt['gain_head_state_dict'])
+    heads['type'].load_state_dict(ckpt['type_head_state_dict'])
+    for h in heads.values():
+        h.eval()
+
+    return encoder, decoder, vocab, heads, ckpt

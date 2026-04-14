@@ -62,3 +62,23 @@ CIRCUIT_TEMPLATES = {
         'node_types': [0, 1, 2]
     }
 }
+
+# ── v2 admittance encoder constants ──────────────────────────────
+
+# Reference values for admittance-polynomial edge feature normalisation.
+# R_ref = 1 kΩ, C_ref ≈ 32 nF, L_ref = 1 mH.
+# Edge features are [G/G_REF, C/C_REF, L_inv/L_INV_REF] so that typical
+# training values cluster around 1.0.
+G_REF = 1e-3          # 1 / R_ref  (Siemens)
+C_REF = 10 ** -7.5    # C_ref      (Farads, ≈ 31.6 nF)
+L_INV_REF = 1e3       # 1 / L_ref  (1/Henry)
+
+# 10 filter types used by the v2 model (adds rl_lowpass, rl_highpass
+# to the original 8).  Sorted alphabetically for deterministic indexing.
+FILTER_TYPES_V2 = sorted([
+    'band_pass', 'band_stop', 'cl_highpass', 'high_pass',
+    'lc_lowpass', 'low_pass', 'rl_highpass', 'rl_lowpass',
+    'rlc_parallel', 'rlc_series',
+])
+
+TYPE_TO_IDX = {t: i for i, t in enumerate(FILTER_TYPES_V2)}

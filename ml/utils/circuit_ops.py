@@ -1,6 +1,6 @@
 """Circuit formatting and validation helpers for generated walks."""
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Dict, List, Optional
 
 import torch
@@ -41,16 +41,59 @@ def walk_to_string(walk_tokens: List[str], vocab: CircuitVocabulary) -> str:
 
 
 def is_valid_walk(walk_tokens: List[str], vocab: Optional[CircuitVocabulary] = None) -> bool:
-    """Check that a walk starts and ends at VSS and contains at least one component."""
+    """Check physical validity of a generated circuit walk.
+
+    Requirements:
+    1. Starts and ends at VSS
+    2. Contains at least one component
+    3. Contains VIN and VOUT nodes
+    4. VIN is connected to both VOUT and VSS through components
+    """
     if not walk_tokens:
         return False
     if walk_tokens[0] != 'VSS' or walk_tokens[-1] != 'VSS':
         return False
-    if vocab is not None:
-        has_comp = any(vocab.token_type(t) == 'component' for t in walk_tokens)
-    else:
-        has_comp = len(walk_tokens) >= 3
-    return has_comp
+
+    if vocab is None:
+        return len(walk_tokens) >= 3
+
+    has_comp = any(vocab.token_type(t) == 'component' for t in walk_tokens)
+    if not has_comp:
+        return False
+
+    nets = set(t for t in walk_tokens if vocab.token_type(t) == 'net')
+    if 'VIN' not in nets or 'VOUT' not in nets:
+        return False
+
+    # Build net adjacency (two nets are adjacent if they share a component)
+    comp_nets: Dict[str, set] = defaultdict(set)
+    for i, tok in enumerate(walk_tokens):
+        if vocab.token_type(tok) == 'component':
+            if i > 0 and vocab.token_type(walk_tokens[i - 1]) == 'net':
+                comp_nets[tok].add(walk_tokens[i - 1])
+            if i < len(walk_tokens) - 1 and vocab.token_type(walk_tokens[i + 1]) == 'net':
+                comp_nets[tok].add(walk_tokens[i + 1])
+
+    net_adj: Dict[str, set] = defaultdict(set)
+    for comp, cnets in comp_nets.items():
+        cnets_list = list(cnets)
+        for a in cnets_list:
+            for b in cnets_list:
+                if a != b:
+                    net_adj[a].add(b)
+
+    # BFS from VIN — must reach both VOUT and VSS
+    visited = set()
+    queue = deque(['VIN'])
+    visited.add('VIN')
+    while queue:
+        n = queue.popleft()
+        for neighbor in net_adj[n]:
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append(neighbor)
+
+    return 'VOUT' in visited and 'VSS' in visited
 
 
 def generate_walk(
