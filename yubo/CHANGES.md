@@ -98,3 +98,50 @@ KL weight: 0 → 0.01 over first 20 epochs. Train uses sampled z; val uses mu.
 | Val Accuracy | 99.04% |
 | pole_real R² | 0.843 |
 | pole_imag R² | 0.642 |
+
+---
+
+## Change 3 — z_pz branch: replaced attention pooling with mean/max + terminal embeddings (Eason's suggestion)
+
+**Date:** April 2026
+
+### What changed (`ml/models/encoder.py`)
+
+- Removed `vin_pool_attn` MLP entirely
+- Replaced z_pz pooling with mean/max pooling over all nodes + `concat(h_VIN, h_VOUT, h_GND)`, same style as z_topo and z_struct
+- `pole_head` kept unchanged (`Linear 4→32→2`, predicts σ_p and ω_p from μ_pz)
+- Encoder param count: 258,741 → 164,149
+
+### Loss design
+
+- `parameter_loss` (MSE from `pole_head`) → applied to z_pz [4D] only
+- `reconstruction_loss` (CE from decoder) → applied to full 8D Z
+
+### 2-epoch smoke test results
+
+| Epoch | Split | CE loss | KL loss | Pole loss | Total loss |
+|-------|-------|---------|---------|-----------|------------|
+| 1 | Train | 1.0146 | 0.7844 | 0.1780 | 1.1930 |
+| 1 | Val | 0.2998 | 1.3105 | 0.0539 | 0.3543 |
+| 2 | Train | 0.2238 | 1.8132 | 0.0617 | 0.2873 |
+| 2 | Val | 0.1015 | 2.5171 | 0.0366 | 0.1406 |
+
+### Full training results
+
+Best checkpoint: epoch 38 (val total loss: 0.0259)
+
+| Metric | Value |
+|--------|-------|
+| Val CE loss | 0.0147 |
+| Val accuracy | 98.1% |
+| Val pole loss (MSE) | 0.0020 |
+| pole_real R² | 0.9875 |
+| pole_imag R² | 0.9867 |
+
+Per filter-type MAE (signed-log scale, full dataset probe):
+
+| Filter Type | MAE pole_real | MAE pole_imag |
+|-------------|--------------|--------------|
+| band_stop | 0.0303 | 0.0571 |
+| rlc_series | 0.0332 | 0.0503 |
+| band_pass | 0.0327 | 0.0370 |
