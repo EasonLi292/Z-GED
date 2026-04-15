@@ -163,12 +163,10 @@ Each `AdmittanceConv` layer:
 
 1. Projects node features into the layer hidden width.
 2. Reads normalized edge coefficients `g_raw`, `c_raw`, and `l_raw`.
-3. Applies learned coefficient scaling:
+3. Applies a fixed Box-Cox transform with gamma = 0.5:
 
    ```text
-   g_eff = alpha_G * g_raw + beta_G * log1p(g_raw)
-   c_eff = alpha_C * c_raw + beta_C * log1p(c_raw)
-   l_eff = alpha_L * l_raw + beta_L * log1p(l_raw)
+   f(x) = ((1 + x)^0.5 - 1) / 0.5 = 2 * (sqrt(1 + x) - 1)
    ```
 
 4. Applies separate neighbor transforms:
@@ -180,38 +178,71 @@ Each `AdmittanceConv` layer:
 5. Sums the channel messages:
 
    ```text
-   msg = g_eff * phi_G(x_j)
-       + c_eff * phi_C(x_j)
-       + l_eff * phi_L(x_j)
+   msg = f(g_raw) * phi_G(x_j)
+       + f(c_raw) * phi_C(x_j)
+       + f(l_raw) * phi_L(x_j)
    ```
 
 6. Aggregates messages with sum aggregation.
 7. Applies bias, dropout, layer norm, ReLU, and residual projection in the
    surrounding `AdmittanceEncoder` stack.
 
-The `alpha` parameters initialize to 1 and `beta` parameters initialize to 0.
-At initialization, coefficient scaling is identity. This is deliberate: the
-model starts from the linear admittance-additivity prior and learns deviations
-only if training supports them.
+#### Why Box-Cox, and why gamma = 0.5
 
-In the current trained checkpoint, `checkpoints/production/best_v2.pt`, these
-scalars remain close to the identity-linear prior:
+The Box-Cox family `f(x; gamma) = ((1+x)^gamma - 1) / gamma` smoothly
+interpolates between linear scaling (gamma = 1, identity) and logarithmic
+scaling (gamma -> 0, log1p). Key properties:
 
-| Layer | Channel | `alpha` | `beta` | `beta / alpha` |
-|---:|---|---:|---:|---:|
-| 0 | G | +0.964260 | +0.035122 | +0.036424 |
-| 0 | C | +1.162337 | +0.223847 | +0.192583 |
-| 0 | L | +0.851117 | -0.068078 | -0.079987 |
-| 1 | G | +1.058064 | +0.105133 | +0.099364 |
-| 1 | C | +0.853974 | -0.002924 | -0.003424 |
-| 1 | L | +1.132479 | +0.202166 | +0.178516 |
-| 2 | G | +1.032769 | +0.063506 | +0.061491 |
-| 2 | C | +1.005208 | +0.107835 | +0.107276 |
-| 2 | L | +1.118448 | +0.144108 | +0.128846 |
+- `f(0) = 0`: absent components contribute nothing.
+- `f'(0) = 1`: small admittances are treated linearly regardless of gamma.
+- The gamma parameter controls compression of large values.
 
-This means V2 does use the logarithmic correction, but modestly. The largest
-relative log terms are layer-0 capacitance and layer-1 inductance; layer-1
-capacitance essentially keeps the log term off.
+Representative outputs at gamma = 0.5:
+
+| x (normalised admittance) | f(x) |
+|--:|--:|
+| 0 | 0 |
+| 1 | 0.83 |
+| 10 | 4.63 |
+| 100 | 18.1 |
+
+Gamma = 0.5 was selected by grid search over fixed (non-learnable) gamma
+values. Each gamma was trained for 40 epochs with the same hyperparameters:
+
+| gamma | val CE | tok acc | type acc | compression regime |
+|------:|-------:|--------:|---------:|---|
+| -1.00 | 0.0139 | 98.4% | 100% | heavy saturation, f(100) = 0.99 |
+| -0.50 | 0.0129 | 98.5% | 100% | strong saturation, f(100) = 1.80 |
+| -0.25 | 0.0130 | 98.4% | 100% | moderate saturation |
+| 0.00 | 0.0130 | 98.4% | 100% | log1p |
+| +0.10 | 0.0140 | 98.4% | 100% | near-log |
+| +0.25 | 0.0135 | 98.4% | 100% | mild compression |
+| **+0.50** | **0.0123** | **98.9%** | **100%** | **sqrt-like, f(100) = 18.1** |
+| +0.75 | 0.0125 | 98.9% | 100% | weak compression, f(100) = 41.1 |
+| +1.00 | 0.0151 | 98.8% | 99% | linear (no compression), f(100) = 100 |
+
+The optimal is at gamma = 0.5: sqrt-like compression that is stronger than
+linear but weaker than log. Pure linear (gamma = 1) is worst; it lets outlier
+admittance values dominate GNN messages. Pure log (gamma = 0) and saturating
+(gamma < 0) compress too aggressively and destroy magnitude information that
+the attribute heads need.
+
+#### Why gamma is not learnable
+
+Earlier versions used learnable per-channel scaling (`alpha * x + beta *
+log1p(x)`, two parameters per channel per layer). This suffers from init bias:
+the parameters stay near their initialization regardless of the true optimum.
+Experiments confirmed this by training three variants:
+
+| Init | Final avg |alpha| | Final avg |beta| | Best val CE |
+|------|-----------|-----------|-------------|
+| alpha=1, beta=0 (linear) | 1.02 | 0.11 | 0.0120 |
+| alpha=0, beta=1 (log) | 0.04 | 1.02 | 0.0109 |
+| alpha=0.5, beta=0.5 | 0.49 | 0.57 | 0.0120 |
+
+Each variant barely moves from its init. A fixed gamma chosen by grid search
+avoids this problem entirely, has zero learnable scaling parameters, and
+achieves the best overall val CE.
 
 Each `phi_*` transform is:
 

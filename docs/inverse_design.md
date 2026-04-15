@@ -37,18 +37,19 @@ All three quantities are **parallel-additive**: two resistors in parallel have `
 
 #### AdmittanceConv (message passing layer)
 
-Each `AdmittanceConv` layer processes the three component channels separately with learned coefficient scaling:
+Each `AdmittanceConv` layer processes the three component channels with a fixed Box-Cox transform:
 
 ```
-scaled_value = alpha * x + beta * log1p(x)
+f(x) = 2 * (sqrt(1 + x) - 1)    [Box-Cox with gamma = 0.5]
 ```
 
-- `alpha` initialized to 1.0, `beta` to 0.0 (identity at init)
-- Separate `(alpha, beta)` pairs for G, C, and L channels
-- Each channel has a 2-layer MLP phi function: `Linear(h_in + 1, h_out) -> ReLU -> Linear(h_out, h_out)`
-- Messages from all three channels are summed (respecting parallel additivity)
+- `f(0) = 0`: absent components contribute nothing
+- `f'(0) = 1`: small admittances are treated linearly
+- `f(1) = 0.83`, `f(10) = 4.63`, `f(100) = 18.1`: moderate compression of outliers
+- Each channel has a 2-layer MLP phi function: `Linear(h, h) -> ReLU -> Linear(h, h, bias=False)`
+- Messages from all three channels are summed
 
-**Physics guarantee at initialization:** Since `beta=0` at init, `scaled_value = x`, and the sum-aggregation in message passing exactly mirrors `Y_total = Y_1 + Y_2 + ...`. Two parallel resistors with `G = 0.5 mS` each produce the same message as one resistor with `G = 1.0 mS`.
+Gamma = 0.5 was selected by grid search over the Box-Cox family (see `ARCHITECTURE.md`). It is not learnable — a fixed transform avoids the init-bias problem where learnable scaling parameters stay near their initialization regardless of the true optimum.
 
 #### Structured 5D latent space
 

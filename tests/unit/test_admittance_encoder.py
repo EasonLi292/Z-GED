@@ -2,9 +2,9 @@
 Tests for the admittance-polynomial encoder (v2).
 
 Verifies physical claims of AdmittanceEncoder:
-  1. Scaling init     - alpha=1, beta=0 at construction
-  2. Parallel algebra - two 2 kOhm resistors in parallel == one 1 kOhm
-                        (exact at init when beta=0)
+  1. Box-Cox scaling  - f(0)=0 (absent components contribute nothing)
+  2. Parallel algebra - two 2 kOhm resistors in parallel ~ one 1 kOhm
+                        (approximate under Box-Cox compression)
   3. Series algebra   - two series caps == one equivalent cap
                         (informational; not expected to match untrained)
   4. R/L discrimination - R and L with equal |Y| should produce
@@ -15,7 +15,7 @@ import pytest
 import torch
 from torch_geometric.data import Data, Batch
 
-from ml.models.admittance_encoder import AdmittanceEncoder
+from ml.models.admittance_encoder import AdmittanceEncoder, _boxcox
 from ml.models.constants import G_REF, C_REF, L_INV_REF
 
 
@@ -61,24 +61,30 @@ def encoder():
     return enc
 
 
-class TestScalingInit:
-    def test_alpha_one_beta_zero(self, encoder):
-        """Verify alpha=1, beta=0 init preserves identity scaling."""
-        for i, conv in enumerate(encoder.convs):
-            for name, alpha, beta in [
-                ('G', conv.alpha_G, conv.beta_G),
-                ('C', conv.alpha_C, conv.beta_C),
-                ('L', conv.alpha_L, conv.beta_L),
-            ]:
-                assert abs(alpha.item() - 1.0) < 1e-6, \
-                    f"Layer {i} alpha_{name} = {alpha.item()}, expected 1.0"
-                assert abs(beta.item()) < 1e-6, \
-                    f"Layer {i} beta_{name} = {beta.item()}, expected 0.0"
+class TestBoxCoxScaling:
+    def test_f_zero_is_zero(self):
+        """f(0) = 0: absent components contribute nothing."""
+        assert _boxcox(torch.tensor(0.0)).item() == pytest.approx(0.0, abs=1e-7)
+
+    def test_f_prime_zero_is_one(self):
+        """f'(0) = 1: small admittances are treated linearly."""
+        eps = 1e-5
+        deriv = (_boxcox(torch.tensor(eps)) / eps).item()
+        assert deriv == pytest.approx(1.0, abs=1e-2)
+
+    def test_compression(self):
+        """Box-Cox compresses large values: f(100) << 100."""
+        f100 = _boxcox(torch.tensor(100.0)).item()
+        assert 15 < f100 < 25  # ~18.1 for gamma=0.5
 
 
 class TestParallelAlgebra:
-    def test_two_parallel_resistors_equal_one(self, encoder):
-        """Two 2 kOhm resistors in parallel VIN-VOUT == one 1 kOhm."""
+    def test_two_parallel_resistors_similar_to_one(self, encoder):
+        """Two 2 kOhm resistors in parallel VIN-VOUT ~ one 1 kOhm.
+
+        Under Box-Cox, f(a)+f(b) != f(a+b) in general, so parallel
+        equivalence is approximate, not exact.
+        """
         two_parallel = _make_graph(
             node_types=[GND, VIN, VOUT],
             edges=[
@@ -102,8 +108,10 @@ class TestParallelAlgebra:
         mu = _get_mu(encoder, [two_parallel, one_equiv])
         diff = (mu[0] - mu[1]).norm().item()
         rel = diff / (mu[0].norm().item() + 1e-9)
-        assert rel < 1e-3, \
-            f"Parallel R||R relative error {rel:.3e} exceeds threshold 1e-3"
+        # Box-Cox compression means f(a)+f(b) != f(a+b), so this is
+        # approximate. Threshold is looser than the old linear-scaling test.
+        assert rel < 0.5, \
+            f"Parallel R||R relative error {rel:.3e} exceeds threshold 0.5"
 
 
 class TestSeriesAlgebra:

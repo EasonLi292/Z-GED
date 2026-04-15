@@ -1,21 +1,24 @@
 """
 Physics-informed admittance encoder (v2).
 
-v1 → v2 changes:
-  1. φ_G/C/L upgraded from single Linear to 2-layer MLP (more expressive,
-     additivity preserved because coeff·φ(x_j) structure is unchanged).
-  2. Learned coefficient scaling: α·coeff + β·log1p(coeff) per component
-     type, per layer. At init α=1, β=0 → identical to v1.
-  3. Optional VAE bottleneck with structured 5D latent:
-       [z_topo(2D) | z_VIN(1D) | z_VOUT(1D) | z_GND(1D)]
-     Per-branch KL allows separate β_topo and β_term weighting.
-  4. Backward-compatible: `vae=False` reproduces v1 deterministic mode.
-
 Each edge is characterised by its admittance-polynomial coefficients
     [G, C, L_inv]  =  [1/R, C_farads, 1/L]
 so that Y(s) = G + sC + L_inv/s. These coefficients are ADDITIVE under
 parallel combination — sum-aggregation in a GNN at a shared node
 computes the exact parallel admittance of incident branches.
+
+Coefficient scaling uses a fixed Box-Cox transform with gamma=0.5:
+    f(x) = ((1+x)^0.5 - 1) / 0.5 = 2*(sqrt(1+x) - 1)
+This provides mild compression of outlier admittance values while
+preserving magnitude differences. Gamma=0.5 was selected by grid search
+over [-1.0, 1.0] (see ARCHITECTURE.md).
+
+Key properties:
+  - f(0)=0: absent components contribute nothing.
+  - f'(0)=1: small admittances are treated linearly.
+  - f(1)=0.83, f(10)=4.63, f(100)=18.1: moderate compression.
+  - Not learnable — avoids init-bias trap where learned scaling
+    parameters stay near their initialization regardless of optimum.
 """
 
 from __future__ import annotations
@@ -46,20 +49,29 @@ def _make_phi(dim: int) -> nn.Sequential:
     )
 
 
+BOXCOX_GAMMA = 0.5
+
+
+def _boxcox(x: torch.Tensor) -> torch.Tensor:
+    """Fixed Box-Cox transform: ((1+x)^gamma - 1) / gamma with gamma=0.5.
+
+    Equivalent to 2*(sqrt(1+x) - 1). f(0)=0, f'(0)=1.
+    """
+    return (torch.sqrt(1 + x) - 1) * 2  # closed-form for gamma=0.5
+
+
 class AdmittanceConv(MessagePassing):
     """Message passing with message proportional to each edge coefficient.
 
-        msg = g_eff · φ_G(x_j) + c_eff · φ_C(x_j) + l_eff · φ_L(x_j)
+        msg = f(g) · φ_G(x_j) + f(c) · φ_C(x_j) + f(l) · φ_L(x_j)
 
-    where:
-        g_eff = α_G · G + β_G · log1p(G)    (learned blend, init: α=1, β=0)
-        φ_k   = 2-layer MLP (nonlinear in x_j, bias=False on outer layer)
+    where f is a fixed Box-Cox transform (gamma=0.5) and
+        φ_k = 2-layer MLP (nonlinear in x_j, bias=False on outer layer)
 
-    Aggregation is SUM. The scalar product coeff·φ(x_j) preserves the
-    parallel-admittance prior: for K parallel edges sharing neighbour x_j,
-        Σ_k coeff_k · φ(x_j) = (Σ coeff_k) · φ(x_j)
-    This holds for any φ, linear or not, because φ(x_j) is the same
-    vector for all edges from the same neighbour.
+    Aggregation is SUM. The scalar product f(coeff)·φ(x_j) preserves the
+    parallel-admittance prior at small values (f'(0)=1, so near-zero
+    coefficients add linearly). For larger values, f compresses outliers
+    to help the GNN generalise across the admittance range.
 
     Post-aggregation (at the target node): bias, LayerNorm, ReLU, residual.
     """
@@ -78,15 +90,6 @@ class AdmittanceConv(MessagePassing):
         self.phi_C = _make_phi(out_channels)
         self.phi_L = _make_phi(out_channels)
 
-        # Learned coefficient scaling: linear + log1p blend.
-        # Init: α=1, β=0 → exact v1 behaviour.
-        self.alpha_G = nn.Parameter(torch.ones(1))
-        self.beta_G = nn.Parameter(torch.zeros(1))
-        self.alpha_C = nn.Parameter(torch.ones(1))
-        self.beta_C = nn.Parameter(torch.zeros(1))
-        self.alpha_L = nn.Parameter(torch.ones(1))
-        self.beta_L = nn.Parameter(torch.zeros(1))
-
         self.bias = nn.Parameter(torch.zeros(out_channels))
         self.dropout = dropout
 
@@ -98,13 +101,9 @@ class AdmittanceConv(MessagePassing):
         return out
 
     def message(self, x_j, edge_attr):
-        g_raw = edge_attr[:, 0:1]
-        c_raw = edge_attr[:, 1:2]
-        l_raw = edge_attr[:, 2:3]
-
-        g = self.alpha_G * g_raw + self.beta_G * torch.log1p(g_raw)
-        c = self.alpha_C * c_raw + self.beta_C * torch.log1p(c_raw)
-        l = self.alpha_L * l_raw + self.beta_L * torch.log1p(l_raw)
+        g = _boxcox(edge_attr[:, 0:1])
+        c = _boxcox(edge_attr[:, 1:2])
+        l = _boxcox(edge_attr[:, 2:3])
 
         return g * self.phi_G(x_j) + c * self.phi_C(x_j) + l * self.phi_L(x_j)
 
