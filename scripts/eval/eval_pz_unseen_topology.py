@@ -23,7 +23,7 @@ from scipy import stats
 import pickle
 
 from ml.data.dataset import CircuitDataset
-from ml.losses.circuit_loss import CircuitLoss
+from ml.models.archive.circuit_loss import CircuitLoss
 from ml.models.constants import FILTER_TYPES
 from ml.utils.runtime import build_encoder, build_decoder, make_collate_fn
 from scripts.training.train import graph_to_dense_format

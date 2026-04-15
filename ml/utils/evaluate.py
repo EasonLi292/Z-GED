@@ -7,6 +7,7 @@ Reports:
     - Comparison with NOVEL_TOPOLOGY_GENERATED.md results
 """
 
+import os
 import pickle
 from collections import Counter
 from typing import Dict, List, Optional, Set, Tuple
