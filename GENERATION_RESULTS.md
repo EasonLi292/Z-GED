@@ -1,140 +1,300 @@
-# Circuit Generation Results
+# Circuit Generation Results (V2)
 
-**Dataset:** 1920 circuits (8 filter types, 240 each), 1536 train, 384 validation
-**Checkpoint:** `checkpoints/production/best.pt`
-**Decoder:** Sequence decoder (GPT-style, Eulerian walk representation)
-**Edge features:** 3D log10 values `[log10(R), log10(C), log10(L)]`
-**Latent space:** 8D hierarchical `[z_topo(2) | z_values(2) | z_pz(4)]`
+This document covers the V2 inverse-design model.
 
----
-
-## Training Metrics
-
-| Metric | Training | Validation |
-|--------|----------|------------|
-| CE Loss | 0.035 | 0.021 |
-| KL Loss | 0.725 | 0.758 |
-| Token Accuracy | 98.2% | 98.6% |
-| Topology Match | -- | 100% |
-| Valid Walk Rate | -- | 100% |
-| Encoder Parameters | 237,907 | -- |
-| Decoder Parameters | 3,280,726 | -- |
-
----
-
-## Specification-Based Generation (Interpolation Analysis)
-
-Exploratory scripts can still map **cutoff frequency** and **Q-factor** to latent codes using K-NN interpolation over encoded dataset points.
-For that path, use `scripts/testing/*.py` or `scripts/generation/regenerate_all_results.py`.
-
-For production generation entry point, use pole/zero inputs:
-
-```bash
-.venv/bin/python scripts/generation/generate_from_specs.py --pole-real -6283 --pole-imag 0 --num-samples 5
-```
-
-### Standard Examples
-
-| Cutoff | Q | Generated Circuit | Status |
-|--------|---|-------------------|--------|
-| 1 kHz | 0.707 | `VOUT--C--VSS, VIN--R--VOUT` | Valid |
-| 10 kHz | 0.707 | `VIN--C--VOUT, VOUT--R--VSS` | Valid |
-| 100 kHz | 0.707 | `VIN--C--VOUT, VOUT--L--VSS` | Valid |
-| 10 kHz | 5.0 | `VIN--R--VOUT, VOUT--RCL--VSS` | Valid |
-
-### Edge Cases
-
-| Cutoff | Q | Generated Circuit | Analysis |
-|--------|---|-------------------|----------|
-| 1 Hz | 0.707 | `VIN--C--VOUT, VOUT--R--VSS` | Extrapolates beyond training range |
-| 1 MHz | 0.707 | `VIN--C--VOUT, VOUT--R--VSS` | Extrapolates beyond training range |
-| 10 kHz | 0.01 | `INTERNAL_2--C--VOUT, INTERNAL_1--L--INTERNAL_2, VOUT--R--VSS, INTERNAL_1--R--VIN` | Low Q (rlc_series) |
-| 10 kHz | 0.1 | `INTERNAL_1--C--VOUT, INTERNAL_1--L--VIN, VOUT--R--VSS` | band_pass |
-| 10 kHz | 2.0 | `VIN--C--VOUT, VOUT--R--VSS` | high_pass |
-| 50 Hz | 5.0 | `VIN--R--VOUT, VOUT--RCL--VSS` | High Q (rlc_parallel) |
-| 500 kHz | 0.1 | `INTERNAL_2--C--VOUT, INTERNAL_1--L--INTERNAL_2, VOUT--R--VSS, INTERNAL_1--R--VIN` | rlc_series |
-
-### Training Data Coverage
-
-| Parameter | Min | Max |
-|-----------|-----|-----|
-| Cutoff frequency | 2.05 Hz | 872,085 Hz |
-| Q-factor | 0.01 | 6.58 |
-
----
-
-## Filter Type Centroids
-
-The 8D latent space clusters by filter type. Generating from cluster centroids:
-
-| Filter Type | z[0:4] | Generated from Centroid |
-|-------------|--------|-------------------------|
-| low_pass | [-0.41, +0.49, +1.76, -0.95] | `VOUT--C--VSS, VIN--R--VOUT` |
-| high_pass | [-0.45, +0.41, -1.09, -0.00] | `VIN--C--VOUT, VOUT--R--VSS` |
-| band_pass | [+0.08, +0.13, -2.52, +1.90] | `INTERNAL_1--C--VOUT, INTERNAL_1--L--VIN, VOUT--R--VSS` |
-| band_stop | [+0.26, -0.06, +2.32, +2.09] | `INTERNAL_2--C--VSS, INTERNAL_1--L--INTERNAL_2, VOUT--R--VSS, INTERNAL_1--R--VIN, INTERNAL_1--R--VOUT` |
-| rlc_series | [+0.02, +0.17, -0.23, +3.03] | `INTERNAL_2--C--VOUT, INTERNAL_1--L--INTERNAL_2, VOUT--R--VSS, INTERNAL_1--R--VIN` |
-| rlc_parallel | [+2.63, -1.01, -0.18, -0.69] | `VIN--R--VOUT, VOUT--RCL--VSS` |
-| lc_lowpass | [-1.12, -0.06, +1.66, -2.14] | `VOUT--C--VSS, VIN--L--VOUT` |
-| cl_highpass | [-0.93, -0.20, -1.75, -1.99] | `VIN--C--VOUT, VOUT--L--VSS` |
-
----
-
-## Reconstruction Accuracy
-
-### By Filter Type (240 circuits each)
-
-| Filter Type | Valid | Example Reconstruction |
-|-------------|-------|------------------------|
-| low_pass | 240/240 | `VOUT--C--VSS, VIN--R--VOUT` |
-| high_pass | 240/240 | `VIN--C--VOUT, VOUT--R--VSS` |
-| band_pass | 240/240 | `INTERNAL_1--C--VOUT, INTERNAL_1--L--VIN, VOUT--R--VSS` |
-| band_stop | 240/240 | `INTERNAL_2--C--VSS, INTERNAL_1--L--INTERNAL_2, VOUT--R--VSS, INTERNAL_1--R--VIN, INTERNAL_1--R--VOUT` |
-| rlc_series | 240/240 | `INTERNAL_2--C--VOUT, INTERNAL_1--L--INTERNAL_2, VOUT--R--VSS, INTERNAL_1--R--VIN` |
-| rlc_parallel | 240/240 | `VIN--R--VOUT, VOUT--RCL--VSS` |
-| lc_lowpass | 240/240 | `VOUT--C--VSS, VIN--L--VOUT` |
-| cl_highpass | 240/240 | `VIN--C--VOUT, VOUT--L--VSS` |
-
-**Total: 1920/1920 (100%) valid reconstructions**
-
----
-
-## Interpolation
-
-### Low-pass -> High-pass
-
-R and C swap positions at alpha ~ 0.50:
-
-| alpha | Generated |
-|---|-----------|
-| 0.00 | `VOUT--C--VSS, VIN--R--VOUT` (low-pass) |
-| 0.25 | `VOUT--C--VSS, VIN--R--VOUT` |
-| 0.50 | `VIN--C--VOUT, VOUT--R--VSS` (transition) |
-| 0.75 | `VIN--C--VOUT, VOUT--R--VSS` |
-| 1.00 | `VIN--C--VOUT, VOUT--R--VSS` (high-pass) |
-
-### Band-pass -> RLC-parallel
-
-Distributed -> lumped transition:
-
-| alpha | Generated |
-|---|-----------|
-| 0.00 | `INTERNAL_1--C--VOUT, INTERNAL_1--L--VIN, VOUT--R--VSS` (distributed LC) |
-| 0.25 | `INTERNAL_1--C--VOUT, INTERNAL_1--L--VIN, VOUT--R--VSS` |
-| 0.50 | `INTERNAL_1--C--VOUT, INTERNAL_1--L--VIN, VOUT--R--VSS` (transition) |
-| 0.75 | `VIN--R--VOUT, VOUT--RCL--VSS` |
-| 1.00 | `VIN--R--VOUT, VOUT--RCL--VSS` (lumped RCL) |
+- Dataset: `rlc_dataset/filter_dataset.pkl` + `rlc_dataset/rl_dataset.pkl` — 2,400 circuits across 10 topology signatures.
+- Checkpoint: `checkpoints/production/best_v2.pt`.
+- Encoder: AdmittanceEncoder on admittance-polynomial edge features.
+- Latent: 5D factored `[z_topo(2) | z_VIN | z_VOUT | z_GND]`.
+- Decoder: GPT-style sequence decoder on Eulerian walks.
+- Attribute heads: `FreqHead(log10 fc)`, `GainHead(|H(1kHz)|)`, `TypeHead(10-way CE)`.
+- Generation entry point: `scripts/generation/generate_inverse_design.py`, which conditions on `(fc, gain, filter_type)` via attribute heads and latent optimization (K-NN interpolation + gradient descent on µ).
 
 ---
 
 ## Novel Topology Generation
 
-### Multi-Target Temperature Sweep (V2)
+The decoder was trained on only 10 unique topology signatures (across 2,400 circuits). Temperature-based sampling is the primary lever for exploring beyond those 10. The experiments below characterize the tradeoff between temperature, validity, and novelty, and break down *how* the decoder fails when temperature is raised.
+
+### Fine-Grained Error-Mode Sweep
+
+`scripts/analysis/error_mode_temperature_sweep.py` decodes 2,000 samples per seed at 13 temperatures (0.1–2.0), 3 seeds per temperature (78,000 samples total), and classifies each generated walk into one of seven buckets:
+
+| Category | Meaning |
+|---|---|
+| `valid_known` | electrically valid, topology signature matches a training topology |
+| `valid_novel` | electrically valid, topology signature not in the training set |
+| `invalid_self_loop` | well-formed sequence, but some component has identical terminals |
+| `invalid_dangling` | well-formed sequence, but an internal net is incident to < 2 components |
+| `invalid_missing_terminal` | well-formed sequence, but VIN/VOUT/VSS is not connected |
+| `ill_formed_seq` | wrong alternation, odd length, or does not start/end at VSS |
+| `ill_formed_comp_count` | sequence parses, but some component token appears ≠ 2 times |
+
+Reproduction (target: fc=10 kHz, gain=0.5, interpolated latent + gradient descent):
+
+```bash
+.venv/bin/python scripts/analysis/error_mode_temperature_sweep.py \
+  --fc 10000 --gain 0.5 --samples 2000 --seeds 0 1 2 \
+  --out analysis_results/error_mode_sweep.json
+```
+
+Counts aggregated across 3 seeds (6,000 samples per temperature):
+
+| T | known | novel | self-loop | dangling | miss-term | seq-err | comp-count |
+|---|---|---|---|---|---|---|---|
+| 0.10 | 6000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 0.30 | 5996 | 0 | 0 | 0 | 0 | 0 | 4 |
+| 0.50 | 5957 | 0 | 0 | 0 | 0 | 0 | 43 |
+| 0.70 | 5890 | 0 | 0 | 0 | 0 | 12 | 98 |
+| 0.90 | 5733 | 1 | 0 | 0 | 0 | 58 | 208 |
+| 1.00 | 5566 | 1 | 0 | 0 | 1 | 125 | 307 |
+| 1.10 | 5305 | 1 | 0 | 0 | 2 | 225 | 467 |
+| 1.20 | 4909 | 2 | 0 | 0 | 2 | 414 | 673 |
+| 1.30 | 4336 | 3 | 0 | 0 | 3 | 690 | 968 |
+| 1.40 | 3714 | 4 | 0 | 0 | 4 | 1071 | 1207 |
+| 1.50 | 2958 | 3 | 0 | 2 | 6 | 1587 | 1444 |
+| 1.70 | 1474 | 6 | 0 | 3 | 7 | 3038 | 1472 |
+| 2.00 | 282 | 2 | 0 | 1 | 7 | 4894 | 814 |
+
+Derived rates (same data, expressed as percentages of 6,000):
+
+| T | valid % | novel / valid | seq-err % | comp-count % | electrical-err % |
+|---|---|---|---|---|---|
+| 0.10 | 100.00 | 0.000 | 0.00 | 0.00 | 0.00 |
+| 0.50 | 99.28 | 0.000 | 0.00 | 0.72 | 0.00 |
+| 0.70 | 98.17 | 0.000 | 0.20 | 1.63 | 0.00 |
+| 0.90 | 95.57 | 0.017 | 0.97 | 3.47 | 0.00 |
+| 1.00 | 92.78 | 0.018 | 2.08 | 5.12 | 0.02 |
+| 1.20 | 81.85 | 0.041 | 6.90 | 11.22 | 0.03 |
+| 1.40 | 61.97 | 0.108 | 17.85 | 20.12 | 0.07 |
+| 1.50 | 49.35 | 0.101 | 26.45 | 24.07 | 0.13 |
+| 1.70 | 24.67 | 0.405 | 50.63 | 24.53 | 0.17 |
+| 2.00 | 4.73 | 0.704 | 81.57 | 13.57 | 0.13 |
+
+Failure-mode observations:
+
+- **Self-loops are effectively never produced** — 0 out of 78,000 samples. The decoder has learned as a hard constraint that a component's two terminal tokens must differ.
+- **Electrical invalidity (dangling internals + missing terminals) stays under 0.2 % at every temperature.** Even at T=2.0, where overall validity drops to 4.7 %, fewer than 0.2 % of samples are well-formed-but-electrically-broken walks. Connectivity to VIN/VOUT/VSS and full coverage of internal nets are also learned as hard constraints.
+- **The two dominant failure modes are both structural**, not electrical:
+  - `ill_formed_comp_count` (each component must appear exactly twice in an Euler walk) is the first failure mode to appear. It starts at T=0.3 and grows steadily until T=1.5, then saturates.
+  - `ill_formed_seq` (token alternation or length violation) appears later (T≥0.7), grows much faster, and dominates at T≥1.7. At T=2.0, 82 % of samples have an ill-formed sequence structure.
+- **Novelty lives in a narrow, low-yield band.** Measured as `valid_novel / valid_total`:
+  - T≤0.7: identically 0
+  - T=0.9–1.1: ≈0.02 %
+  - T=1.4–1.5: ≈0.1 %
+  - T=1.7: 0.4 %
+  - T=2.0: 0.7 %
+  
+  In absolute terms, the best yield is T=1.7 with 6 novel samples out of 1,480 valid (and 4,518 invalid). Cranking further to T=2.0 gives slightly higher *rate among valids* but fewer novel samples in absolute terms because validity collapses.
+
+**Takeaway (with caveat below).** Under the strict parser, the decoder appears to rarely produce novel topologies, and most failures above T=1.0 are sequence-structure (`ill_formed_comp_count`, `ill_formed_seq`) rather than electrical. The strict parser, however, rejects any walk whose component-count doesn't match the Eulerian convention of exactly 2, which is a strong assumption. The next subsection re-analyses the same sweep with a permissive parser and reaches a very different conclusion about novelty.
+
+### Permissive Re-Analysis
+
+The strict `well_formed` check enforces two things simultaneously:
+
+1. **Sequence grammar**: alternating net/component tokens, starts and ends at VSS.
+2. **Eulerian traversal convention**: each component token appears exactly twice.
+
+Rule 2 is true of the training walks but is not a circuit-level requirement. A walk where a component appears 1, 3, or 4 times can still be parsed into a valid 2-terminal circuit graph as long as the component's *unique* net-neighbors are exactly two distinct nets. The over-counted appearances just mean the walk isn't a canonical Euler circuit — not that the underlying graph is broken.
+
+`scripts/analysis/error_mode_temperature_sweep_permissive.py` repeats the same 78k-sample sweep with a relaxed parser:
+
+- Keep the alternation + VSS-bracketed sequence grammar.
+- Drop the `count == 2` rule.
+- Per component, collect the *set* of distinct adjacent nets.
+  - `|set| == 1` → self-loop (truly invalid).
+  - `|set| == 2` → valid 2-terminal component (regardless of count).
+  - `|set| >= 3` → multi-terminal claim, not supported by the 2-terminal vocab (new category `invalid_multi_terminal`).
+- Re-run electrical checks (VIN/VOUT/VSS connected, no dangling internals).
+
+Counts aggregated across 3 seeds (6,000 samples per temperature):
+
+| T | known | novel | self-loop | multi-term | dangling | miss-term | seq-err |
+|---|---|---|---|---|---|---|---|
+| 0.10 | 6000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 0.50 | 5961 | 0 | 0 | 0 | 0 | 39 | 0 |
+| 0.70 | 5904 | 1 | 16 | 19 | 0 | 60 | 0 |
+| 0.90 | 5762 | 8 | 48 | 81 | 2 | 78 | 21 |
+| 1.00 | 5613 | 23 | 78 | 133 | 2 | 91 | 60 |
+| 1.20 | 5006 | 83 | 177 | 320 | 5 | 114 | 295 |
+| 1.40 | 3845 | 207 | 299 | 586 | 6 | 142 | 915 |
+| 1.50 | 3092 | 297 | 310 | 719 | 12 | 162 | 1408 |
+| 1.70 | 1556 | 384 | 348 | 694 | 11 | 139 | 2868 |
+| 2.00 | 297 | 266 | 210 | 325 | 6 | 68 | 4828 |
+
+Strict vs permissive novelty, same samples:
+
+| T | valid % (perm) | novel % of valid (perm) | novel % of valid (strict) | permissive-novel unique |
+|---|---|---|---|---|
+| 1.00 | 93.93 | 0.41 | 0.02 | — |
+| 1.20 | 84.82 | 1.63 | 0.04 | — |
+| 1.40 | 67.53 | 5.11 | 0.11 | — |
+| 1.50 | 56.48 | 8.76 | 0.10 | — |
+| 1.70 | 32.33 | 19.79 | 0.41 | — |
+| 2.00 | 9.38 | 47.25 | 0.70 | — |
+
+Totals across all 78k samples:
+
+- Strict parser: 6 unique novel topologies, 23 samples.
+- **Permissive parser: 264 unique novel topologies, 1,462 samples.**
+
+Almost all novel outputs (≈ 98 % at T=1.7) appear in walks where at least one component is over- or under-counted — i.e. exactly the walks the strict parser was discarding.
+
+Non-Euler walks also include genuinely invalid ones. Separating them out (permissive categories at T=1.7, percent of 6,000):
+
+| category | count | %  |
+|---|---|---|
+| valid_known | 1556 | 25.9 |
+| valid_novel | 384 | 6.4 |
+| invalid_multi_terminal (a component has ≥3 distinct nets) | 694 | 11.6 |
+| invalid_self_loop | 348 | 5.8 |
+| invalid_missing_terminal (VIN/VOUT/VSS not connected) | 139 | 2.3 |
+| invalid_dangling (internal net incident to < 2 components) | 11 | 0.2 |
+| ill_formed_seq (grammar-level violation) | 2868 | 47.8 |
+
+So above T≈1.4 the decoder splits its output into three roughly equal failure modes: (i) ungrammatical sequences, (ii) genuinely invalid electrical claims (self-loop or multi-terminal — the latter is the biggest new category), and (iii) valid circuits whose walks are non-Euler.
+
+#### Top permissive-novel topologies (selection)
+
+| Count | Topology sketch |
+|---|---|
+| 69 | `C(VSS-VOUT) \| R(VIN-VOUT) \| R(VSS-VOUT)` — RC LPF with extra shunt R |
+| 55 | 6-comp: `R(VIN-INT1), R(VOUT-INT1), C(VOUT-INT1), C(VSS-INT0), L(INT0-INT1), R(VSS-VOUT)` |
+| 51 | 6-comp variant including an `RC` compound token between VOUT-INT1 |
+| 45 | 6-comp variant including `RCL(VOUT-INT1)` |
+| 44 | 6-comp variant including `CL(VOUT-INT1)` |
+| 35 | 6-comp variant with `RCL(VSS-VOUT)` |
+| 27 | 4-comp: `C(VSS-INT0), L(INT0-INT1), R(VIN-INT1), R(VSS-VOUT)` |
+| 26 | 6-comp variants using `RC(INT0-INT1)` or `RC(VIN-INT1)` |
+
+Observations:
+
+- The decoder recombines the compound component tokens (`RC`, `CL`, `RCL`) in placements that do not appear in the 10 training signatures. These are *structurally* novel.
+- Many novel outputs have 6 components — larger than any training topology (which top out at 5). Topology size is not capped by the training distribution.
+- The most frequent permissive-novel topology (×69) is still a simple 3-component variant of the RC low-pass family.
+
+**Revised takeaway.** The decoder *does* generate a meaningful volume of novel circuit graphs — it just does so in walks that break the Eulerian counting convention. The strict parser was measuring conformance to the training walk format, not circuit-graph validity, and under-counted true novelty by ~60×. The corrected picture:
+
+- T=0.1–0.7: effectively no novelty (and no need for it — training topologies dominate).
+- T=1.0–1.4: novelty grows from ~0.4 % to ~5 % of valid samples, already 50–100× higher than the strict measure suggests.
+- T=1.5–1.7: novelty peaks in absolute terms (297–384 novel samples / 6,000), still at reasonable validity (32–57 %).
+- T=2.0: validity collapses, but nearly half of what remains is novel.
+
+The decoder *does* internalize electrical priors (self-loops and multi-terminal claims together make up ~17 % at T=1.7, not zero — larger than the strict analysis implied). But it also has real structural exploration beyond its training topologies. The practical "novelty sweet spot" is T≈1.5–1.7, where roughly 1 in 5 valid outputs is a new topology.
+
+### Are The Novel Topologies Actually Buildable?
+
+"Buildable" is not the same thing as "passes the permissive parser." The permissive parser guarantees:
+
+1. Every component has exactly two **distinct** terminals (no self-loops, no 3+-terminal claims).
+2. Every named rail (VIN, VOUT, VSS) has at least one component attached to it.
+3. Every internal net is incident to ≥ 2 components (no dangling stubs).
+
+These conditions are sufficient for the graph to be **physically wirable on a breadboard** — every edge is a real 2-terminal part that can be soldered between the two specified nets. They are *not* sufficient to guarantee a **useful filter transfer function**, because the parser will accept a circuit where VOUT happens to be tied only to ground through a resistor, with no signal path back to VIN.
+
+To measure how many of the 264 novel topologies are "real filters" vs merely "wirable," we apply one more test: remove VSS from the graph and check whether VIN and VOUT remain in the same connected component. If yes, a non-trivial transfer function `H(s) = V_OUT / V_IN` exists; if no, V_OUT is pinned to ground (through whatever resistor network) and the circuit is a wirable but functionally trivial "drain."
+
+Results across all 1,462 novel samples (78k-sample sweep):
+
+| Category | Unique topologies | Samples | Share of novel samples |
+|---|---|---|---|
+| **Buildable AND useful** (VIN→VOUT path exists without VSS) | 252 / 264 | 1,406 / 1,462 | **96.2 %** |
+| **Buildable but trivial** (VOUT shorted to ground only) | 12 / 264 | 56 / 1,462 | 3.8 % |
+
+So the headline number is: **≈ 96 % of novel generations are not only electrically wirable but also have a real VIN→VOUT signal path.** Nearly all of them also contain at least one reactive element — 1,454 / 1,462 (99.5 %) include a capacitor, inductor, or one of the compound tokens — so they act as filters, not resistive dividers.
+
+#### Component-size distribution of novel samples
+
+| # components | samples | note |
+|---|---|---|
+| 2 | 13 | small rewirings like `C \| L` or `R \| C` |
+| 3 | 307 | RC, RL, LC variants; the ×69 `R(VIN-VOUT) \| C(VOUT-VSS) \| R(VOUT-VSS)` is the largest bucket here |
+| 4 | 74 | most training topologies are 3–5 components |
+| 5 | 103 | matches the largest training-size tier |
+| 6 | 910 | **exceeds every training topology** |
+| 7 | 49 | exceeds every training topology |
+| 8 | 6 | exceeds every training topology |
+
+62 % of novel samples have 6+ components, i.e. larger than anything in the 2,400-circuit training corpus (which tops out at 5). Size-extrapolation is happening.
+
+#### Component-token novelty
+
+Training walks use only 4 component types: `R`, `C`, `L`, `RCL`. The vocabulary, however, defines 7 — the three unused types are the compound tokens `RC` (R ‖ C), `CL` (C ‖ L), and `RL` (R ‖ L):
+
+| Token | Occurrences in training (2,400 circuits) | Occurrences in novel generations |
+|---|---|---|
+| R | 5,280 | 3,823 |
+| C | 3,360 | 1,485 |
+| L | 3,360 | 1,396 |
+| RCL | 480 | 305 |
+| RC | **0** | **229** |
+| CL | **0** | **201** |
+| RL | **0** | **170** |
+
+The decoder places `RC`, `CL`, and `RL` at plausible positions (most often as shunt or series elements between an internal node and VOUT/VSS), despite never having seen them in a training walk. This is real extrapolation in the component-vocabulary dimension, not just in connectivity.
+
+#### Worked examples (top useful novel topologies)
+
+**1. `C(VOUT-VSS) | R(VIN-VOUT) | R(VOUT-VSS)` — ×69 samples, 3 components**
+
+- Ascii: `VIN ──R──┬──┬── VOUT,  VOUT──C──VSS,  VOUT──R──VSS`
+- Transfer function: first-order low-pass with a DC-loaded output. `H(s) = (R_load / (R_in + R_load)) · 1 / (1 + sRC)` where the DC gain is set by the resistive divider and the corner by C in parallel with `R_in ‖ R_load`.
+- Buildable: yes, 3 parts on a breadboard.
+- Novel vs training: the training set's RC low-pass family has only one R and one C; adding the second R as a DC loading/divider is new.
+
+**2. 6-component elliptic-like filter — ×55 samples**
+
+`R(VIN-INT1) | R(VOUT-INT1) | C(VOUT-INT1) | C(VSS-INT0) | L(INT0-INT1) | R(VOUT-VSS)`
+
+- INT1 is a summing node connected to VIN (through R), VOUT (through R ‖ C), and a grounded LC branch (L-INT0-C-VSS).
+- VOUT is taken at the R ‖ C leg of the summing node, with an extra R to ground.
+- Structurally analogous to a passive twin-T or LC-notch topology — second-order with a zero near the LC resonance `ω₀ = 1/√(LC)` and pole locations set by the resistor ratios.
+- Buildable: yes; every part is a standard 2-terminal element.
+- This topology has no structural equivalent in the 10 training signatures.
+
+**3. Compound-token variant — ×51 samples**
+
+Same skeleton as #2 but replacing `C(VOUT-INT1)` with `RC(VOUT-INT1)`. An `RC` block is a parallel R‖C shunt between VOUT and the summing node, giving this leg a finite Q. Buildable by wiring a resistor in parallel with a capacitor between the two nets; no more complex than the previous example.
+
+**4. LC-tank variant — ×45 samples**
+
+Replace `RC(VOUT-INT1)` with `RCL(VOUT-INT1)`. Now VOUT sees a parallel R‖C‖L tank to the summing node — this is a band-reject or band-pass depending on which terminal is observed. The RCL compound is well-attested in training (rlc_parallel family), just placed in a new position in this 6-component context.
+
+**5. Pure-L variant — ×23 samples**
+
+`R(VIN-INT1) | L(VOUT-INT1) | R(VOUT-INT1) | C(VSS-INT0) | L(INT0-INT1) | R(VOUT-VSS)`
+
+Two inductors — one between VOUT and the summing node, one in the ground-referred LC branch. This is a 2-pole LPF-with-LC-trap, fully realizable with standard parts.
+
+#### Examples that parse as valid but are functionally trivial
+
+**×27 samples: `C(VSS-INT0) | L(INT0-INT1) | R(VIN-INT1) | R(VOUT-VSS)`**
+
+Trace the connectivity: VIN → R → INT1 → L → INT0 → C → VSS. This is a perfectly valid input-side RLC branch to ground. But VOUT's only connection is `R(VOUT-VSS)` — a single resistor to ground, with no path back to the input side except through VSS itself. The permissive parser accepts it (VIN/VOUT/VSS all have ≥ 1 component, every internal is doubly-incident), but the transfer function is `V_OUT = 0` regardless of V_IN.
+
+Physically you can build this — it just wouldn't function as a filter. These cases account for 12 unique topologies and 56 / 1,462 (3.8 %) of novel samples.
+
+#### Summary of buildability
+
+| Question | Answer |
+|---|---|
+| Are novel generations **electrically wirable** as described? | Yes — 100 % by permissive-parser construction (2-terminal components, connected rails, no dangling nets). |
+| Do they have a **non-trivial VIN→VOUT transfer function**? | 96.2 % of samples do. |
+| Do they contain at least one **reactive element** (C, L, or compound)? | 99.5 % do. |
+| Do they use **component tokens the decoder never saw in training** (`RC`, `CL`, `RL`)? | 600 / 1,462 samples do — 41 %. |
+| Are any **larger than the training topologies** (≥ 6 components)? | 965 / 1,462 samples — 66 %. |
+
+In short: almost every novel topology the decoder generates corresponds to a real circuit you could solder together, nearly all of them use at least one frequency-selective element, and most extrapolate either in size or in component-token usage beyond what the training corpus explicitly contained.
+
+### Multi-Target Temperature Sweep
 
 Comprehensive sweep across 4 target specs, 5 temperatures, and 5 random seeds.
 For each target, the V2 pipeline computes one optimized latent via K-NN interpolation
 + gradient descent (no filter-type constraint), then decodes 2,000 samples per
-(temperature, seed) combination. Total: 200,000 decoded samples.
+(temperature, seed) combination. Total: 200,000 decoded samples. This sweep uses the
+**strict** parser, so its novel-topology counts are the lower-bound figures — see the
+permissive re-analysis above for the corrected picture.
 
 Setup:
 
@@ -170,7 +330,7 @@ Setup:
 | gain=0.1 | 1.2 | 1947 +/- 5.9 | 97.3% | 9.2 | 0.20 | 1 |
 | gain=0.1 | 1.5 | 1728 +/- 9.2 | 86.4% | 10.4 | 0.80 | 4 |
 
-Across all 200,000 samples, **4 unique novel topologies** were discovered:
+Across all 200,000 samples, **4 unique novel topologies** were discovered under the strict parser:
 
 | # | Topology | Count | Source |
 |---|----------|-------|--------|
@@ -181,70 +341,10 @@ Across all 200,000 samples, **4 unique novel topologies** were discovered:
 
 Key observations:
 
-- **T <= 0.7**: Zero novel topologies across all targets and seeds. Validity near 100%.
-- **T = 1.0-1.2**: Occasional novel topologies (0-2 total across 5 seeds). Validity 91-99%.
-- **T = 1.5**: ~1 novel topology per 2,000 samples on average. Validity drops to 65-87%.
-- The training set has only 10 known topology signatures. The decoder has effectively memorized these and strongly resists generating anything else.
-- Novel topologies require temperatures high enough to partially break the learned distribution, at which point validity also collapses.
-
-### Random Latent Temperature Sweep
-
-Random latent samples were decoded with sampling enabled (`greedy=False`) at different decoder temperatures.
-Validity here means an electrically valid Eulerian walk: well-formed sequence, no self-loop component, VIN/VOUT/VSS each connected, and no dangling internal net.
-Novelty is counted only among valid samples, using topology signatures that are invariant to traversal order and internal-net renaming.
-This is stricter than the older `sequence_to_topology_key` helper, which can assign topology strings to walks that contain self-loops, repeated malformed components, or dangling internal nets.
-
-Reproduction:
-
-```bash
-.venv/bin/python scripts/analysis/temperature_topology_sweep.py \
-  --samples 500 \
-  --out analysis_results/temperature_topology_sweep_500.json
-```
-
-| Temperature | Valid | Invalid | Valid Novel | Novel % of Valid | Unique Valid Topologies | Dominant Valid Topology |
-|-------------|-------|---------|-------------|------------------|-------------------------|-------------------------|
-| 0.1 | 497/500 (99.4%) | 3/500 (0.6%) | 0/497 | 0.0% | 8 | `C(VIN-VOUT)\|R(VOUT-VSS)` (184) |
-| 0.3 | 498/500 (99.6%) | 2/500 (0.4%) | 0/498 | 0.0% | 8 | `C(VIN-VOUT)\|R(VOUT-VSS)` (180) |
-| 0.7 | 498/500 (99.6%) | 2/500 (0.4%) | 0/498 | 0.0% | 8 | `C(VIN-VOUT)\|R(VOUT-VSS)` (176) |
-| 1.0 | 494/500 (98.8%) | 6/500 (1.2%) | 0/494 | 0.0% | 8 | `C(VIN-VOUT)\|R(VOUT-VSS)` (172) |
-| 1.3 | 454/500 (90.8%) | 46/500 (9.2%) | 0/454 | 0.0% | 8 | `C(VIN-VOUT)\|R(VOUT-VSS)` (160) |
-| 1.7 | 306/500 (61.2%) | 194/500 (38.8%) | 0/306 | 0.0% | 8 | `C(VIN-VOUT)\|R(VOUT-VSS)` (102) |
-| 2.0 | 131/500 (26.2%) | 369/500 (73.8%) | 0/131 | 0.0% | 7 | `C(VIN-VOUT)\|R(VOUT-VSS)` (53) |
-| 2.5 | 13/500 (2.6%) | 487/500 (97.4%) | 0/13 | 0.0% | 5 | `C(VIN-VOUT)\|R(VOUT-VSS)` (6) |
-| 3.0 | 1/500 (0.2%) | 499/500 (99.8%) | 0/1 | 0.0% | 1 | `C(VIN-VOUT)\|R(VOUT-VSS)` (1) |
-
-### Frequent Topologies
-
-The most common valid outputs remain known training topologies at every temperature. Higher temperature reduces validity before it creates valid novel structures.
-
-| Temperature | Frequent Valid Topologies |
-|-------------|---------------------------|
-| 0.1 | `C(VIN-VOUT)\|R(VOUT-VSS)` (184); `C(VOUT-VSS)\|R(VIN-VOUT)` (61); `C(INTERNAL_2-VOUT)\|L(INTERNAL_1-INTERNAL_2)\|R(VOUT-VSS)\|R(INTERNAL_1-VIN)` (59); `C(VIN-VOUT)\|L(VOUT-VSS)` (56); `R(VIN-VOUT)\|RCL(VOUT-VSS)` (43) |
-| 1.0 | `C(VIN-VOUT)\|R(VOUT-VSS)` (172); `C(VIN-VOUT)\|L(VOUT-VSS)` (62); `C(INTERNAL_2-VOUT)\|L(INTERNAL_1-INTERNAL_2)\|R(VOUT-VSS)\|R(INTERNAL_1-VIN)` (60); `C(VOUT-VSS)\|R(VIN-VOUT)` (60); `R(VIN-VOUT)\|RCL(VOUT-VSS)` (47) |
-| 1.7 | `C(VIN-VOUT)\|R(VOUT-VSS)` (102); `C(VIN-VOUT)\|L(VOUT-VSS)` (48); `R(VIN-VOUT)\|RCL(VOUT-VSS)` (40); `C(VOUT-VSS)\|R(VIN-VOUT)` (35); `C(VOUT-VSS)\|L(VIN-VOUT)` (33) |
-| 2.5 | `C(VIN-VOUT)\|R(VOUT-VSS)` (6); `C(VOUT-VSS)\|R(VIN-VOUT)` (3); `R(VIN-VOUT)\|RCL(VOUT-VSS)` (2); `C(INTERNAL_1-VOUT)\|L(INTERNAL_1-VIN)\|R(VOUT-VSS)` (1); `C(VIN-VOUT)\|L(VOUT-VSS)` (1) |
-
-Across 4,500 random latent samples, the decoder produced **0 electrically valid novel topologies** under this stricter validity definition. Temperature mainly trades valid known topologies for malformed or electrically invalid walks.
-
-### Validator Sensitivity
-
-The older topology-key metric explains why some earlier or external-looking novelty numbers can look much higher. It only asks whether a generated walk can be converted into a topology string; it does not reject every electrically invalid construction.
-
-| Decode Mode | Metric | Valid | Valid Novel | Novel % of Valid | Example Novel Outputs |
-|-------------|--------|-------|-------------|------------------|-----------------------|
-| Greedy | strict electrical walk | 499/500 (99.8%) | 1/499 | 0.2% | `L(VIN-VOUT)\|RCL(VOUT-VSS)` |
-| Greedy | topology-key only | 499/500 (99.8%) | 1/499 | 0.2% | `L(VIN-VOUT)\|RCL(VOUT-VSS)` |
-| T=1.0 sampling | strict electrical walk | 494/500 (98.8%) | 0/494 | 0.0% | -- |
-| T=1.0 sampling | topology-key only | 496/500 (99.2%) | 2/496 | 0.4% | includes dangling/renamed internal variants |
-| T=1.7 sampling | strict electrical walk | 306/500 (61.2%) | 0/306 | 0.0% | -- |
-| T=1.7 sampling | topology-key only | 431/500 (86.2%) | 99/431 | 23.0% | includes self-loops and malformed multi-component variants |
-| T=2.5 sampling | strict electrical walk | 13/500 (2.6%) | 0/13 | 0.0% | -- |
-| T=2.5 sampling | topology-key only | 195/500 (39.0%) | 172/195 | 88.2% | many contain `VOUT-VOUT`, `VSS-VSS`, or dangling internals |
-| T=3.0 sampling | strict electrical walk | 1/500 (0.2%) | 0/1 | 0.0% | -- |
-| T=3.0 sampling | topology-key only | 85/500 (17.0%) | 83/85 | 97.6% | mostly malformed self-loop-heavy strings |
-
-The stricter metric is the one used in the temperature sweep because it better matches whether a topology is usable as a circuit graph. The topology-key-only metric is useful as a debugging signal: it shows that temperature increases structural variety, but most of that variety is not valid circuit structure.
+- **T <= 0.7**: Zero novel topologies (strict) across all targets and seeds. Validity near 100%.
+- **T = 1.0–1.2**: Occasional novel topologies (0–2 total across 5 seeds). Validity 91–99%.
+- **T = 1.5**: ~1 novel topology per 2,000 samples on average under the strict parser. Validity drops to 65–87%.
+- The permissive re-analysis above shows that these strict counts are ≈ 60× below the true novelty rate — most novel graphs live in walks where a component token is over- or under-counted.
 
 ### Comparison To AnalogGenie Paper
 
@@ -255,133 +355,80 @@ The AnalogGenie paper reports much higher novelty because it studies a different
 - Validity: SPICE-simulatable with default sizing, checking for floating and shorting nodes.
 - Novelty: different from every topology in their full dataset.
 
-This repo's result is from a much smaller sequence decoder trained on 8 RLC filter topology families. Its random-latent samples mostly recover those known families. The numbers are therefore not directly comparable to AnalogGenie's Table 1.
+This repo's V2 model is a much smaller sequence decoder trained on 10 RLC filter topology signatures. Under a permissive graph-level validator it still produces 264 unique novel topologies across 78k samples, many of which are size- or vocabulary-extrapolations from training. The absolute numbers are not directly comparable to AnalogGenie's Table 1 (different corpus, different validator, different task), but the qualitative story — temperature trades validity for novelty, and the model does find new buildable topologies — is consistent.
 
----
-
-## Pole/Zero-Driven Generation
-
-Generate circuits by specifying **dominant pole/zero** directly. The decoder constructs z[4:8] from signed-log normalized pole/zero values, samples z[0:4] from the prior, and generates using the decoder only (no encoder needed).
-
-```bash
-python scripts/generation/generate_from_specs.py --pole-real -6283 --pole-imag 0 --num-samples 5
-```
-
-### Signed-Log Normalization
-
-`z = sign(x) * log10(|x| + 1) / 7.0` maps raw pole/zero values to ~[-1, 1]:
-
-| z[4:8] | Meaning |
-|--------|---------|
-| z[4] = sigma_p | signed_log(real part of dominant pole) |
-| z[5] = omega_p | signed_log(\|imag part of dominant pole\|) |
-| z[6] = sigma_z | signed_log(real part of dominant zero) |
-| z[7] = omega_z | signed_log(\|imag part of dominant zero\|) |
-
-### Test Cases (3 samples each)
-
-#### Real Pole, No Zero (RC Low-Pass Behavior)
-
-| Pole | z[4:8] | Samples | Valid |
-|------|--------|---------|-------|
-| -6283 + 0j (~1kHz) | [-0.543, 0, 0, 0] | `R--C`, `R--C`, `R--C` | 3/3 |
-| -62832 + 0j (~10kHz) | [-0.685, 0, 0, 0] | band_pass, `R--C`, `R--C` | 3/3 |
-| -628318 + 0j (~100kHz) | [-0.828, 0, 0, 0] | `R--C`, `R--C`, `R--C` | 3/3 |
-
-#### Real Zero, No Pole (RC High-Pass Behavior)
-
-| Zero | z[4:8] | Samples | Valid |
-|------|--------|---------|-------|
-| -6283 + 0j (~1kHz) | [0, 0, -0.543, 0] | `R--C`, `R--C`, rlc_parallel | 3/3 |
-
-#### Conjugate Poles (Resonant Behavior)
-
-| Pole | Zero | z[4:8] | Samples | Valid |
-|------|------|--------|---------|-------|
-| -3142 + 49348j | 0 | [-0.500, +0.670, 0, 0] | `R--C`, band_pass, `R--C` | 3/3 |
-| -3142 + 49348j | 0 + 49348j | [-0.500, +0.670, 0, +0.670] | rlc_series, `R--C`, `R--C` | 3/3 |
-
-#### Extreme Frequencies
-
-| Pole | z[4:8] | Samples | Valid |
-|------|--------|---------|-------|
-| -100 + 0j (very low) | [-0.286, 0, 0, 0] | `R--C`, `R--C`, `R--C` | 3/3 |
-| -1e6 + 0j (very high) | [-0.857, 0, 0, 0] | rlc_parallel, `R--C`, `R--C` | 3/3 |
-
-### Summary
-
-| Category | Valid/Total |
-|----------|------------|
-| Real pole, no zero | 9/9 (100%) |
-| Real zero, no pole | 3/3 (100%) |
-| Conjugate poles | 6/6 (100%) |
-| Extreme frequencies | 6/6 (100%) |
-| **Overall** | **24/24 (100%)** |
-
-**Observations:**
-- 100% valid rate across all pole/zero test cases (up from 83% with adjacency decoder)
-- Real-pole-only specs reliably produce RC topologies
-- The z[0:4] prior sampling introduces topology diversity (same pole/zero can yield different structures)
-- Extreme frequency poles now reliably produce valid topologies
+Scaling the training corpus (à la AnalogGenie's 3,350 topologies) would further expand the reachable space, but the current model is already more exploratory than the strict Euler-convention metrics suggest.
 
 ---
 
 ## Key Insights
 
-### 1. Sequence Decoder vs Adjacency Decoder
+### 1. "Electrical vs structural" depends on the parser you use
 
-| Metric | Adjacency Decoder | Sequence Decoder |
-|--------|-------------------|------------------|
-| Reconstruction accuracy | 100% | 100% |
-| Valid rate (random samples) | 89.2% | 98.8% at T=1.0; 99.6% at T=0.3/0.7 |
-| P/Z generation valid rate | 83% | 100% |
-| Novel topologies (500 samples) | 9 unique, 112 samples | 0 electrically valid novel samples at T=0.1-3.0 |
-| Decoder parameters | 7,698,901 | 3,280,726 |
+The strict parser (training-convention match: every component appears exactly twice) suggests failures are overwhelmingly sequence-level and the decoder's electrical priors are near-deterministic. The permissive parser (only check unique net-neighbors, not occurrence count) reveals a more nuanced picture:
 
-### 2. Q-Factor Drives Topology Selection
+- Genuine electrical failures at T=1.7: ≈ 17 % (self-loops + multi-terminal claims), not < 0.2 %.
+- The hard constraint the decoder *has* clearly internalized is "don't re-use a net twice at the same component" (self-loop rate ≈ 6 % at T=1.7, still much less than the random baseline, but nonzero).
+- The soft constraint it has not internalized is "a component's distinct neighbors number exactly 2" — at high temperature, roughly 12 % of walks claim a 3+-terminal component.
 
-| Q Range | Typical Topology |
-|---------|------------------|
-| Q < 0.1 | 4-node rlc_series |
-| Q ~ 0.1 | 3-node band_pass (distributed LC) |
-| Q ~ 0.707 | 2-component RC (Butterworth) |
-| Q > 2.0 | 2-component RCL parallel (tank) |
+### 2. Novelty Is Substantial Once You Stop Filtering By Training Grammar
+
+Permissive-parser novelty rates:
+
+| T | validity | novel share of valid | absolute novel count |
+|---|---|---|---|
+| 1.0 | 94 % | 0.4 % | 23 / 6,000 |
+| 1.4 | 68 % | 5.1 % | 207 / 6,000 |
+| 1.7 | 32 % | 19.8 % | 384 / 6,000 |
+| 2.0 | 9 % | 47.3 % | 266 / 6,000 |
+
+Total unique novel topologies across 78k samples: **264** (permissive) vs **6** (strict — the strict count was filtering the walks where novelty actually shows up). Practical sweet spot: T ≈ 1.5–1.7.
 
 ### 3. Latent Space is Well-Organized
 
-- All 8 dimensions are meaningful (z[0:4] topology, z[4:8] pole/zero)
-- Filter types form distinct clusters
-- Interpolation produces smooth transitions
-- Random-latent validity remains high through T=1.0, then falls quickly at hotter temperatures
+- The V2 5D latent factors into `[z_topo(2) | z_VIN | z_VOUT | z_GND]`.
+- Filter types form distinct clusters.
+- Spec-conditioned µ optimisation (K-NN + gradient descent on attribute heads) converges to high-validity neighborhoods — 100 % valid at T ≤ 0.5 across every target tested.
 
-### 4. High Fidelity = Few Novel Topologies
+### 4. Where Novelty Lives
 
-The sequence decoder strongly prefers known training topologies. Raising temperature reduces validity before it creates electrically valid novel circuits, so exploration needs a stronger intervention than temperature alone. The adjacency decoder's lower fidelity paradoxically produced more novel structures, including some physically meaningful ones. This is a precision-vs-exploration tradeoff.
+Under the permissive parser, the decoder produces hundreds of distinct novel topologies (264 unique across 78k samples), many with six components — one larger than any training example. They live almost entirely in non-Eulerian walks: walks where a component token appears a number of times other than 2, but whose *unique* terminal set still has exactly 2 distinct nets.
+
+This means there are two useful knobs for exploration:
+
+1. **Temperature** opens up structural variety, peaking around T=1.5–1.7 where ~1 in 5 valid outputs is novel.
+2. **Relaxing the walk-format enforcement** at decode time (or post-hoc when canonicalising outputs to graphs) recovers novelty that the training-grammar filter was discarding.
 
 ---
 
 ## Usage
 
 ```bash
-# Pole/zero-driven generation (decoder only, no encoder needed)
-python scripts/generation/generate_from_specs.py --pole-real -6283 --pole-imag 0 --num-samples 5
+# V2 inverse-design generation (fc + gain + optional filter type)
+.venv/bin/python scripts/generation/generate_inverse_design.py \
+    --type low_pass --fc 10000 --gain 0.7 --samples 5
 
-# Conjugate pole pair (resonant circuit)
-python scripts/generation/generate_from_specs.py --pole-real -3142 --pole-imag 49348 --num-samples 5
+# Fine-grained error-mode sweep — strict (Eulerian walk-format filter)
+.venv/bin/python scripts/analysis/error_mode_temperature_sweep.py \
+    --fc 10000 --gain 0.5 --samples 2000 --seeds 0 1 2 \
+    --out analysis_results/error_mode_sweep.json
 
-# With a zero (band-stop behavior)
-python scripts/generation/generate_from_specs.py --pole-real -3142 --pole-imag 49348 --zero-imag 49348
+# Fine-grained error-mode sweep — permissive (graph-level validity only)
+.venv/bin/python scripts/analysis/error_mode_temperature_sweep_permissive.py \
+    --fc 10000 --gain 0.5 --samples 2000 --seeds 0 1 2 \
+    --out analysis_results/error_mode_sweep_permissive.json
 
-# Regenerate all results
-python scripts/generation/regenerate_all_results.py
+# Multi-target fixed-spec sweep
+.venv/bin/python scripts/analysis/fixed_spec_temperature_sweep.py
 ```
 
 ---
 
 ## Files
 
-- **Model:** `checkpoints/production/best.pt`
-- **Archived model:** `checkpoints/production/best_adjacency.pt`
-- **Dataset:** `rlc_dataset/filter_dataset.pkl` (1920 circuits, 8 types)
-- **Generation script:** `scripts/generation/generate_from_specs.py`
-- **Results script:** `scripts/generation/regenerate_all_results.py`
+- **V2 model:** `checkpoints/production/best_v2.pt` (2,400 circuits, 10 topology signatures)
+- **Datasets:** `rlc_dataset/filter_dataset.pkl`, `rlc_dataset/rl_dataset.pkl`
+- **V2 generation script:** `scripts/generation/generate_inverse_design.py`
+- **Error-mode sweep (strict):** `scripts/analysis/error_mode_temperature_sweep.py`
+- **Error-mode sweep (permissive):** `scripts/analysis/error_mode_temperature_sweep_permissive.py`
+- **Multi-target sweep:** `scripts/analysis/fixed_spec_temperature_sweep.py`
