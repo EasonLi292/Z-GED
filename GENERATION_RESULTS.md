@@ -27,8 +27,10 @@ The decoder was trained on only 10 unique topology signatures (across 2,400 circ
 | `invalid_self_loop` | well-formed sequence, but some component has identical terminals on both sides |
 | `invalid_dangling` | well-formed sequence, but an **internal** net (`INTERNAL_*`) is touched by < 2 components. VIN/VOUT/VSS with only 1 component attached do **not** trigger this — a simple RC filter where `VIN` is only wired to `R` is valid. |
 | `invalid_missing_terminal` | VIN, VOUT, or VSS has **zero** components attached (incidence < 1). Having incidence = 1 is fine. |
-| `ill_formed_seq` | wrong alternation, odd length, or does not start/end at VSS |
-| `ill_formed_comp_count` | sequence parses, but some component token appears ≠ 2 times. **This filter is lossy**: ≈ 33 % of the walks it rejects are actually valid circuits in disguise (non-Euler re-traversals of a real graph). The permissive re-analysis below recovers them. |
+| `ill_formed_seq` | wrong alternation, **even** length, or does not start/end at VSS. A well-formed walk has odd length (`net comp net comp ... net`), so lengths 4, 6, 8, … are rejected. |
+| `ill_formed_comp_count` | sequence parses, but some component token appears ≠ 2 times. **This filter is lossy**: ≈ 33 % of the walks it rejects are actually valid circuits in disguise (non-Euler re-traversals of a real graph). The permissive re-analysis below recovers them. See the note below on why this rule is "2" specifically for Z-GED. |
+
+**Why "exactly 2" and not some other number?** In a bipartite-graph Euler walk with the edge-doubling convention used by this project, a component with *k* terminals is visited *k* times (each visit consumes one incoming + one outgoing arc). Z-GED's vocabulary only includes 2-terminal components (`R`, `C`, `L`, `RC`, `CL`, `RL`, `RCL`), so every component in a canonical training walk is visited exactly 2 times. This is a scope artifact, not a general Euler-walk property: AnalogGenie's walks, which contain 4-terminal MOSFETs, have `PM1`/`NM1` appearing 4× per walk, and high-degree nets like `VSS` appear many times (once per pair of incident arcs) — those walks are still valid Euler circuits in their setting. The `ill_formed_comp_count` bucket is therefore only a Z-GED-specific training-grammar match, not a general circuit-validity check — the permissive parser drops it entirely and checks the graph directly.
 
 Reproduction (target: fc=10 kHz, gain=0.5, interpolated latent + gradient descent):
 
@@ -76,7 +78,7 @@ Failure-mode observations:
 - **Self-loops are effectively never produced** — 0 out of 78,000 samples. The decoder has learned as a hard constraint that a component's two terminal tokens must differ.
 - **Electrical invalidity (dangling internals + missing terminals) stays under 0.2 % at every temperature.** Even at T=2.0, where overall validity drops to 4.7 %, fewer than 0.2 % of samples are well-formed-but-electrically-broken walks. Connectivity to VIN/VOUT/VSS and full coverage of internal nets are also learned as hard constraints.
 - **The two dominant failure modes are both structural**, not electrical:
-  - `ill_formed_comp_count` (each component must appear exactly twice in an Euler walk) is the first failure mode to appear. It starts at T=0.3 and grows steadily until T=1.5, then saturates.
+  - `ill_formed_comp_count` (each of Z-GED's 2-terminal components is visited exactly twice in the doubled-Euler training walks) is the first failure mode to appear. It starts at T=0.3 and grows steadily until T=1.5, then saturates.
   - `ill_formed_seq` (token alternation or length violation) appears later (T≥0.7), grows much faster, and dominates at T≥1.7. At T=2.0, 82 % of samples have an ill-formed sequence structure.
 - **Novelty lives in a narrow, low-yield band.** Measured as `valid_novel / valid_total`:
   - T≤0.7: identically 0
@@ -94,9 +96,9 @@ Failure-mode observations:
 The strict `well_formed` check enforces two things simultaneously:
 
 1. **Sequence grammar**: alternating net/component tokens, starts and ends at VSS.
-2. **Eulerian traversal convention**: each component token appears exactly twice.
+2. **Z-GED training-walk convention**: each 2-terminal component token appears exactly twice. (The general rule for bipartite Euler walks with edge-doubling is that a *k*-terminal component appears *k* times — e.g. AnalogGenie walks show MOSFETs 4×. "Exactly twice" is only a property of Z-GED's vocabulary, not Euler walks in general.)
 
-Rule 2 is true of the training walks but is not a circuit-level requirement. A walk where a component appears 1, 3, or 4 times can still be parsed into a valid 2-terminal circuit graph as long as the component's *unique* net-neighbors are exactly two distinct nets. The over-counted appearances just mean the walk isn't a canonical Euler circuit — not that the underlying graph is broken.
+Rule 2 is true of the training walks but is not a circuit-level requirement. A walk where a 2-terminal component appears 1, 3, or 4 times can still be parsed into a valid circuit graph as long as the component's *unique* net-neighbors are exactly two distinct nets. The over-counted appearances just mean the walk isn't a canonical Euler circuit — not that the underlying graph is broken.
 
 `scripts/analysis/error_mode_temperature_sweep_permissive.py` repeats the same 78k-sample sweep with a relaxed parser:
 
@@ -396,7 +398,7 @@ Scaling the training corpus (à la AnalogGenie's 3,350 topologies) would further
 
 ### 1. "Electrical vs structural" depends on the parser you use
 
-The strict parser (training-convention match: every component appears exactly twice) suggests failures are overwhelmingly sequence-level and the decoder's electrical priors are near-deterministic. The permissive parser (only check unique net-neighbors, not occurrence count) reveals a more nuanced picture:
+The strict parser (training-convention match: every 2-terminal component is visited exactly twice in the doubled-Euler walk) suggests failures are overwhelmingly sequence-level and the decoder's electrical priors are near-deterministic. The permissive parser (only check unique net-neighbors, not occurrence count) reveals a more nuanced picture:
 
 - Genuine electrical failures at T=1.7: ≈ 17 % (self-loops + multi-terminal claims), not < 0.2 %.
 - The hard constraint the decoder *has* clearly internalized is "don't re-use a net twice at the same component" (self-loop rate ≈ 6 % at T=1.7, still much less than the random baseline, but nonzero).
