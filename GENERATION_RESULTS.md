@@ -155,6 +155,37 @@ Non-Euler walks also include genuinely invalid ones. Separating them out (permis
 
 So above T≈1.4 the decoder splits its output into three roughly equal failure modes: (i) ungrammatical sequences, (ii) genuinely invalid electrical claims (self-loop or multi-terminal — the latter is the biggest new category), and (iii) valid circuits whose walks are non-Euler.
 
+#### What exactly counts as "dangling"?
+
+A natural worry: if `VIN` in a simple RC filter is only attached to `R` (one component), does the parser mark that as dangling? **No.** The dangling check is scoped to internal nets only:
+
+- `VIN`, `VOUT`, `VSS` need incidence ≥ 1 (else → `invalid_missing_terminal`).
+- `INTERNAL_*` nets need incidence ≥ 2 (else → `invalid_dangling`).
+
+Canonical RC low-pass walk `VSS C1 VOUT R1 VIN R1 VOUT C1 VSS` has `incidence = {VSS: 1, VOUT: 2, VIN: 1}` and is correctly classified as `valid_known`. The dangling rule only fires when an internal net has a floating stub — e.g. `L1(INTERNAL_1 – INTERNAL_2)` where `INTERNAL_2` is touched by no other component, so the inductor has one end hanging in mid-air. These are real electrical failures, which is why the rate stays < 0.2 % even at T=2.0.
+
+#### Decomposing the strict `ill_formed_comp_count` bucket
+
+The strict parser rejects any walk where some component token appears ≠ 2 times. The user-facing question is whether that rejection throws away valid circuits. At T=1.5, 480 / 2000 samples land in `ill_formed_comp_count`. Re-classifying that bucket with the permissive parser:
+
+| permissive verdict | count | share of strict bucket |
+|---|---|---|
+| `valid_novel` | 107 | 22.3 % |
+| `valid_known` | 52 | 10.8 % |
+| `invalid_multi_terminal` (component claims 3+ distinct nets) | 172 | 35.8 % |
+| `invalid_self_loop` | 91 | 19.0 % |
+| `invalid_missing_terminal` | 54 | 11.2 % |
+| `invalid_dangling` | 4 | 0.8 % |
+
+So **≈ 33 % of the strict `ill_formed_comp_count` bucket is actually a valid circuit** — 159 samples at T=1.5 alone. These are walks where the decoder re-traces an edge an extra time (e.g. `C1` appears 3×, `L1` appears 3×) or leaves a component visited only once, but whose unique net-neighbors still sum to exactly 2 per component. Example (at T=1.5, classified permissively as `valid_known`):
+
+```
+VSS C1 INTERNAL_2 L1 INTERNAL_2 C1 VSS R1 VOUT R3 INTERNAL_1 L1 INTERNAL_1 R2 VIN R2 INTERNAL_1 L1 INTERNAL_2 C1 VSS
+```
+
+`C1` appears 3 times, `L1` appears 3 times, `R1` and `R3` once — but the recovered graph
+`C1(VSS–INT2), L1(INT1–INT2), R1(VSS–VOUT), R3(INT1–VOUT), R2(VIN–INT1)` is one of the 10 training topologies. The remaining ≈ 67 % of the bucket *is* genuinely broken (multi-terminal claims, self-loops, unreachable terminals), so comp-count rejection is not pure signal — it conflates real-circuit-with-bad-walk and actually-invalid-circuit cases. This is why the permissive parser is needed to separate them.
+
 #### Top permissive-novel topologies (selection)
 
 | Count | Topology sketch |
