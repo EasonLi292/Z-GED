@@ -24,11 +24,11 @@ The decoder was trained on only 10 unique topology signatures (across 2,400 circ
 |---|---|
 | `valid_known` | electrically valid, topology signature matches a training topology |
 | `valid_novel` | electrically valid, topology signature not in the training set |
-| `invalid_self_loop` | well-formed sequence, but some component has identical terminals |
-| `invalid_dangling` | well-formed sequence, but an internal net is incident to < 2 components |
-| `invalid_missing_terminal` | well-formed sequence, but VIN/VOUT/VSS is not connected |
+| `invalid_self_loop` | well-formed sequence, but some component has identical terminals on both sides |
+| `invalid_dangling` | well-formed sequence, but an **internal** net (`INTERNAL_*`) is touched by < 2 components. VIN/VOUT/VSS with only 1 component attached do **not** trigger this — a simple RC filter where `VIN` is only wired to `R` is valid. |
+| `invalid_missing_terminal` | VIN, VOUT, or VSS has **zero** components attached (incidence < 1). Having incidence = 1 is fine. |
 | `ill_formed_seq` | wrong alternation, odd length, or does not start/end at VSS |
-| `ill_formed_comp_count` | sequence parses, but some component token appears ≠ 2 times |
+| `ill_formed_comp_count` | sequence parses, but some component token appears ≠ 2 times. **This filter is lossy**: ≈ 33 % of the walks it rejects are actually valid circuits in disguise (non-Euler re-traversals of a real graph). The permissive re-analysis below recovers them. |
 
 Reproduction (target: fc=10 kHz, gain=0.5, interpolated latent + gradient descent):
 
