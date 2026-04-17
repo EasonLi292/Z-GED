@@ -320,6 +320,70 @@ Physically you can build this — it just wouldn't function as a filter. These c
 
 In short: almost every novel topology the decoder generates corresponds to a real circuit you could solder together, nearly all of them use at least one frequency-selective element, and most extrapolate either in size or in component-token usage beyond what the training corpus explicitly contained.
 
+### Max-Permissive Re-Analysis
+
+The permissive parser rejects any walk where a single component token picks up
+≥ 3 distinct net-neighbors (category `invalid_multi_terminal`). That bucket is
+almost always a label collision — two 2-terminal resistors that the decoder
+happened to tag with the same instance ID (`R1`), not a genuine 3-terminal
+device (the vocabulary has none). The max-permissive parser
+(`scripts/analysis/error_mode_temperature_sweep_maxpermissive.py`) interprets
+every distinct adjacency pair for such a component as its own 2-terminal edge
+that happens to share a label. The `|union| ∈ {1, 2}` branches are unchanged
+from permissive.
+
+Aggregate across the same 78,000-sample sweep:
+
+| category | count | share |
+|---|---|---|
+| `valid_known` | 58,879 | 75.49 % |
+| `valid_novel` | 4,531 | 5.81 % |
+| `ill_formed_seq` | 11,051 | 14.17 % |
+| `invalid_self_loop` | 1,876 | 2.41 % |
+| `invalid_missing_terminal` | 1,471 | 1.89 % |
+| `invalid_dangling` | 192 | 0.25 % |
+
+**Novelty (max-permissive): 709 unique topologies, 4,531 samples.** vs 264 /
+1,462 under permissive — an extra 445 topologies and 1,401 samples recovered
+from what permissive called `invalid_multi_terminal`. The `valid_known` count
+is identical to permissive's (58,879), confirming the recovery doesn't
+re-bucket any previously-known walk into the novel tier.
+
+Of the 4,531 novel samples:
+
+- **97.4 %** have a VIN→VOUT path that avoids VSS (useful filter), 2.6 % are
+  "grounded drain" topologies.
+- **99.3 %** contain at least one reactive element (C, L, or compound
+  `RC`/`CL`/`RL`/`RCL`).
+- 62 % have ≥ 6 components — larger than any training topology.
+
+#### Commonly generated circuits the decoder produces
+
+A handful of signatures dominate the novel bucket. They all share the same
+LC-tank scaffold that the 4-comp/5-comp training topologies contain, with
+extra resistors re-wiring VOUT or adding pull-ups/pull-downs.
+
+| count | #comps | topology | electrical reading |
+|---|---|---|---|
+| 322 | 6 | `C(VSS-I0) ‖ L(I0-I1) ‖ R(VIN-I1) ‖ R(VOUT-VSS) ‖ R(VOUT-I1) ‖ R(VSS-I1)` | training's LC-notch 5-comp + extra `R(VSS-I1)` pulldown on the summing node |
+| 194 | 5 | `C(VOUT-I0) ‖ C(VSS-I0) ‖ L(I0-I1) ‖ R(VIN-I1) ‖ R(VOUT-VSS)` | two-capacitor LC with C split between VOUT and VSS |
+| 147 | 6 | `…+ R(VOUT-I0)` variant of #1 | adds a VOUT tap on the LC branch |
+| 144 | 6 | `…+ R(VIN-VOUT)` variant of #1 | direct feed-through resistor, pairs with LC shunt |
+| 70  | 3 | `C(VOUT-VSS) ‖ R(VIN-VOUT) ‖ R(VOUT-VSS)` | first-order RC LPF with load/divider R (buildable, 3 parts) |
+| 50  | 3 | `C(VIN-VOUT) ‖ C(VIN-VSS) ‖ R(VOUT-VSS)` | AC-coupled C + shunt C, resistive ground return — unusual but wirable |
+
+All six are buildable from standard 2-terminal parts, all have a real signal
+path VIN→VOUT, and all contain ≥ 1 reactive element. The 6-component family
+(#1, #3, #4) is effectively "training's LC-notch, plus one extra resistor in
+a new position" — a compositional extension, not a fundamentally new
+topology.
+
+The **invalid** bucket is dominated by sequence-grammar violations
+(`ill_formed_seq`, 14.17 %) at high T, self-loops (2.41 %), and missing
+terminals (1.89 %). Genuinely dangling internal nets are rare (0.25 %) — the
+decoder has learned "every internal net is multi-incident" as a hard
+constraint.
+
 ### Multi-Target Temperature Sweep
 
 Comprehensive sweep across 4 target specs, 5 temperatures, and 5 random seeds.
@@ -451,6 +515,11 @@ This means there are two useful knobs for exploration:
     --fc 10000 --gain 0.5 --samples 2000 --seeds 0 1 2 \
     --out analysis_results/error_mode_sweep_permissive.json
 
+# Max-permissive (treats shared-label 3+ terminal claims as multiple 2-terminal edges)
+.venv/bin/python scripts/analysis/error_mode_temperature_sweep_maxpermissive.py \
+    --fc 10000 --gain 0.5 --samples 2000 --seeds 0 1 2 \
+    --out analysis_results/error_mode_sweep_maxpermissive.json
+
 # Multi-target fixed-spec sweep
 .venv/bin/python scripts/analysis/fixed_spec_temperature_sweep.py
 ```
@@ -464,4 +533,5 @@ This means there are two useful knobs for exploration:
 - **V2 generation script:** `scripts/generation/generate_inverse_design.py`
 - **Error-mode sweep (strict):** `scripts/analysis/error_mode_temperature_sweep.py`
 - **Error-mode sweep (permissive):** `scripts/analysis/error_mode_temperature_sweep_permissive.py`
+- **Error-mode sweep (max-permissive):** `scripts/analysis/error_mode_temperature_sweep_maxpermissive.py`
 - **Multi-target sweep:** `scripts/analysis/fixed_spec_temperature_sweep.py`
